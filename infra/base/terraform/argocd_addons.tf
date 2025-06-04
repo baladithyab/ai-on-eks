@@ -35,3 +35,9 @@ resource "kubectl_manifest" "nvidia_dcgm_helm" {
     module.eks_blueprints_addons
   ]
 }
+
+resource "kubectl_manifest" "dynamo_core_yaml" {
+  count      = var.enable_dynamo_stack ? 1 : 0
+  yaml_body  = templatefile("${path.module}/argocd-addons/dynamo-core.yaml", { dynamo_version = var.dynamo_stack_version })
+  depends_on = [module.eks_blueprints_addons]
+}
