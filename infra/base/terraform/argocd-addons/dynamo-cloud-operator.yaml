@@ -36,7 +36,8 @@ spec:
     syncOptions:
       - ServerSideApply=true
       - CreateNamespace=true
-    automated: {}
+    # Note: automated sync is disabled initially
+    # Images must be built before enabling auto-sync
   ignoreDifferences:
     - group: apps
       kind: Deployment

@@ -10,9 +10,9 @@
 # The script performs the following steps:
 # 1. Sets up environment variables from Terraform outputs
 # 2. Clones the Dynamo repository
-# 3. Builds the base image using the container build script
-# 4. Builds operator and api-store images using Earthly
-# 5. Pushes all images to ECR
+# 3. Builds operator and api-store images using Earthly
+# 4. Pushes images to ECR
+# Note: Base image building is handled by the blueprints folder
 # ============================================================================
 
 set -euo pipefail
@@ -136,63 +136,21 @@ else
     fi
 fi
 
-section "Step 4: Building Base Image"
+section "Step 4: Building Operator and API Store Images"
 
-info "Building Dynamo base image..."
-cd container
-
-# Build with retry logic for NIXL checkout errors
-build_base_image() {
-    local max_retries=2
-    local retry_count=0
-    
-    while [ $retry_count -lt $max_retries ]; do
-        info "Building base image (attempt $((retry_count + 1))/$max_retries)..."
-        
-        if ./build.sh --framework vllm 2>&1 | tee /tmp/build_output.log; then
-            info "Base image build completed successfully!"
-            return 0
-        else
-            if grep -q "Failed to checkout NIXL commit.*The cached directory may be out of date" /tmp/build_output.log; then
-                warn "NIXL checkout error detected. Cleaning up and retrying..."
-                rm -rf /tmp/nixl
-                retry_count=$((retry_count + 1))
-                if [ $retry_count -lt $max_retries ]; then
-                    sleep 2
-                else
-                    error "Build failed after $max_retries attempts"
-                    exit 1
-                fi
-            else
-                error "Build failed with non-NIXL error"
-                cat /tmp/build_output.log
-                exit 1
-            fi
-        fi
-    done
-}
-
-build_base_image
-rm -f /tmp/build_output.log
-
-# Tag and push base image
-BASE_IMAGE_NAME="${DOCKER_SERVER}/${BASE_ECR_REPOSITORY}:${IMAGE_TAG}-vllm"
-info "Tagging and pushing base image: $BASE_IMAGE_NAME"
-docker tag dynamo:latest-vllm "$BASE_IMAGE_NAME"
-docker push "$BASE_IMAGE_NAME"
-
-section "Step 5: Building Operator and API Store Images"
-
-# Return to dynamo directory
-cd ..
+# Ensure we're in the dynamo directory
 
 info "Building and pushing Operator and API Store images using Earthly..."
+# Note: Base image should be available from blueprints folder or pre-built
+# We'll use the ECR base image repository for the base image reference
+BASE_IMAGE_NAME="${DOCKER_SERVER}/${BASE_ECR_REPOSITORY}:${IMAGE_TAG}-vllm"
+info "Using base image: $BASE_IMAGE_NAME"
 earthly --push +all-docker --DOCKER_SERVER=$DOCKER_SERVER --IMAGE_TAG=$IMAGE_TAG --BASE_IMAGE="$BASE_IMAGE_NAME"
 
-section "Step 6: Verification"
+section "Step 5: Verification"
 
-info "Verifying images in ECR..."
-for REPO in ${OPERATOR_ECR_REPOSITORY} ${API_STORE_ECR_REPOSITORY} ${PIPELINES_ECR_REPOSITORY} ${BASE_ECR_REPOSITORY}; do
+info "Verifying built images in ECR..."
+for REPO in ${OPERATOR_ECR_REPOSITORY} ${API_STORE_ECR_REPOSITORY} ${PIPELINES_ECR_REPOSITORY}; do
     info "Checking repository: ${REPO}"
     if aws ecr describe-images --repository-name ${REPO} --region ${AWS_REGION} --max-items 1 >/dev/null 2>&1; then
         info "✓ Images found in ${REPO}"
@@ -200,6 +158,14 @@ for REPO in ${OPERATOR_ECR_REPOSITORY} ${API_STORE_ECR_REPOSITORY} ${PIPELINES_E
         warn "⚠ No images found in ${REPO}"
     fi
 done
+
+info "Checking base image repository (should be pre-built)..."
+if aws ecr describe-images --repository-name ${BASE_ECR_REPOSITORY} --region ${AWS_REGION} --max-items 1 >/dev/null 2>&1; then
+    info "✓ Base images found in ${BASE_ECR_REPOSITORY}"
+else
+    warn "⚠ No base images found in ${BASE_ECR_REPOSITORY}"
+    warn "Base image should be built by the blueprints folder or pre-existing"
+fi
 
 section "Build Complete!"
 

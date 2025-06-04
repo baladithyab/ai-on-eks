@@ -74,6 +74,10 @@ section "Building and Pushing Container Images"
 info "Building Dynamo Cloud container images..."
 info "This process may take 20-30 minutes as it builds the base image and operator components."
 
+# Wait for ArgoCD to be ready first
+info "Waiting for ArgoCD to be ready..."
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-server -n argocd --timeout=300s
+
 # Run the container build script
 if ./build-and-push-images.sh; then
     info "✓ Container images built and pushed successfully!"
@@ -81,25 +85,36 @@ else
     error "Container image build failed. ArgoCD deployment may fail without images."
     warn "You can manually run: ./build-and-push-images.sh"
     warn "Or use the platform setup script: ./setup-dynamo-platform.sh"
+    exit 1
 fi
 
-# Wait for ArgoCD to be ready
-info "Waiting for ArgoCD to be ready..."
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-server -n argocd --timeout=300s
+# Trigger ArgoCD sync for Dynamo Cloud application
+info "Triggering ArgoCD sync for Dynamo Cloud application..."
+# Use kubectl to trigger a manual sync
+kubectl patch application dynamo-cloud-operator -n argocd --type='merge' -p='{"operation":{"initiatedBy":{"username":"admin"},"sync":{"syncStrategy":{"hook":{}}}}}' || true
+
+# Wait a moment and check if the sync started
+sleep 5
+info "Checking ArgoCD application status..."
+kubectl get application dynamo-cloud-operator -n argocd -o jsonpath='{.status.sync.status}' || true
 
 info "Dynamo Cloud infrastructure deployment completed!"
-info "The Dynamo Cloud platform will be deployed automatically by ArgoCD."
+info "The Dynamo Cloud platform is being deployed by ArgoCD."
 
 section "Next Steps"
 info "1. Monitor the ArgoCD deployment:"
 info "   kubectl get applications -n argocd"
+info "   kubectl describe application dynamo-cloud-operator -n argocd"
 info ""
-info "2. Check Dynamo Cloud pods:"
-info "   kubectl get pods -n dynamo-cloud"
+info "2. Wait for Dynamo Cloud pods to be ready (this may take 5-10 minutes):"
+info "   kubectl get pods -n dynamo-cloud -w"
 info ""
-info "3. To access Dynamo Cloud API, use port-forwarding:"
+info "3. Once pods are running, access Dynamo Cloud API:"
 info "   kubectl port-forward svc/dynamo-store 8080:80 -n dynamo-cloud"
 info ""
-info "4. Set up Dynamo CLI:"
+info "4. Set up Dynamo CLI (in another terminal):"
 info "   export DYNAMO_CLOUD=http://localhost:8080"
 info "   dynamo cloud login --api-token TEST-TOKEN --endpoint \$DYNAMO_CLOUD"
+info ""
+info "5. If deployment fails, check ArgoCD application logs:"
+info "   kubectl logs -l app.kubernetes.io/name=argocd-application-controller -n argocd"
