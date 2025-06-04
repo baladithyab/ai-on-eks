@@ -30,19 +30,29 @@ cd infra/dynamo
 This will:
 - Deploy an EKS cluster with required addons (EFS, monitoring, ArgoCD, etc.)
 - Create ECR repositories for all Dynamo Cloud components
+- Clone Dynamo repository and build container images
+- Push images to ECR (this takes 20-30 minutes)
 - Set up the base infrastructure for Dynamo Cloud
 - Configure kubectl to access the cluster
 - Deploy Dynamo Cloud platform via ArgoCD
 
-### 2. Set up Dynamo Cloud Platform
+### 2. Manual Container Build (Optional)
+
+If the automated build during installation fails, you can manually build and push images:
+
+```bash
+./build-and-push-images.sh
+```
+
+Or use the comprehensive platform setup script:
 
 ```bash
 ./setup-dynamo-platform.sh
 ```
 
-This will:
+The platform setup script will:
 - Install Dynamo Python wheel in a virtual environment
-- Create ECR repositories for Dynamo components
+- Verify ECR repositories exist
 - Build and push Dynamo container images
 - Deploy the Dynamo Cloud platform using Helm
 - Set up access and monitoring

@@ -44,7 +44,6 @@ resource "kubectl_manifest" "dynamo_cloud_operator_yaml" {
     aws_region     = local.region
   })
   depends_on = [
-    module.eks_blueprints_addons,
-    kubernetes_config_map.dynamo_ecr_config
+    module.eks_blueprints_addons
   ]
 }

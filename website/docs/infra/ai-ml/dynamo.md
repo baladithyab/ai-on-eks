@@ -104,10 +104,17 @@ cd ai-on-eks/infra/dynamo
 
 This will deploy the base infrastructure including:
 - EKS cluster with managed node groups
+- ECR repositories for Dynamo Cloud components
 - EFS for shared persistent storage
 - Prometheus and Grafana for monitoring
 - ArgoCD for GitOps deployment
 - EFA device plugin for high-performance networking
+
+The script will also automatically:
+- Clone the Dynamo repository
+- Build container images (base, operator, api-store, pipelines)
+- Push images to ECR (this process takes 20-30 minutes)
+- Deploy Dynamo Cloud platform via ArgoCD
 
 </CollapsibleContent>
 

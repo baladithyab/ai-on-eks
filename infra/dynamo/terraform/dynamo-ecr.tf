@@ -3,10 +3,14 @@
 #
 # This module creates ECR repositories for all Dynamo Cloud components
 # and sets up the necessary environment for container builds.
+# This file is copied to the _LOCAL directory during deployment.
 #---------------------------------------------------------------
 
 # Data source to get current AWS account ID
 data "aws_caller_identity" "current" {}
+
+# Data source to get current AWS region
+data "aws_region" "current" {}
 
 # ECR Repository for Dynamo Operator
 resource "aws_ecr_repository" "dynamo_operator" {
@@ -19,7 +23,9 @@ resource "aws_ecr_repository" "dynamo_operator" {
     scan_on_push = true
   }
 
-  tags = local.tags
+  tags = {
+    Name = "dynamo-operator"
+  }
 }
 
 # ECR Repository for Dynamo API Store
@@ -33,7 +39,9 @@ resource "aws_ecr_repository" "dynamo_api_store" {
     scan_on_push = true
   }
 
-  tags = local.tags
+  tags = {
+    Name = "dynamo-api-store"
+  }
 }
 
 # ECR Repository for Dynamo Pipelines
@@ -47,7 +55,9 @@ resource "aws_ecr_repository" "dynamo_pipelines" {
     scan_on_push = true
   }
 
-  tags = local.tags
+  tags = {
+    Name = "dynamo-pipelines"
+  }
 }
 
 # ECR Repository for Dynamo Base Image
@@ -61,7 +71,9 @@ resource "aws_ecr_repository" "dynamo_base" {
     scan_on_push = true
   }
 
-  tags = local.tags
+  tags = {
+    Name = "dynamo-base"
+  }
 }
 
 # Lifecycle policy for ECR repositories to manage image retention
@@ -220,9 +232,9 @@ resource "kubernetes_config_map" "dynamo_ecr_config" {
 
   data = {
     AWS_ACCOUNT_ID              = data.aws_caller_identity.current.account_id
-    AWS_REGION                  = local.region
-    DOCKER_SERVER               = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${local.region}.amazonaws.com"
-    CI_REGISTRY_IMAGE           = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${local.region}.amazonaws.com"
+    AWS_REGION                  = data.aws_region.current.name
+    DOCKER_SERVER               = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com"
+    CI_REGISTRY_IMAGE           = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com"
     OPERATOR_ECR_REPOSITORY     = aws_ecr_repository.dynamo_operator[0].name
     API_STORE_ECR_REPOSITORY    = aws_ecr_repository.dynamo_api_store[0].name
     PIPELINES_ECR_REPOSITORY    = aws_ecr_repository.dynamo_pipelines[0].name
@@ -234,8 +246,4 @@ resource "kubernetes_config_map" "dynamo_ecr_config" {
     DYNAMO_NAMESPACE            = "dynamo-cloud"
     IMAGE_TAG                   = "latest"
   }
-
-  depends_on = [
-    module.eks_blueprints_addons
-  ]
 }

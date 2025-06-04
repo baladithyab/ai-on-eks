@@ -7,3 +7,18 @@ output "grafana_secret_name" {
   description = "The name of the secret containing the Grafana admin password."
   value       = var.enable_kube_prometheus_stack ? aws_secretsmanager_secret.grafana[0].name : null
 }
+
+output "cluster_name" {
+  description = "The name of the EKS cluster"
+  value       = module.eks.cluster_name
+}
+
+output "region" {
+  description = "The AWS region"
+  value       = local.region
+}
+
+output "aws_account_id" {
+  description = "The AWS account ID"
+  value       = data.aws_caller_identity.current.account_id
+}

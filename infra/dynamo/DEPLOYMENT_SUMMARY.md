@@ -9,10 +9,12 @@ This document summarizes the new Dynamo Cloud infrastructure deployment option t
 ### 1. Infrastructure Folder Structure
 ```
 infra/dynamo/
-├── install.sh                     # Main deployment script
+├── install.sh                     # Main deployment script with automated builds
+├── build-and-push-images.sh       # Automated container build script
 ├── setup-dynamo-platform.sh       # Platform setup script (extracted from 4a)
 ├── terraform/
-│   └── blueprint.tfvars           # Dynamo-specific configuration
+│   ├── blueprint.tfvars           # Dynamo-specific configuration
+│   └── dynamo-ecr.tf              # ECR repository configuration
 ├── README.md                      # Comprehensive documentation
 └── DEPLOYMENT_SUMMARY.md          # This summary
 ```
@@ -31,9 +33,19 @@ infra/dynamo/
 
 #### Main Installation Script (`install.sh`)
 - Deploys EKS cluster with required addons using Terraform
+- Creates ECR repositories for all Dynamo components
+- Automatically builds and pushes container images
 - Updates kubeconfig automatically
 - Waits for ArgoCD to be ready
 - Provides clear next steps and access instructions
+
+#### Container Build Script (`build-and-push-images.sh`)
+Automated container build process similar to the original 4a script:
+- Clones Dynamo repository and checks out specified version
+- Builds base image with retry logic for NIXL errors
+- Uses Earthly to build operator and api-store images
+- Pushes all images to ECR repositories
+- Verifies successful image uploads
 
 #### Platform Setup Script (`setup-dynamo-platform.sh`)
 Extracted and simplified from the original `4a_build_push_dynamo_cloud.sh`:
@@ -143,15 +155,17 @@ cd infra/dynamo
 
 ### New Files
 - `infra/dynamo/install.sh`
+- `infra/dynamo/build-and-push-images.sh`
 - `infra/dynamo/setup-dynamo-platform.sh`
 - `infra/dynamo/terraform/blueprint.tfvars`
+- `infra/dynamo/terraform/dynamo-ecr.tf`
 - `infra/dynamo/README.md`
 - `infra/dynamo/DEPLOYMENT_SUMMARY.md`
 - `infra/base/terraform/argocd-addons/dynamo-cloud-operator.yaml`
-- `infra/base/terraform/dynamo-ecr.tf`
 
 ### Modified Files
 - `infra/base/terraform/variables.tf` - Added Dynamo variables
 - `infra/base/terraform/argocd_addons.tf` - Added Dynamo ArgoCD integration with ECR references
+- `infra/base/terraform/outputs.tf` - Added AWS account ID, region, and cluster name outputs
 
 This implementation provides a production-ready, maintainable deployment option for Dynamo Cloud that follows the established patterns and best practices of the ai-on-eks repository.

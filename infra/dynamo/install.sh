@@ -70,6 +70,19 @@ info "• dynamo-api-store - Dynamo API gateway and store"
 info "• dynamo-pipelines - Dynamo inference pipelines"
 info "• dynamo-base - Dynamo base container image"
 
+section "Building and Pushing Container Images"
+info "Building Dynamo Cloud container images..."
+info "This process may take 20-30 minutes as it builds the base image and operator components."
+
+# Run the container build script
+if ./build-and-push-images.sh; then
+    info "✓ Container images built and pushed successfully!"
+else
+    error "Container image build failed. ArgoCD deployment may fail without images."
+    warn "You can manually run: ./build-and-push-images.sh"
+    warn "Or use the platform setup script: ./setup-dynamo-platform.sh"
+fi
+
 # Wait for ArgoCD to be ready
 info "Waiting for ArgoCD to be ready..."
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-server -n argocd --timeout=300s
