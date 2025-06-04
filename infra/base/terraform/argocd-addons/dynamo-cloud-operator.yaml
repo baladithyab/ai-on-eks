@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/ai-dynamo/dynamo.git
     targetRevision: ${dynamo_version}
-    path: deploy/cloud/helm
+    path: deploy/dynamo/helm
     helm:
       valueFiles:
         - values.yaml

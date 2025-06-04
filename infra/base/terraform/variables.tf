@@ -271,5 +271,5 @@ variable "enable_dynamo_stack" {
 variable "dynamo_stack_version" {
   description = "Dynamo default version"
   type        = string
-  default     = "0.2.0"
+  default     = "release/0.2.0"
 }

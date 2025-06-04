@@ -90,7 +90,7 @@ The infrastructure is configured through `terraform/blueprint.tfvars`. Key setti
 
 The platform setup script uses these default configurations:
 
-- **Dynamo Version**: `0.2.0`
+- **Dynamo Version**: `release/0.2.0` (uses release branch)
 - **AWS Region**: `us-west-2`
 - **Namespace**: `dynamo-cloud`
 - **Image Tag**: `latest`
