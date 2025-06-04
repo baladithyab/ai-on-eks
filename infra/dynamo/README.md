@@ -97,18 +97,54 @@ The platform setup script automatically gets configuration from Terraform output
 
 The Dynamo version and AWS region are automatically synchronized with the Terraform configuration to ensure consistency across all deployment components.
 
+### Karpenter Node Pools
+
+Dynamo deployment is optimized with customized Karpenter node pools:
+
+#### Enabled Node Pools for Dynamo
+- **CPU x86**: M5.4xlarge, M5.8xlarge, M5.16xlarge (optimized for operator/API workloads)
+- **GPU G6**: G6.12xlarge, G6.16xlarge, G6.24xlarge (L4 GPUs for inference)
+
+#### Disabled Node Pools (Cost Optimization)
+- **GPU G5**: Disabled to focus on G6 instances
+- **Trainium TRN1**: Not needed for Dynamo workloads
+- **Inferentia INF2**: Not needed for Dynamo workloads
+
+#### Configuration Details
+
+**CPU Workloads (Dynamo Operator, API Store)**
+- **Node Pool**: `x86-cpu-karpenter`
+- **Instance Types**: M5.4xlarge to M5.16xlarge (customized for performance)
+- **Purpose**: Dynamo operator, API gateway, and CPU-based inference
+- **AMI**: Bottlerocket (optimized for containers)
+- **Scaling**: Automatic based on workload demands
+
+**GPU Workloads (Inference)**
+- **Node Pool**: `g6-gpu-karpenter`
+- **Instance Types**: G6.12xlarge, G6.16xlarge, G6.24xlarge (L4 GPUs)
+- **Purpose**: GPU-accelerated model inference
+- **AMI**: Bottlerocket with NVIDIA drivers
+- **Taints**: `nvidia.com/gpu=Exists:NoSchedule` (GPU workloads only)
+- **Scaling**: Automatic provisioning when GPU workloads are scheduled
+
+This configuration matches the instance types from the original dynamo-cloud script while providing cost optimization by disabling unnecessary node pools.
+
 ## Architecture
 
 The deployment creates the following components:
 
 ### Infrastructure Layer (Terraform)
-- EKS cluster with managed node groups
+- EKS cluster with Karpenter autoscaling
 - VPC with public/private subnets
 - EFS file system for shared storage
 - ECR repositories for container images
 - IAM roles and policies
 - Monitoring stack (Prometheus/Grafana)
 - ArgoCD for GitOps deployment
+- Optimized Karpenter node pools:
+  - **x86-cpu-karpenter**: M5.4xlarge to M5.16xlarge for CPU workloads
+  - **g6-gpu-karpenter**: G6.12xlarge to G6.24xlarge for GPU inference
+  - Trainium/Inferentia pools disabled for cost optimization
 
 ### Platform Layer (Helm)
 - Dynamo Operator (manages inference workloads)

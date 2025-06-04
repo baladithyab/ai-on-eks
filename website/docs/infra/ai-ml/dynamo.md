@@ -103,12 +103,16 @@ cd ai-on-eks/infra/dynamo
 ```
 
 This will deploy the base infrastructure including:
-- EKS cluster with managed node groups
+- EKS cluster with Karpenter autoscaling
 - ECR repositories for Dynamo Cloud components
 - EFS for shared persistent storage
 - Prometheus and Grafana for monitoring
 - ArgoCD for GitOps deployment
 - EFA device plugin for high-performance networking
+- Karpenter node pools for dynamic scaling:
+  - **x86-cpu-karpenter**: M5 instances for CPU workloads
+  - **g6-gpu-karpenter**: G6 instances for GPU inference
+  - **g5-gpu-karpenter**: G5 instances for GPU inference
 
 The script will also automatically:
 - Clone the Dynamo repository

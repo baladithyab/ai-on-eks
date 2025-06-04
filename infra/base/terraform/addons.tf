@@ -320,7 +320,9 @@ module "data_addons" {
   # Karpenter Resources Add-on
   #---------------------------------------------------------------
   enable_karpenter_resources = true
-  karpenter_resources_helm_config = {
+  karpenter_resources_helm_config = merge(
+    # G6 GPU node pool
+    var.enable_karpenter_node_pools.gpu_g6 ? {
     g6-gpu-karpenter = {
       values = [
         <<-EOT
@@ -358,7 +360,7 @@ module "data_addons" {
             values: ["g6"]
           - key: "karpenter.k8s.aws/instance-size"
             operator: In
-            values: [ "2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge", "24xlarge", "48xlarge" ]
+            values: ${jsonencode(var.karpenter_g6_instance_types)}
           - key: "kubernetes.io/arch"
             operator: In
             values: ["amd64"]
@@ -375,6 +377,9 @@ module "data_addons" {
       EOT
       ]
     }
+    } : {},
+    # G5 GPU node pool
+    var.enable_karpenter_node_pools.gpu_g5 ? {
     g5-gpu-karpenter = {
       values = [
         <<-EOT
@@ -422,7 +427,7 @@ module "data_addons" {
             values: ["g5"]
           - key: "karpenter.k8s.aws/instance-size"
             operator: In
-            values: [ "2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge", "24xlarge", "48xlarge" ]
+            values: ${jsonencode(var.karpenter_g5_instance_types)}
           - key: "kubernetes.io/arch"
             operator: In
             values: ["amd64"]
@@ -439,6 +444,9 @@ module "data_addons" {
       EOT
       ]
     }
+    } : {},
+    # CPU x86 node pool
+    var.enable_karpenter_node_pools.cpu_x86 ? {
     x86-cpu-karpenter = {
       values = [
         <<-EOT
@@ -479,7 +487,7 @@ module "data_addons" {
             values: ["m5"]
           - key: "karpenter.k8s.aws/instance-size"
             operator: In
-            values: [ "xlarge", "2xlarge", "4xlarge", "8xlarge"]
+            values: ${jsonencode(var.karpenter_cpu_instance_types)}
           - key: "kubernetes.io/arch"
             operator: In
             values: ["amd64"]
@@ -496,6 +504,9 @@ module "data_addons" {
       EOT
       ]
     }
+    } : {},
+    # Trainium TRN1 node pool
+    var.enable_karpenter_node_pools.trainium_trn1 ? {
     trainium-trn1 = {
       values = [
         <<-EOT
@@ -555,6 +566,9 @@ module "data_addons" {
       EOT
       ]
     }
+    } : {},
+    # Inferentia INF2 node pool
+    var.enable_karpenter_node_pools.inferentia_inf2 ? {
     inferentia-inf2 = {
       values = [
         <<-EOT
@@ -612,7 +626,8 @@ module "data_addons" {
       EOT
       ]
     }
-  }
+    } : {}
+  )
 
   depends_on = [
     kubernetes_secret_v1.huggingface_token,
