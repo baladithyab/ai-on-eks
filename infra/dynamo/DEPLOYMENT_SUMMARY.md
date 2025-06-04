@@ -41,17 +41,18 @@ infra/dynamo/
 
 #### Container Build Script (`build-and-push-images.sh`)
 Automated container build process similar to the original 4a script:
+- Gets Dynamo version from Terraform outputs for consistency
 - Clones Dynamo repository and checks out specified version
-- Builds base image with retry logic for NIXL errors
 - Uses Earthly to build operator and api-store images
 - Pushes all images to ECR repositories
 - Verifies successful image uploads
 
 #### Platform Setup Script (`setup-dynamo-platform.sh`)
 Extracted and simplified from the original `4a_build_push_dynamo_cloud.sh`:
+- Gets configuration from Terraform outputs when available
 - Python virtual environment setup
 - Dynamo wheel installation
-- ECR repository creation
+- ECR repository verification
 - Container image building and pushing
 - Helm deployment
 - Access configuration
@@ -81,7 +82,13 @@ The `blueprint.tfvars` includes all necessary components for Dynamo Cloud:
 - Improved error handling and user feedback
 - Created helper scripts for easy access setup
 
-### 5. **Enhanced Documentation**
+### 5. **Version Consistency**
+- All components use the same Dynamo version from Terraform variables
+- Shell scripts automatically get version from Terraform outputs
+- ArgoCD, build scripts, and configuration all synchronized
+- Single source of truth for version management
+
+### 6. **Enhanced Documentation**
 - Comprehensive README with usage instructions
 - Clear troubleshooting guidance
 - Architecture overview

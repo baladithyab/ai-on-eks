@@ -35,11 +35,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 section "DYNAMO CLOUD PLATFORM SETUP"
 
-# Configuration
-DYNAMO_REPO_VERSION="0.2.0"
-AWS_REGION="us-west-2"
+# Configuration - try to get from Terraform first, then use defaults
+if [ -f "terraform/_LOCAL/terraform.tfstate" ]; then
+    info "Getting configuration from Terraform outputs..."
+    DYNAMO_REPO_VERSION=$(cd terraform/_LOCAL && terraform output -raw dynamo_stack_version 2>/dev/null || echo "release/0.2.0")
+    AWS_REGION=$(cd terraform/_LOCAL && terraform output -raw region 2>/dev/null || echo "us-west-2")
+else
+    info "Terraform state not found, using default configuration..."
+    DYNAMO_REPO_VERSION="release/0.2.0"
+    AWS_REGION="us-west-2"
+fi
+
 NAMESPACE="dynamo-cloud"
 IMAGE_TAG="latest"
+
+info "Configuration:"
+info "  Dynamo Version: $DYNAMO_REPO_VERSION"
+info "  AWS Region: $AWS_REGION"
+info "  Namespace: $NAMESPACE"
+info "  Image Tag: $IMAGE_TAG"
 
 # ECR repository names
 OPERATOR_ECR_REPOSITORY="dynamo-operator"

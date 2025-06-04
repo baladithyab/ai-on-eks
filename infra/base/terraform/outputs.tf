@@ -22,3 +22,8 @@ output "aws_account_id" {
   description = "The AWS account ID"
   value       = data.aws_caller_identity.current.account_id
 }
+
+output "dynamo_stack_version" {
+  description = "The Dynamo stack version"
+  value       = var.dynamo_stack_version
+}

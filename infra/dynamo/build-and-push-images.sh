@@ -48,6 +48,7 @@ info "Getting configuration from Terraform..."
 export AWS_ACCOUNT_ID=$(terraform output -raw aws_account_id 2>/dev/null || aws sts get-caller-identity --query Account --output text)
 export AWS_REGION=$(terraform output -raw region 2>/dev/null || aws configure get region)
 export CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "dynamo-on-eks")
+export DYNAMO_REPO_VERSION=$(terraform output -raw dynamo_stack_version 2>/dev/null || echo "release/0.2.0")
 
 # Set up ECR and Docker configuration
 export DOCKER_SERVER=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
@@ -66,6 +67,7 @@ info "  AWS Account ID: $AWS_ACCOUNT_ID"
 info "  AWS Region: $AWS_REGION"
 info "  ECR Registry: $DOCKER_SERVER"
 info "  Cluster Name: $CLUSTER_NAME"
+info "  Dynamo Version: $DYNAMO_REPO_VERSION"
 
 # Return to script directory
 cd "$SCRIPT_DIR"
@@ -91,9 +93,6 @@ info "Logging in to ECR..."
 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${DOCKER_SERVER}
 
 section "Step 3: Cloning Dynamo Repository"
-
-# Configuration
-DYNAMO_REPO_VERSION="0.2.0"
 
 # Clone or update Dynamo repository
 if [ -d "dynamo" ]; then
