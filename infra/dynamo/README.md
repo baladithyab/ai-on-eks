@@ -29,8 +29,10 @@ cd infra/dynamo
 
 This will:
 - Deploy an EKS cluster with required addons (EFS, monitoring, ArgoCD, etc.)
+- Create ECR repositories for all Dynamo Cloud components
 - Set up the base infrastructure for Dynamo Cloud
 - Configure kubectl to access the cluster
+- Deploy Dynamo Cloud platform via ArgoCD
 
 ### 2. Set up Dynamo Cloud Platform
 
@@ -136,7 +138,7 @@ kubectl logs -f deployment/dynamo-api-store -n dynamo-cloud
 Check ArgoCD application status:
 ```bash
 kubectl get applications -n argocd
-kubectl describe application dynamo-core -n argocd
+kubectl describe application dynamo-cloud-operator -n argocd
 ```
 
 ## Cleanup

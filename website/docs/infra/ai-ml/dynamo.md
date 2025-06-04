@@ -142,8 +142,8 @@ kubectl get applications -n argocd
 ```
 
 ```bash
-NAME           SYNC STATUS   HEALTH STATUS   AGE
-dynamo-core    Synced        Healthy         45m
+NAME                    SYNC STATUS   HEALTH STATUS   AGE
+dynamo-cloud-operator   Synced        Healthy         45m
 ```
 
 Check that Dynamo Cloud pods are running:

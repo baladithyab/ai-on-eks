@@ -1,0 +1,52 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dynamo-cloud-operator
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ai-dynamo/dynamo.git
+    targetRevision: ${dynamo_version}
+    path: deploy/cloud/helm
+    helm:
+      valueFiles:
+        - values.yaml
+      parameters:
+        - name: "operator.image.repository"
+          value: "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-operator"
+        - name: "operator.image.tag"
+          value: "latest"
+        - name: "apiStore.image.repository"
+          value: "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-api-store"
+        - name: "apiStore.image.tag"
+          value: "latest"
+        - name: "pipelines.image.repository"
+          value: "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-pipelines"
+        - name: "pipelines.image.tag"
+          value: "latest"
+        - name: "baseImage.repository"
+          value: "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-base"
+        - name: "baseImage.tag"
+          value: "latest-vllm"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dynamo-cloud
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+    automated: {}
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jqPathExpressions:
+        - .spec.template.spec.containers[].image
+    - group: v1
+      kind: Secret
+      jqPathExpressions:
+        - .data
+    - group: v1
+      kind: ConfigMap
+      jqPathExpressions:
+        - .data

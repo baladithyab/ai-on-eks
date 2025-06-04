@@ -36,8 +36,15 @@ resource "kubectl_manifest" "nvidia_dcgm_helm" {
   ]
 }
 
-resource "kubectl_manifest" "dynamo_core_yaml" {
-  count      = var.enable_dynamo_stack ? 1 : 0
-  yaml_body  = templatefile("${path.module}/argocd-addons/dynamo-core.yaml", { dynamo_version = var.dynamo_stack_version })
-  depends_on = [module.eks_blueprints_addons]
+resource "kubectl_manifest" "dynamo_cloud_operator_yaml" {
+  count = var.enable_dynamo_stack ? 1 : 0
+  yaml_body = templatefile("${path.module}/argocd-addons/dynamo-cloud-operator.yaml", {
+    dynamo_version = var.dynamo_stack_version
+    aws_account_id = data.aws_caller_identity.current.account_id
+    aws_region     = local.region
+  })
+  depends_on = [
+    module.eks_blueprints_addons,
+    kubernetes_config_map.dynamo_ecr_config
+  ]
 }

@@ -68,19 +68,23 @@ pip install tensorboardX
 
 section "Step 2: Setting up AWS and ECR"
 
-# Get AWS account ID
+# Get AWS account ID and ECR configuration
 export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export DOCKER_SERVER=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
 
 info "AWS Account ID: $AWS_ACCOUNT_ID"
 info "ECR Registry: $DOCKER_SERVER"
 
-# Create ECR repositories
-info "Creating ECR repositories for Dynamo components..."
+# Check if ECR repositories exist (they should be created by Terraform)
+info "Verifying ECR repositories for Dynamo components..."
 for REPO in ${OPERATOR_ECR_REPOSITORY} ${API_STORE_ECR_REPOSITORY} ${PIPELINES_ECR_REPOSITORY} ${BASE_ECR_REPOSITORY}; do
-    info "Checking/creating repository: ${REPO}"
-    aws ecr describe-repositories --repository-names ${REPO} --region ${AWS_REGION} 2>/dev/null || \
-    aws ecr create-repository --repository-name ${REPO} --region ${AWS_REGION}
+    info "Checking repository: ${REPO}"
+    if aws ecr describe-repositories --repository-names ${REPO} --region ${AWS_REGION} >/dev/null 2>&1; then
+        info "✓ Repository ${REPO} exists"
+    else
+        warn "Repository ${REPO} does not exist. Creating it..."
+        aws ecr create-repository --repository-name ${REPO} --region ${AWS_REGION}
+    fi
 done
 
 # Login to ECR

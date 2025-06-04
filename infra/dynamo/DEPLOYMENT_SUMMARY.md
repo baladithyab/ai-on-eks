@@ -24,8 +24,8 @@ infra/dynamo/
 - `dynamo_stack_version` - Dynamo version configuration (default: "0.2.0")
 
 #### ArgoCD Integration (`infra/base/terraform/argocd_addons.tf`)
-- Added `dynamo_core_yaml` resource for automated Dynamo deployment
-- Created `dynamo-core.yaml` ArgoCD application manifest
+- Added `dynamo_cloud_operator_yaml` resource for automated Dynamo deployment
+- Created `dynamo-cloud-operator.yaml` ArgoCD application manifest with ECR image references
 
 ### 3. Deployment Scripts
 
@@ -147,10 +147,11 @@ cd infra/dynamo
 - `infra/dynamo/terraform/blueprint.tfvars`
 - `infra/dynamo/README.md`
 - `infra/dynamo/DEPLOYMENT_SUMMARY.md`
-- `infra/base/terraform/argocd-addons/dynamo-core.yaml`
+- `infra/base/terraform/argocd-addons/dynamo-cloud-operator.yaml`
+- `infra/base/terraform/dynamo-ecr.tf`
 
 ### Modified Files
 - `infra/base/terraform/variables.tf` - Added Dynamo variables
-- `infra/base/terraform/argocd_addons.tf` - Added Dynamo ArgoCD integration
+- `infra/base/terraform/argocd_addons.tf` - Added Dynamo ArgoCD integration with ECR references
 
 This implementation provides a production-ready, maintainable deployment option for Dynamo Cloud that follows the established patterns and best practices of the ai-on-eks repository.

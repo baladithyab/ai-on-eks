@@ -8,11 +8,10 @@
 #
 # The script performs the following steps:
 # 1. Deploys EKS cluster with required addons using Terraform
-# 2. Sets up Dynamo Cloud platform components
-# 3. Creates ECR repositories for Dynamo components
-# 4. Builds and pushes Dynamo container images
-# 5. Deploys Dynamo Cloud platform using Helm
-# 6. Sets up monitoring and observability
+# 2. Creates ECR repositories for Dynamo components
+# 3. Sets up Dynamo Cloud platform components via ArgoCD
+# 4. Configures monitoring and observability
+# 5. Provides access instructions for Dynamo Cloud API
 # ============================================================================
 
 set -euo pipefail
@@ -62,6 +61,14 @@ if ! terraform -chdir=terraform/_LOCAL output -json | jq -r '.enable_dynamo_stac
 fi
 
 info "Dynamo stack is enabled. Proceeding with Dynamo Cloud setup..."
+
+# Display ECR repository information
+section "ECR Repositories Created"
+info "The following ECR repositories have been created for Dynamo Cloud:"
+info "• dynamo-operator - Dynamo Kubernetes operator"
+info "• dynamo-api-store - Dynamo API gateway and store"
+info "• dynamo-pipelines - Dynamo inference pipelines"
+info "• dynamo-base - Dynamo base container image"
 
 # Wait for ArgoCD to be ready
 info "Waiting for ArgoCD to be ready..."
