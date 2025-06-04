@@ -120,6 +120,68 @@ Note: Base image is not required for operator/api-store builds.
 
 </CollapsibleContent>
 
+<CollapsibleContent header={<h3><span>Manual ArgoCD Sync (If Needed)</span></h3>}>
+
+The installation script automatically triggers ArgoCD sync after building and pushing the container images. However, if you need to manually trigger the sync or if the automatic sync fails, you can do so using the following methods:
+
+### Method 1: Using kubectl (Recommended)
+
+```bash
+# Trigger a manual sync of the Dynamo Cloud application
+kubectl patch application dynamo-cloud-operator -n argocd --type='merge' -p='{"operation":{"initiatedBy":{"username":"admin"},"sync":{"syncStrategy":{"hook":{}}}}}'
+
+# Check the sync status
+kubectl get application dynamo-cloud-operator -n argocd -o jsonpath='{.status.sync.status}'
+```
+
+### Method 2: Using ArgoCD CLI (If Available)
+
+If you have the ArgoCD CLI installed, you can use:
+
+```bash
+# Port-forward to ArgoCD server
+kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+
+# Login to ArgoCD (password can be found in the argocd-initial-admin-secret)
+argocd login localhost:8080 --insecure
+
+# Sync the application
+argocd app sync dynamo-cloud-operator
+```
+
+### Method 3: Using ArgoCD Web UI
+
+1. Port-forward to ArgoCD server:
+   ```bash
+   kubectl port-forward svc/argocd-server -n argocd 8080:443
+   ```
+
+2. Access ArgoCD UI at `https://localhost:8080`
+
+3. Login with:
+   - Username: `admin`
+   - Password: Get from secret: `kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath="{.data.password}" | base64 --decode`
+
+4. Find the `dynamo-cloud-operator` application and click "Sync"
+
+### Troubleshooting Sync Issues
+
+If the sync fails, check the following:
+
+```bash
+# Check if container images exist in ECR
+aws ecr describe-images --repository-name dynamo-operator --region us-west-2 --max-items 1
+aws ecr describe-images --repository-name dynamo-api-store --region us-west-2 --max-items 1
+
+# Check ArgoCD application status
+kubectl describe application dynamo-cloud-operator -n argocd
+
+# Check ArgoCD controller logs
+kubectl logs -l app.kubernetes.io/name=argocd-application-controller -n argocd --tail=100
+```
+
+</CollapsibleContent>
+
 <CollapsibleContent header={<h3><span>Verify Deployment</span></h3>}>
 
 Update local kubeconfig so we can access the Kubernetes cluster
@@ -144,7 +206,7 @@ ip-100-64-139-184.ec2.internal   Ready    <none>   96m   v1.32.1-eks-5d632ec
 ip-100-64-63-169.ec2.internal    Ready    <none>   96m   v1.32.1-eks-5d632ec
 ```
 
-Next, let's verify that ArgoCD is running and has deployed the Dynamo Core application:
+Next, let's verify that ArgoCD is running and has deployed the Dynamo Cloud application:
 
 ```bash
 kubectl get applications -n argocd
@@ -155,7 +217,15 @@ NAME                    SYNC STATUS   HEALTH STATUS   AGE
 dynamo-cloud-operator   Synced        Healthy         45m
 ```
 
-Check that Dynamo Cloud pods are running:
+If the application shows as "OutOfSync" or "Unknown", you may need to manually trigger the sync as described in the previous section.
+
+You can also check the detailed status:
+
+```bash
+kubectl describe application dynamo-cloud-operator -n argocd
+```
+
+Check that Dynamo Cloud pods are running (this may take 5-10 minutes after sync):
 
 ```bash
 kubectl get pods -n dynamo-cloud
@@ -165,6 +235,19 @@ kubectl get pods -n dynamo-cloud
 NAME                                    READY   STATUS    RESTARTS   AGE
 dynamo-operator-7b8c9d4f5b-xyz12       1/1     Running   0          30m
 dynamo-api-store-6f7d8c9b4a-abc34      1/1     Running   0          30m
+```
+
+If pods are not yet running, you can watch their status:
+
+```bash
+kubectl get pods -n dynamo-cloud -w
+```
+
+Or check for any issues:
+
+```bash
+kubectl describe pods -n dynamo-cloud
+kubectl logs -f deployment/dynamo-operator -n dynamo-cloud
 ```
 
 </CollapsibleContent>
