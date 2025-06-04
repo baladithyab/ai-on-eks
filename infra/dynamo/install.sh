@@ -72,7 +72,7 @@ info "• dynamo-base - Dynamo base container image"
 
 section "Building and Pushing Container Images"
 info "Building Dynamo Cloud container images..."
-info "This process may take 20-30 minutes as it builds the base image and operator components."
+info "This process may take 5-10 minutes to build operator and api-store components."
 
 # Wait for ArgoCD to be ready first
 info "Waiting for ArgoCD to be ready..."

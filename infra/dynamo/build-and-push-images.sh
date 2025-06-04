@@ -55,7 +55,7 @@ export CI_REGISTRY_IMAGE=${DOCKER_SERVER}
 export CI_COMMIT_SHA="latest"
 export IMAGE_TAG="latest"
 
-# ECR repository names
+# ECR repository names (for verification)
 export OPERATOR_ECR_REPOSITORY="dynamo-operator"
 export API_STORE_ECR_REPOSITORY="dynamo-api-store"
 export PIPELINES_ECR_REPOSITORY="dynamo-pipelines"
@@ -141,11 +141,7 @@ section "Step 4: Building Operator and API Store Images"
 # Ensure we're in the dynamo directory
 
 info "Building and pushing Operator and API Store images using Earthly..."
-# Note: Base image should be available from blueprints folder or pre-built
-# We'll use the ECR base image repository for the base image reference
-BASE_IMAGE_NAME="${DOCKER_SERVER}/${BASE_ECR_REPOSITORY}:${IMAGE_TAG}-vllm"
-info "Using base image: $BASE_IMAGE_NAME"
-earthly --push +all-docker --DOCKER_SERVER=$DOCKER_SERVER --IMAGE_TAG=$IMAGE_TAG --BASE_IMAGE="$BASE_IMAGE_NAME"
+earthly --push +all-docker --DOCKER_SERVER=$DOCKER_SERVER --IMAGE_TAG=$IMAGE_TAG
 
 section "Step 5: Verification"
 

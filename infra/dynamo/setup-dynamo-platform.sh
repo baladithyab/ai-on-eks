@@ -178,7 +178,7 @@ cd ..
 
 # Build API Store and Operator images using Earthly
 info "Building and pushing API Store and Operator images..."
-earthly --push +all-docker --DOCKER_SERVER=$DOCKER_SERVER --IMAGE_TAG=$IMAGE_TAG --BASE_IMAGE="$BASE_IMAGE_NAME"
+earthly --push +all-docker --DOCKER_SERVER=$DOCKER_SERVER --IMAGE_TAG=$IMAGE_TAG
 
 section "Step 5: Deploying Dynamo Cloud Platform"
 

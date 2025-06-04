@@ -31,8 +31,8 @@ This will:
 - Deploy an EKS cluster with required addons (EFS, monitoring, ArgoCD, etc.)
 - Create ECR repositories for all Dynamo Cloud components
 - Clone Dynamo repository and build container images (operator, api-store, pipelines)
-- Push images to ECR (this takes 10-20 minutes)
-- Note: Base image building is handled separately by the blueprints folder
+- Push images to ECR (this takes 5-10 minutes)
+- Note: Base image is not required for operator/api-store builds
 - Set up the base infrastructure for Dynamo Cloud
 - Configure kubectl to access the cluster
 - Deploy Dynamo Cloud platform via ArgoCD

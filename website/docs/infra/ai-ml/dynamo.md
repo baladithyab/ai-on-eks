@@ -113,10 +113,10 @@ This will deploy the base infrastructure including:
 The script will also automatically:
 - Clone the Dynamo repository
 - Build container images (operator, api-store, pipelines)
-- Push images to ECR (this process takes 10-20 minutes)
+- Push images to ECR (this process takes 5-10 minutes)
 - Trigger ArgoCD deployment of Dynamo Cloud platform
 
-Note: Base image building is handled separately by the blueprints folder.
+Note: Base image is not required for operator/api-store builds.
 
 </CollapsibleContent>
 
