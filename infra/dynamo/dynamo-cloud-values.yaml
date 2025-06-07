@@ -1,0 +1,149 @@
+dynamo-operator:
+  enabled: true
+  natsAddr: "nats://dynamo-cloud-nats:4222"
+  etcdAddr: "dynamo-cloud-etcd:2379"
+  namespaceRestriction:
+    enabled: true
+    targetNamespace: dynamo-cloud
+  controllerManager:
+    manager:
+      image:
+        repository: ${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-operator
+        tag: latest
+  imagePullSecrets:
+    - name: docker-imagepullsecret
+  dynamo:
+    apiStore:
+      endpoint: http://dynamo-store
+      clusterName: default
+    internalImages:
+      dynamoComponentsDownloader: rapidfort/curl:latest
+      kaniko: gcr.io/kaniko-project/executor:debug
+      buildkit: moby/buildkit:v0.20.2
+      buildkitRootless: moby/buildkit:v0.20.2-rootless
+      debugger: python:3.12-slim
+    enableRestrictedSecurityContext: false
+    dockerRegistry:
+      server: ${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com
+      username: AWS
+      password: ""
+      secure: true
+      dynamoComponentsRepositoryName: dynamo-pipelines
+      useKubernetesSecret: true
+    imageBuildEngine: buildkit
+    addNamespacePrefixToImageName: false
+    ingress:
+      enabled: false
+      className: nginx
+      tlsSecretName: my-tls-secret
+    istio:
+      enabled: false
+      gateway: istio-system/istio-ingressgateway
+    ingressHostSuffix: dynamo-cloud.com
+
+dynamo-api-store:
+  enabled: true
+  namespaceRestriction:
+    enabled: true
+    targetNamespace: dynamo-cloud
+  istio:
+    enabled: false
+    gateway: istio-system/istio-ingressgateway
+    host: dynamo-cloud.dynamo-cloud.com
+  image:
+    repository: ${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-api-store
+    tag: latest
+    pullPolicy: IfNotPresent
+  imagePullSecrets:
+    - name: docker-imagepullsecret
+  ingress:
+    enabled: false
+    className: nginx
+    hosts:
+      - host: dynamo-cloud.dynamo-cloud.com
+        paths:
+          - path: /
+            pathType: Prefix
+  dynamo:
+    env:
+      resource_scope: user
+  postgresql:
+    primary:
+      persistence:
+        enabled: false
+  minio:
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClass: ""
+    apiIngress:
+      enabled: false
+      ingressClassName: nginx
+      hostname: minio.example.com
+      pathType: Prefix
+
+etcd:
+  enabled: true
+  # Disable Bitnami pre-upgrade hook that causes a stuck Job on fresh installs
+  preUpgrade:
+    enabled: false
+  # Disable volume permissions init container that requires privileged security context
+  volumePermissions:
+    enabled: false
+  replicaCount: 1
+  auth:
+    rbac:
+      create: false
+  readinessProbe:
+    enabled: false
+  livenessProbe:
+    enabled: false
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 1Gi
+
+nats:
+  enabled: true
+  config:
+    cluster:
+      enabled: false
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        dir: /data
+        pvc:
+          enabled: true
+          size: 1Gi
+          storageClassName: ""
+      memoryStore:
+        enabled: false
+    nats:
+      port: 4222
+      tls:
+        enabled: false
+    leafnodes:
+      enabled: false
+    websocket:
+      enabled: false
+    mqtt:
+      enabled: false
+    gateway:
+      enabled: false
+    monitor:
+      enabled: true
+      port: 8222
+      tls:
+        enabled: false
+    profiling:
+      enabled: false
+    resolver:
+      enabled: false
+    serverNamePrefix: ""
+
+postgresql:
+  enabled: false
+
+minio:
+  enabled: false 

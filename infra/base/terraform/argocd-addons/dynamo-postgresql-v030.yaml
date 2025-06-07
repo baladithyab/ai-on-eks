@@ -1,0 +1,79 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dynamo-postgresql
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: dynamo-postgresql
+    app.kubernetes.io/version: ${dynamo_version}
+    environment: ${environment}
+    app.kubernetes.io/managed-by: terraform
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: registry-1.docker.io/bitnamicharts
+    chart: postgresql
+    targetRevision: "16.7.9"  # Known working version
+    helm:
+      values: |
+        # PostgreSQL Configuration for Dynamo Cloud
+        # Override service name to match what API Store expects
+        fullnameOverride: "dynamo-cloud-platform-postgresql"
+
+        auth:
+          enablePostgresUser: true
+          postgresPassword: "dynamo123"
+          database: "dynamo"
+          # Create secret with the key name that API Store expects
+          secretKeys:
+            adminPasswordKey: "password"
+            userPasswordKey: "password"
+        
+        # Persistence Configuration
+        primary:
+          persistence:
+            enabled: true
+            storageClass: ""
+            size: 1Gi
+        
+        # Resource Configuration
+        primary:
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+        
+        # Service Configuration
+        service:
+          type: ClusterIP
+          ports:
+            postgresql: 5432
+        
+        # Metrics (optional)
+        metrics:
+          enabled: false
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${dynamo_namespace}
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true

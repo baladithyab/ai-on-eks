@@ -1,0 +1,276 @@
+# Terraform template for Dynamo v0.3.0 ArgoCD Application
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ${application_name}
+  namespace: ${argocd_namespace}
+  labels:
+    app.kubernetes.io/name: dynamo-operator
+    app.kubernetes.io/version: v0.3.0
+    app.kubernetes.io/managed-by: terraform
+    environment: ${environment}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"  # Unified deployment with all dependencies
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ${argocd_project}
+  source:
+    repoURL: https://github.com/ai-dynamo/dynamo.git
+    targetRevision: ${dynamo_version}
+    path: deploy/cloud/helm/platform
+    helm:
+      valueFiles:
+        - values.yaml
+      # Force ArgoCD to resolve Helm dependencies
+      skipCrds: false
+      # Enable dependency management
+      releaseName: dynamo-cloud-platform
+      values: |
+        # Global Configuration
+        imagePullSecrets:
+          - name: ${ecr_secret_name}
+
+        # Dynamo Operator Configuration
+        dynamo-operator:
+          enabled: true
+          
+          # ECR Image Pull Secrets
+          imagePullSecrets:
+            - name: ${ecr_secret_name}
+            - name: ${docker_secret_name}
+          
+          # Namespace Restrictions (Production Security)
+          namespaceRestriction:
+            enabled: ${namespace_restriction_enabled}
+            targetNamespace: ${dynamo_namespace}
+          
+          # Internal Dependencies (Deployed as Helm sub-charts)
+          natsAddr: "${release_name}-nats:4222"
+          etcdAddr: "${release_name}-etcd:2379"
+          
+          controllerManager:
+            manager:
+              image:
+                repository: ${dynamo_operator_image}
+                tag: ${dynamo_operator_tag}
+              args:
+                - --health-probe-bind-address=:8081
+                - --metrics-bind-address=127.0.0.1:8080
+                - --leader-elect
+                - --leader-election-id=dynamo.nko.nvidia.com
+              resources:
+                limits:
+                  cpu: ${operator_cpu_limit}
+                  memory: ${operator_memory_limit}
+                requests:
+                  cpu: ${operator_cpu_request}
+                  memory: ${operator_memory_request}
+            kubeRbacProxy:
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 128Mi
+                requests:
+                  cpu: 5m
+                  memory: 64Mi
+          
+          dynamo:
+            apiStore:
+              endpoint: "http://${api_store_service_name}.${dynamo_namespace}.svc.cluster.local"
+              clusterName: ${cluster_name}
+            
+            # ECR Registry Configuration (v0.3.0 Enhanced)
+            dockerRegistry:
+              server: ${ecr_registry_url}
+              inClusterServer: ${ecr_registry_url}  # v0.3.0 feature
+              username: "AWS"
+              password: ""  # Using imagePullSecrets
+              secure: true
+              dynamoComponentsRepositoryName: ${pipelines_repository_name}
+            
+            # Build Configuration
+            imageBuildEngine: ${image_build_engine}
+            enableRestrictedSecurityContext: ${enable_restricted_security_context}
+            enableLWS: ${enable_lws}
+            addNamespacePrefixToImageName: ${add_namespace_prefix}
+            
+            # Internal Images
+            internalImages:
+              dynamoComponentsDownloader: ${components_downloader_image}
+              kaniko: ${kaniko_image}
+              buildkit: ${buildkit_image}
+              buildkitRootless: ${buildkit_rootless_image}
+              debugger: ${debugger_image}
+
+            # Istio Configuration (Required by Helm chart)
+            istio:
+              enabled: false
+
+            # Ingress Configuration
+            ingress:
+              enabled: ${ingress_enabled}
+              className: ${ingress_class_name}
+              tlsSecretName: ${ingress_tls_secret_name}
+
+            # Ingress Host Suffix
+            ingressHostSuffix: ${ingress_hostname}
+
+        # Dynamo API Store Configuration
+        dynamo-api-store:
+          enabled: true
+          
+          namespaceRestriction:
+            enabled: ${namespace_restriction_enabled}
+            targetNamespace: ${dynamo_namespace}
+          
+          image:
+            repository: ${dynamo_api_store_image}
+            tag: ${dynamo_api_store_tag}
+            pullPolicy: IfNotPresent
+          
+          # ECR Authentication
+          imagePullSecrets:
+            - name: ${ecr_secret_name}
+          
+          # Istio Configuration (Optional - disabled by default)
+          istio:
+            enabled: false
+          
+          # Ingress Configuration (Optional)
+          ingress:
+            enabled: ${ingress_enabled}
+            className: ${ingress_class_name}
+            hosts:
+              - host: ${ingress_hostname}
+                paths:
+                  - path: /
+                    pathType: Prefix
+            %{if ingress_tls_enabled}
+            tls:
+              - secretName: ${ingress_tls_secret_name}
+                hosts:
+                  - ${ingress_hostname}
+            %{endif}
+          
+          # Service Configuration
+          service:
+            type: ClusterIP
+            port: 80
+            annotations: 
+              %{for key, value in service_annotations}
+              ${key}: "${value}"
+              %{endfor}
+          
+          # Application Configuration
+          dynamo:
+            env:
+              resource_scope: ${resource_scope}
+            apiStore:
+              port: 8000
+
+          # PostgreSQL Configuration (external service with correct name)
+          postgresql:
+            auth:
+              existingSecret: ""
+              postgresPassword: "dynamo123"
+              username: "postgres"
+              password: "dynamo123"
+              database: "dynamo"
+
+          # MinIO Configuration (external service with correct name)
+          minio:
+            mode: standalone
+            auth:
+              rootUser: "admin"
+              rootPassword: "dynamo123"
+            persistence:
+              enabled: false  # Using external MinIO
+            service:
+              type: ClusterIP
+              ports:
+                api: 9000
+                console: 9001
+
+          # PostgreSQL and MinIO deployed as separate ArgoCD applications
+
+          # Resource Management
+          resources:
+            limits:
+              cpu: ${api_store_cpu_limit}
+              memory: ${api_store_memory_limit}
+            requests:
+              cpu: ${api_store_cpu_request}
+              memory: ${api_store_memory_request}
+
+        # Enable Bundled Dependencies (Helm sub-charts)
+        nats:
+          enabled: true
+          config:
+            cluster:
+              enabled: false
+            jetstream:
+              enabled: true
+              fileStore:
+                enabled: true
+                dir: /data
+                pvc:
+                  enabled: true
+                  size: ${nats_jetstream_size}
+                  storageClassName: "${nats_storage_class}"
+              memoryStore:
+                enabled: false
+            nats:
+              port: ${nats_port}
+              tls:
+                enabled: false
+            monitor:
+              enabled: true
+              port: 8222
+
+        etcd:
+          enabled: true
+          replicaCount: ${etcd_replica_count}
+          auth:
+            rbac:
+              create: false
+              allowNoneAuthentication: true
+          readinessProbe:
+            enabled: false
+          livenessProbe:
+            enabled: false
+          persistence:
+            enabled: true
+            size: ${etcd_storage_size}
+            storageClass: "${etcd_storage_class}"
+          preUpgradeJob:
+            enabled: false
+
+        # PostgreSQL and MinIO deployed as separate ArgoCD applications (sync-wave 0)
+        postgresql:
+          enabled: false  # Using external PostgreSQL
+
+        minio:
+          enabled: false  # Using external MinIO
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${dynamo_namespace}
+
+  syncPolicy:
+    automated:
+      prune: ${auto_prune}
+      selfHeal: ${auto_self_heal}
+    syncOptions:
+      - CreateNamespace=${create_namespace}
+      - ApplyOutOfSyncOnly=true
+      %{if replace_resources}
+      - Replace=true
+      %{endif}
+    retry:
+      limit: ${sync_retry_limit}
+      backoff:
+        duration: ${sync_retry_duration}
+        factor: ${sync_retry_factor}
+        maxDuration: ${sync_retry_max_duration}

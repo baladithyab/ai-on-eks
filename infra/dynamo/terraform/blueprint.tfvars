@@ -80,8 +80,8 @@ enable_ai_ml_observability_stack = true
 # Dynamo Stack Configuration
 # -------------------------------------------------------------------------------------
 
-# Dynamo version to deploy
-dynamo_stack_version = "release/0.2.0"
+# Dynamo version to deploy (v0.3.0 with separate dependencies)
+dynamo_stack_version = "v0.3.0"
 
 # Hugging Face token for model downloads (replace with your token)
 # huggingface_token = "your-huggingface-token-here"

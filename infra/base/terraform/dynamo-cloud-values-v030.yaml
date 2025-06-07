@@ -1,0 +1,32 @@
+# Dynamo v0.3.0 Values Template
+# This file provides minimal overrides since most configuration
+# is now handled through ArgoCD template variables
+
+# Global Configuration
+global:
+  # AWS Configuration (injected by Terraform)
+  aws:
+    accountId: "${aws_account_id}"
+    region: "${aws_region}"
+
+# Additional custom values can be added here if needed
+# Most configuration is now handled through the ArgoCD template variables
+# in dynamo-operator-v030.yaml
+
+# Example of additional PostgreSQL configuration for API Store
+postgresql:
+  primary:
+    persistence:
+      enabled: false
+      
+# Example of additional MinIO configuration for API Store  
+minio:
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+  apiIngress:
+    enabled: false
+    ingressClassName: nginx
+    hostname: minio.example.com
+    pathType: Prefix

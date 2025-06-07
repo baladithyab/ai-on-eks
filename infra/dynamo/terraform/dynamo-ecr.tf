@@ -6,11 +6,7 @@
 # This file is copied to the _LOCAL directory during deployment.
 #---------------------------------------------------------------
 
-# Data source to get current AWS account ID
-data "aws_caller_identity" "current" {}
-
-# Data source to get current AWS region
-data "aws_region" "current" {}
+# Note: aws_caller_identity and aws_region data sources are defined in main.tf
 
 # ECR Repository for Dynamo Operator
 resource "aws_ecr_repository" "dynamo_operator" {
@@ -221,29 +217,5 @@ resource "aws_ecr_lifecycle_policy" "dynamo_base_policy" {
   })
 }
 
-# Create a Kubernetes ConfigMap with ECR repository information
-resource "kubernetes_config_map" "dynamo_ecr_config" {
-  count = var.enable_dynamo_stack ? 1 : 0
-
-  metadata {
-    name      = "dynamo-ecr-config"
-    namespace = "dynamo-cloud"
-  }
-
-  data = {
-    AWS_ACCOUNT_ID              = data.aws_caller_identity.current.account_id
-    AWS_REGION                  = data.aws_region.current.name
-    DOCKER_SERVER               = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com"
-    CI_REGISTRY_IMAGE           = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com"
-    OPERATOR_ECR_REPOSITORY     = aws_ecr_repository.dynamo_operator[0].name
-    API_STORE_ECR_REPOSITORY    = aws_ecr_repository.dynamo_api_store[0].name
-    PIPELINES_ECR_REPOSITORY    = aws_ecr_repository.dynamo_pipelines[0].name
-    BASE_ECR_REPOSITORY         = aws_ecr_repository.dynamo_base[0].name
-    OPERATOR_IMAGE_URI          = "${aws_ecr_repository.dynamo_operator[0].repository_url}:latest"
-    API_STORE_IMAGE_URI         = "${aws_ecr_repository.dynamo_api_store[0].repository_url}:latest"
-    PIPELINES_IMAGE_URI         = "${aws_ecr_repository.dynamo_pipelines[0].repository_url}:latest"
-    BASE_IMAGE_URI              = "${aws_ecr_repository.dynamo_base[0].repository_url}:latest-vllm"
-    DYNAMO_NAMESPACE            = "dynamo-cloud"
-    IMAGE_TAG                   = "latest"
-  }
-}
+# Note: ConfigMap with ECR repository information will be created by the Dynamo Cloud operator
+# when it's deployed, using the outputs from this terraform configuration

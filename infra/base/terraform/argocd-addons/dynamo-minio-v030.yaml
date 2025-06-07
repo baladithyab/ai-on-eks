@@ -1,0 +1,87 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dynamo-minio
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: dynamo-minio
+    app.kubernetes.io/version: ${dynamo_version}
+    environment: ${environment}
+    app.kubernetes.io/managed-by: terraform
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: registry-1.docker.io/bitnamicharts
+    chart: minio
+    targetRevision: "17.0.2"  # Known working version
+    helm:
+      values: |
+        # MinIO Configuration for Dynamo Cloud
+        # Override service name to match what API Store expects
+        fullnameOverride: "dynamo-cloud-platform-minio"
+
+        auth:
+          rootUser: "admin"
+          rootPassword: "dynamo123"
+          # Ensure secret keys match what API Store expects
+          existingSecret: ""
+        
+        # Persistence Configuration
+        persistence:
+          enabled: true
+          storageClass: ""
+          size: 5Gi
+        
+        # Resource Configuration
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        
+        # Service Configuration
+        service:
+          type: ClusterIP
+          ports:
+            api: 9000
+            console: 9001
+        
+        # Ingress Configuration (disabled)
+        ingress:
+          enabled: false
+        
+        # Console Ingress (disabled)
+        consoleIngress:
+          enabled: false
+        
+        # Default Buckets
+        defaultBuckets: "dynamo-bucket"
+        
+        # Metrics (optional)
+        metrics:
+          serviceMonitor:
+            enabled: false
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${dynamo_namespace}
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true

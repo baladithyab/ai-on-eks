@@ -271,7 +271,200 @@ variable "enable_dynamo_stack" {
 variable "dynamo_stack_version" {
   description = "Dynamo default version"
   type        = string
-  default     = "release/0.2.0"
+  default     = "v0.3.0"
+}
+
+# Dynamo v0.3.0 Configuration Variables
+variable "dynamo_namespace" {
+  description = "Kubernetes namespace for Dynamo deployment"
+  type        = string
+  default     = "dynamo-cloud"
+}
+
+variable "dynamo_argocd_project" {
+  description = "ArgoCD project for Dynamo applications"
+  type        = string
+  default     = "default"
+}
+
+variable "dynamo_environment" {
+  description = "Environment label for Dynamo deployment"
+  type        = string
+  default     = "production"
+}
+
+# NATS Configuration
+variable "nats_namespace" {
+  description = "Kubernetes namespace for NATS deployment"
+  type        = string
+  default     = "dynamo-cloud"
+}
+
+variable "nats_jetstream_size" {
+  description = "Storage size for NATS JetStream"
+  type        = string
+  default     = "5Gi"
+}
+
+variable "nats_storage_class" {
+  description = "Storage class for NATS persistence"
+  type        = string
+  default     = ""
+}
+
+variable "nats_port" {
+  description = "NATS server port"
+  type        = number
+  default     = 4222
+}
+
+# ETCD Configuration
+variable "etcd_namespace" {
+  description = "Kubernetes namespace for ETCD deployment"
+  type        = string
+  default     = "dynamo-cloud"
+}
+
+variable "etcd_replica_count" {
+  description = "Number of ETCD replicas"
+  type        = number
+  default     = 1
+}
+
+variable "etcd_storage_size" {
+  description = "Storage size for ETCD"
+  type        = string
+  default     = "2Gi"
+}
+
+variable "etcd_storage_class" {
+  description = "Storage class for ETCD persistence"
+  type        = string
+  default     = ""
+}
+
+variable "etcd_port" {
+  description = "ETCD client port"
+  type        = number
+  default     = 2379
+}
+
+# ArgoCD Sync Configuration
+variable "argocd_auto_prune" {
+  description = "Enable automatic pruning for ArgoCD applications"
+  type        = bool
+  default     = true
+}
+
+variable "argocd_auto_self_heal" {
+  description = "Enable automatic self-healing for ArgoCD applications"
+  type        = bool
+  default     = true
+}
+
+variable "argocd_sync_retry_limit" {
+  description = "Maximum number of sync retries"
+  type        = number
+  default     = 5
+}
+
+variable "argocd_sync_retry_duration" {
+  description = "Initial retry duration"
+  type        = string
+  default     = "5s"
+}
+
+variable "argocd_sync_retry_factor" {
+  description = "Retry backoff factor"
+  type        = number
+  default     = 2
+}
+
+variable "argocd_sync_retry_max_duration" {
+  description = "Maximum retry duration"
+  type        = string
+  default     = "3m"
+}
+
+# Dynamo Operator Configuration
+variable "dynamo_operator_cpu_limit" {
+  description = "CPU limit for Dynamo operator"
+  type        = string
+  default     = "500m"
+}
+
+variable "dynamo_operator_memory_limit" {
+  description = "Memory limit for Dynamo operator"
+  type        = string
+  default     = "512Mi"
+}
+
+variable "dynamo_operator_cpu_request" {
+  description = "CPU request for Dynamo operator"
+  type        = string
+  default     = "100m"
+}
+
+variable "dynamo_operator_memory_request" {
+  description = "Memory request for Dynamo operator"
+  type        = string
+  default     = "128Mi"
+}
+
+# Dynamo API Store Configuration
+variable "dynamo_api_store_cpu_limit" {
+  description = "CPU limit for Dynamo API store"
+  type        = string
+  default     = "1000m"
+}
+
+variable "dynamo_api_store_memory_limit" {
+  description = "Memory limit for Dynamo API store"
+  type        = string
+  default     = "1Gi"
+}
+
+variable "dynamo_api_store_cpu_request" {
+  description = "CPU request for Dynamo API store"
+  type        = string
+  default     = "250m"
+}
+
+variable "dynamo_api_store_memory_request" {
+  description = "Memory request for Dynamo API store"
+  type        = string
+  default     = "256Mi"
+}
+
+# Ingress Configuration
+variable "dynamo_ingress_enabled" {
+  description = "Enable ingress for Dynamo API store"
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_ingress_class_name" {
+  description = "Ingress class name"
+  type        = string
+  default     = "nginx"
+}
+
+variable "dynamo_ingress_hostname" {
+  description = "Hostname for Dynamo ingress"
+  type        = string
+  default     = "dynamo.example.com"
+}
+
+variable "dynamo_ingress_tls_enabled" {
+  description = "Enable TLS for ingress"
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_ingress_tls_secret_name" {
+  description = "TLS secret name for ingress"
+  type        = string
+  default     = "dynamo-tls"
 }
 
 # Karpenter node pool configuration

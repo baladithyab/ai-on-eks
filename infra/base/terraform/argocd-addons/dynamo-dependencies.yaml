@@ -1,0 +1,100 @@
+# These applications are now included in the unified dynamo-cloud-platform deployment
+# To avoid conflicts, these standalone applications are disabled
+# All NATS and ETCD configuration is now managed through dynamo-cloud-operator.yaml
+
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+# metadata:
+#   name: dynamo-nats
+#   namespace: argocd
+# spec:
+#   project: default
+#   source:
+#     chart: nats
+#     repoURL: https://nats-io.github.io/k8s/helm/charts/
+#     targetRevision: "1.3.2"
+#     helm:
+#       values: |
+#         tlsCA:
+#           enabled: false
+#         config:
+#           cluster:
+#             enabled: false
+#           jetstream:
+#             enabled: true
+#             fileStore:
+#               enabled: true
+#               dir: /data
+#               pvc:
+#                 enabled: true
+#                 size: 1Gi
+#                 storageClassName: ""
+#             memoryStore:
+#               enabled: false
+#           nats:
+#             port: 4222
+#             tls:
+#               enabled: false
+#           leafnodes:
+#             enabled: false
+#           websocket:
+#             enabled: false
+#           mqtt:
+#             enabled: false
+#           gateway:
+#             enabled: false
+#           monitor:
+#             enabled: true
+#             port: 8222
+#             tls:
+#               enabled: false
+#           profiling:
+#             enabled: false
+#             port: 65432
+#           resolver:
+#             enabled: false
+#           serverNamePrefix: ""
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: dynamo-cloud
+#   syncPolicy:
+#     syncOptions:
+#       - ServerSideApply=true
+#       - CreateNamespace=true
+#     automated: {}
+# ---
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+# metadata:
+#   name: dynamo-etcd
+#   namespace: argocd
+# spec:
+#   project: default
+#   source:
+#     chart: etcd
+#     repoURL: https://charts.bitnami.com/bitnami
+#     targetRevision: "10.2.3"
+#     helm:
+#       values: |
+#         replicaCount: 1
+#         auth:
+#           rbac:
+#             create: false
+#         readinessProbe:
+#           enabled: false
+#         livenessProbe:
+#           enabled: false
+#         persistence:
+#           enabled: true
+#           storageClass: ""
+#           size: 1Gi
+#         preUpgrade:
+#           enabled: false
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: dynamo-cloud
+#   syncPolicy:
+#     syncOptions:
+#       - ServerSideApply=true
+#       - CreateNamespace=true
+#     automated: {}

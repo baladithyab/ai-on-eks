@@ -1,43 +1,26 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: dynamo-cloud-operator
+  name: dynamo-cloud-platform
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: https://github.com/ai-dynamo/dynamo.git
     targetRevision: ${dynamo_version}
-    path: deploy/dynamo/helm
+    path: deploy/dynamo/helm/platform
     helm:
       valueFiles:
         - values.yaml
-      parameters:
-        - name: "operator.image.repository"
-          value: "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-operator"
-        - name: "operator.image.tag"
-          value: "latest"
-        - name: "apiStore.image.repository"
-          value: "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-api-store"
-        - name: "apiStore.image.tag"
-          value: "latest"
-        - name: "pipelines.image.repository"
-          value: "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-pipelines"
-        - name: "pipelines.image.tag"
-          value: "latest"
-        - name: "baseImage.repository"
-          value: "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-base"
-        - name: "baseImage.tag"
-          value: "latest-vllm"
+      values: |
+        ${values_yaml}
   destination:
     server: https://kubernetes.default.svc
     namespace: dynamo-cloud
   syncPolicy:
     syncOptions:
       - ServerSideApply=true
-      - CreateNamespace=true
-    # Note: automated sync is disabled initially
-    # Images must be built before enabling auto-sync
+    automated: {}
   ignoreDifferences:
     - group: apps
       kind: Deployment

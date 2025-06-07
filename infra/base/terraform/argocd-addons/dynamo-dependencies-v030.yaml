@@ -1,0 +1,293 @@
+# Terraform template for Dynamo v0.3.0 Dependencies (NATS + ETCD)
+---
+# NATS Messaging System (Required for Dynamo v0.3.0)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nats-for-dynamo-${environment}
+  namespace: ${argocd_namespace}
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/version: "2.10.21"
+    app.kubernetes.io/managed-by: terraform
+    app.kubernetes.io/part-of: dynamo-platform
+    environment: ${environment}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"  # Deploy first
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ${argocd_project}
+  source:
+    repoURL: https://nats-io.github.io/k8s/helm/charts/
+    chart: nats
+    targetRevision: 1.3.2
+    helm:
+      values: |
+        # Core NATS configuration for Dynamo v0.3.0
+        config:
+          jetstream:
+            enabled: true
+            fileStore:
+              enabled: true
+              dir: /data
+              pvc:
+                enabled: true
+                size: ${nats_jetstream_size}
+                storageClassName: "${nats_storage_class}"
+              maxSize: ${nats_jetstream_size}
+            memoryStore:
+              enabled: false
+          nats:
+            port: ${nats_port}
+            tls:
+              enabled: false
+          monitor:
+            enabled: true
+            port: 8222
+          cluster:
+            enabled: false
+          websocket:
+            enabled: false
+          mqtt:
+            enabled: false
+          gateway:
+            enabled: false
+          
+        # Container configuration
+        container:
+          image:
+            repository: nats
+            tag: 2.10.21-alpine
+            pullPolicy: IfNotPresent
+          ports:
+            nats: {}
+            monitor: {}
+          env: {}
+          
+        # Reloader container
+        reloader:
+          enabled: true
+          image:
+            repository: natsio/nats-server-config-reloader
+            tag: 0.16.0
+        
+        # Service configuration
+        service:
+          enabled: true
+          type: ClusterIP
+          ports:
+            nats:
+              enabled: true
+            monitor:
+              enabled: true
+        
+        # StatefulSet configuration
+        statefulSet:
+          merge:
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: nats
+                      resources:
+                        requests:
+                          memory: 256Mi
+                          cpu: 250m
+                        limits:
+                          memory: 1Gi
+                          cpu: 500m
+                      env:
+                        - name: GOMEMLIMIT
+                          value: "896MiB"  # 90% of memory limit
+        
+        # Pod template configuration
+        podTemplate:
+          configChecksumAnnotation: true
+          merge:
+            metadata:
+              labels:
+                app.kubernetes.io/part-of: dynamo-platform
+                environment: ${environment}
+        
+        # NATS Box for debugging and management
+        natsBox:
+          enabled: true
+          container:
+            image:
+              repository: natsio/nats-box
+              tag: 0.14.5
+        
+        # Pod disruption budget
+        podDisruptionBudget:
+          enabled: true
+        
+        # Service account
+        serviceAccount:
+          enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${nats_namespace}
+  
+  syncPolicy:
+    automated:
+      prune: ${auto_prune}
+      selfHeal: ${auto_self_heal}
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: ${sync_retry_limit}
+      backoff:
+        duration: ${sync_retry_duration}
+        factor: ${sync_retry_factor}
+        maxDuration: ${sync_retry_max_duration}
+
+---
+# ETCD Key-Value Store (Required for Dynamo v0.3.0)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: etcd-for-dynamo-${environment}
+  namespace: ${argocd_namespace}
+  labels:
+    app.kubernetes.io/name: etcd
+    app.kubernetes.io/version: "3.5.15"
+    app.kubernetes.io/managed-by: terraform
+    app.kubernetes.io/part-of: dynamo-platform
+    environment: ${environment}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"  # Deploy first
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ${argocd_project}
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: etcd
+    targetRevision: 11.1.0
+    helm:
+      values: |
+        # ETCD configuration optimized for Dynamo v0.3.0
+        replicaCount: ${etcd_replica_count}
+        
+        # Image configuration
+        image:
+          registry: docker.io
+          repository: bitnami/etcd
+          pullPolicy: IfNotPresent
+        
+        # Disable authentication for simplicity (adjust for production)
+        auth:
+          rbac:
+            create: false
+            allowNoneAuthentication: true
+          token:
+            enabled: false
+        
+        # Disable default probes (can be resource intensive)
+        readinessProbe:
+          enabled: false
+        livenessProbe:
+          enabled: false
+        startupProbe:
+          enabled: false
+        
+        # Persistence configuration
+        persistence:
+          enabled: true
+          size: ${etcd_storage_size}
+          storageClass: "${etcd_storage_class}"
+          accessModes:
+            - ReadWriteOnce
+        
+        # Service configuration
+        service:
+          type: ClusterIP
+          ports:
+            client: ${etcd_port}
+            peer: 2380
+        
+        # Security context
+        containerSecurityContext:
+          enabled: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          runAsNonRoot: true
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        
+        podSecurityContext:
+          enabled: true
+          fsGroup: 1001
+          fsGroupChangePolicy: "OnRootMismatch"
+        
+        # Resource management
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 250m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        
+        # Pod disruption budget
+        podDisruptionBudget:
+          create: true
+          minAvailable: 0
+        
+        # Service account
+        serviceAccount:
+          create: true
+          automountServiceAccountToken: false
+        
+        # Pod labels
+        commonLabels:
+          app.kubernetes.io/part-of: dynamo-platform
+          environment: ${environment}
+        
+        # Metrics configuration (optional)
+        metrics:
+          enabled: false
+          service:
+            type: ClusterIP
+            port: 2381
+        
+        # Auto compaction settings for long-running deployments
+        extraEnvVars:
+          - name: ETCD_AUTO_COMPACTION_MODE
+            value: periodic
+          - name: ETCD_AUTO_COMPACTION_RETENTION
+            value: "1h"
+          - name: ETCD_QUOTA_BACKEND_BYTES
+            value: "8589934592"  # 8GB
+          - name: ETCD_MAX_REQUEST_BYTES
+            value: "33554432"    # 32MB
+          - name: ETCD_SNAPSHOT_COUNT
+            value: "100000"
+        
+        # Network configuration
+        extraEnvVarsSecret: ""
+        extraEnvVarsConfigMap: ""
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${etcd_namespace}
+  
+  syncPolicy:
+    automated:
+      prune: ${auto_prune}
+      selfHeal: ${auto_self_heal}
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: ${sync_retry_limit}
+      backoff:
+        duration: ${sync_retry_duration}
+        factor: ${sync_retry_factor}
+        maxDuration: ${sync_retry_max_duration}

@@ -1,0 +1,56 @@
+# This application is now included in the unified dynamo-cloud-platform deployment
+# To avoid conflicts, this standalone application is disabled
+# All dynamo-api-store configuration is now managed through dynamo-cloud-operator.yaml
+
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+# metadata:
+#   name: dynamo-api-store
+#   namespace: argocd
+# spec:
+#   project: default
+#   source:
+#     repoURL: https://github.com/ai-dynamo/dynamo.git
+#     targetRevision: ${dynamo_version}
+#     path: deploy/dynamo/helm/platform/components/api-store
+#     helm:
+#       valueFiles:
+#         - values.yaml
+#       parameters:
+#         - name: "image.repository"
+#           value: "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/dynamo-api-store"
+#         - name: "image.tag"
+#           value: "latest"
+#         - name: "imagePullSecrets[0].name"
+#           value: "docker-imagepullsecret"
+#         - name: "namespaceRestriction.enabled"
+#           value: "true"
+#         - name: "namespaceRestriction.targetNamespace"
+#           value: "dynamo-cloud"
+#         - name: "dynamo.env.resource_scope"
+#           value: "user"
+#         - name: "ingress.enabled"
+#           value: "false"
+#         - name: "istio.enabled"
+#           value: "false"
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: dynamo-cloud
+#   syncPolicy:
+#     syncOptions:
+#       - ServerSideApply=true
+#       - CreateNamespace=true
+#     automated: {}
+#   ignoreDifferences:
+#     - group: apps
+#       kind: Deployment
+#       jqPathExpressions:
+#         - .spec.template.spec.containers[].image
+#     - group: v1
+#       kind: Secret
+#       jqPathExpressions:
+#         - .data
+#     - group: v1
+#       kind: ConfigMap
+#       jqPathExpressions:
+#         - .data
