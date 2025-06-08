@@ -39,8 +39,15 @@ if [ ! -d "./terraform/_LOCAL" ]; then
 
     # Still try to clean up any remaining AWS resources manually
     section "Manual AWS Resource Cleanup"
-    AWS_REGION=${AWS_REGION:-"us-west-2"}
-    CLUSTER_NAME=${CLUSTER_NAME:-"dynamo-on-eks"}
+
+    # Try to get cluster info from blueprint.tfvars if it exists
+    if [ -f "./terraform/blueprint.tfvars" ]; then
+        AWS_REGION=$(grep -E '^region\s*=' ./terraform/blueprint.tfvars | cut -d'"' -f2 2>/dev/null || echo "us-west-2")
+        CLUSTER_NAME=$(grep -E '^name\s*=' ./terraform/blueprint.tfvars | cut -d'"' -f2 2>/dev/null || echo "dynamo-on-eks")
+    else
+        AWS_REGION=${AWS_REGION:-"us-west-2"}
+        CLUSTER_NAME=${CLUSTER_NAME:-"dynamo-on-eks"}
+    fi
     AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "unknown")
 
     # Clean up KMS alias and CloudWatch log groups manually
@@ -96,10 +103,21 @@ if ! terraform init; then
     exit 1
 fi
 
-# Get cluster information before cleanup
+# Get cluster information before cleanup (following base cleanup pattern)
 info "Getting cluster information..."
-CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "unknown")
-AWS_REGION=$(terraform output -raw region 2>/dev/null || echo "us-west-2")
+
+# Prepare terraform command with blueprint.tfvars if it exists
+TERRAFORM_COMMAND="terraform destroy -auto-approve"
+if [ -f "../blueprint.tfvars" ]; then
+    TERRAFORM_COMMAND="$TERRAFORM_COMMAND -var-file=../blueprint.tfvars"
+    # Get cluster name and region from blueprint.tfvars using terraform console
+    CLUSTER_NAME=$(echo "var.name" | terraform console -var-file=../blueprint.tfvars 2>/dev/null | tr -d '"' || echo "unknown")
+    AWS_REGION=$(echo "var.region" | terraform console -var-file=../blueprint.tfvars 2>/dev/null | tr -d '"' || echo "us-west-2")
+else
+    # Fallback to terraform outputs
+    CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "unknown")
+    AWS_REGION=$(terraform output -raw region 2>/dev/null || echo "us-west-2")
+fi
 
 info "Cluster: ${CLUSTER_NAME}"
 info "Region: ${AWS_REGION}"
@@ -418,13 +436,8 @@ fi
 
 section "Step 6: Terraform Destroy"
 
-# Prepare terraform command
-TERRAFORM_COMMAND="terraform destroy -auto-approve"
-if [ -f "../blueprint.tfvars" ]; then
-    TERRAFORM_COMMAND="$TERRAFORM_COMMAND -var-file=../blueprint.tfvars"
-fi
-
 info "Starting Terraform destroy process..."
+info "Using command: $TERRAFORM_COMMAND"
 
 # Check if there are any resources in the state
 if ! terraform state list >/dev/null 2>&1; then
@@ -448,7 +461,8 @@ for target in "${targets[@]}"; do
         if [[ ${PIPESTATUS[0]} -eq 0 && $destroy_output == *"Destroy complete"* ]]; then
             info "SUCCESS: Terraform destroy of $target completed successfully"
         else
-            warn "Terraform destroy of $target had issues, continuing..."
+            error "FAILED: Terraform destroy of $target failed"
+            warn "Continuing with cleanup, but some resources may remain..."
         fi
     else
         info "Module $target not found in state, skipping..."
@@ -522,21 +536,24 @@ for target in "${targets[@]}"; do
         if [[ ${PIPESTATUS[0]} -eq 0 && $destroy_output == *"Destroy complete"* ]]; then
             info "SUCCESS: Terraform destroy of $target completed successfully"
         else
-            warn "Terraform destroy of $target had issues, attempting full destroy..."
+            error "FAILED: Terraform destroy of $target failed"
+            warn "Attempting final destroy to catch remaining resources..."
         fi
     else
         info "Module $target not found in state, skipping..."
     fi
 done
 
-# Final destroy to catch any remaining resources
+# Final destroy to catch any remaining resources (critical for complete cleanup)
 info "Destroying remaining resources..."
 destroy_output=$($TERRAFORM_COMMAND 2>&1 | tee /dev/tty)
 if [[ ${PIPESTATUS[0]} -eq 0 && $destroy_output == *"Destroy complete"* ]]; then
     info "SUCCESS: Terraform destroy of all remaining resources completed successfully"
 else
-    warn "Final Terraform destroy had issues, but continuing with cleanup..."
-    info "Some resources may need to be cleaned up manually in the AWS console"
+    error "FAILED: Final Terraform destroy failed"
+    warn "Some resources may need to be cleaned up manually in the AWS console"
+    warn "Check the AWS console for remaining EKS clusters, VPCs, and other resources"
+    warn "You may need to run 'terraform destroy' manually in the terraform/_LOCAL directory"
 fi
 
 section "Step 8: Local Cleanup"
@@ -573,3 +590,6 @@ info ""
 info "The Dynamo Cloud infrastructure cleanup has completed."
 info "Note: KMS keys have been scheduled for deletion (7-day waiting period)."
 info "Note: Some steps may have been skipped if resources were already cleaned up."
+info ""
+warn "If EKS cluster or VPC still exist, check the AWS console and run:"
+warn "  cd terraform/_LOCAL && terraform destroy -auto-approve -var-file=../blueprint.tfvars"

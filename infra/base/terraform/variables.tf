@@ -467,42 +467,4 @@ variable "dynamo_ingress_tls_secret_name" {
   default     = "dynamo-tls"
 }
 
-# Karpenter node pool configuration
-variable "enable_karpenter_node_pools" {
-  description = "Control which Karpenter node pools to enable"
-  type = object({
-    cpu_x86        = bool
-    gpu_g6         = bool
-    gpu_g5         = bool
-    trainium_trn1  = bool
-    inferentia_inf2 = bool
-  })
-  default = {
-    cpu_x86        = true
-    gpu_g6         = true
-    gpu_g5         = true
-    trainium_trn1  = true
-    inferentia_inf2 = true
-  }
-}
 
-# CPU node pool instance types
-variable "karpenter_cpu_instance_types" {
-  description = "Instance types for CPU Karpenter node pool"
-  type        = list(string)
-  default     = ["xlarge", "2xlarge", "4xlarge", "8xlarge"]
-}
-
-# GPU G6 node pool instance types
-variable "karpenter_g6_instance_types" {
-  description = "Instance types for G6 GPU Karpenter node pool"
-  type        = list(string)
-  default     = ["2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge", "24xlarge", "48xlarge"]
-}
-
-# GPU G5 node pool instance types
-variable "karpenter_g5_instance_types" {
-  description = "Instance types for G5 GPU Karpenter node pool"
-  type        = list(string)
-  default     = ["2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge", "24xlarge", "48xlarge"]
-}

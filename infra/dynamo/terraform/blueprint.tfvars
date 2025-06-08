@@ -86,29 +86,7 @@ dynamo_stack_version = "v0.3.0"
 # Hugging Face token for model downloads (replace with your token)
 # huggingface_token = "your-huggingface-token-here"
 
-# -------------------------------------------------------------------------------------
-# Karpenter Node Pool Configuration for Dynamo
-#
-# Customize which Karpenter node pools are enabled and their instance types
-# for optimal Dynamo Cloud performance
-# -------------------------------------------------------------------------------------
 
-# Enable only the node pools needed for Dynamo (disable Trainium/Inferentia)
-enable_karpenter_node_pools = {
-  cpu_x86        = true   # For Dynamo operator and API workloads
-  gpu_g6         = true   # For GPU inference (L4 GPUs)
-  gpu_g5         = false  # Disable G5 to focus on G6
-  trainium_trn1  = false  # Not needed for Dynamo
-  inferentia_inf2 = false # Not needed for Dynamo
-}
-
-# Optimize CPU instances for Dynamo operator and API workloads
-# Focus on larger instances for better performance
-karpenter_cpu_instance_types = ["4xlarge", "8xlarge", "16xlarge"]
-
-# Optimize G6 GPU instances for Dynamo inference workloads
-# Focus on 12xlarge which matches the original dynamo-cloud script
-karpenter_g6_instance_types = ["12xlarge", "16xlarge", "24xlarge"]
 
 # -------------------------------------------------------------------------------------
 # Node Configuration (Optional Overrides)

@@ -28,10 +28,7 @@ spec:
           enablePostgresUser: true
           postgresPassword: "dynamo123"
           database: "dynamo"
-          # Create secret with the key name that API Store expects
-          secretKeys:
-            adminPasswordKey: "password"
-            userPasswordKey: "password"
+          username: "postgres"
         
         # Persistence Configuration
         primary:

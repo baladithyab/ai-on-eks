@@ -173,10 +173,11 @@ spec:
           # PostgreSQL Configuration (external service with correct name)
           postgresql:
             auth:
-              existingSecret: ""
-              postgresPassword: "dynamo123"
+              existingSecret: "dynamo-cloud-platform-postgresql"
+              secretKeys:
+                adminPasswordKey: "password"
+                userPasswordKey: "password"
               username: "postgres"
-              password: "dynamo123"
               database: "dynamo"
 
           # MinIO Configuration (external service with correct name)
@@ -265,9 +266,6 @@ spec:
     syncOptions:
       - CreateNamespace=${create_namespace}
       - ApplyOutOfSyncOnly=true
-      %{if replace_resources}
-      - Replace=true
-      %{endif}
     retry:
       limit: ${sync_retry_limit}
       backoff:

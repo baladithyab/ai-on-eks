@@ -113,7 +113,7 @@ resource "kubectl_manifest" "dynamo_platform_v030_yaml" {
     enable_restricted_security_context = false
     enable_lws                      = false
     add_namespace_prefix            = false
-    image_build_engine              = "buildkit"
+    image_build_engine              = "kaniko"
 
     # Resource Configuration
     operator_cpu_limit      = var.dynamo_operator_cpu_limit
@@ -182,6 +182,27 @@ resource "kubectl_manifest" "dynamo_minio_v030_yaml" {
   })
   depends_on = [
     module.eks_blueprints_addons,
+    kubernetes_namespace.dynamo_cloud
+  ]
+}
+
+# Create a custom PostgreSQL secret with the correct key name for API Store
+resource "kubectl_manifest" "dynamo_postgresql_secret" {
+  count = var.enable_dynamo_stack ? 1 : 0
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dynamo-cloud-platform-postgresql
+  namespace: ${var.dynamo_namespace}
+  labels:
+    app.kubernetes.io/name: dynamo-postgresql
+    app.kubernetes.io/managed-by: terraform
+type: Opaque
+stringData:
+  password: "dynamo123"
+YAML
+  depends_on = [
     kubernetes_namespace.dynamo_cloud
   ]
 }
