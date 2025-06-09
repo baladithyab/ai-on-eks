@@ -204,7 +204,7 @@ build_base_image() {
         # Build command based on framework
         local build_cmd="./build.sh"
         if [ "${FRAMEWORK}" != "none" ]; then
-            build_cmd="${build_cmd} --framework ${FRAMEWORK}"
+            build_cmd="${build_cmd} --framework ${FRAMEWORK} --make-efa"
         fi
         
         if ${build_cmd} 2>&1 | tee /tmp/build_output.log; then

@@ -98,6 +98,10 @@ export AWS_ACCOUNT_ID=$(terraform output -raw aws_account_id 2>/dev/null || aws 
 export AWS_REGION=$(terraform output -raw aws_region 2>/dev/null || aws configure get region || echo "us-west-2")
 export CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "dynamo-on-eks")
 
+# Update kubeconfig
+info "Updating kubeconfig for cluster access..."
+aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+
 # Return to script directory
 cd "${SCRIPT_DIR}"
 
@@ -232,7 +236,9 @@ if ! command_exists earthly; then
 fi
 
 # Build and push all platform components using the main Earthfile
+info "Working in directory: $(pwd)"
 info "Building and pushing operator and API store images..."
+cd "${BLUEPRINT_DIR}"/dynamo
 earthly --push +all-docker --DOCKER_SERVER=${DOCKER_SERVER} --IMAGE_TAG=${IMAGE_TAG}
 
 if [ $? -eq 0 ]; then
@@ -252,26 +258,23 @@ cd "${BLUEPRINT_DIR}"
 
 section "Phase 4: Dynamo Platform Deployment"
 
-# Update kubeconfig
-info "Updating kubeconfig for cluster access..."
-aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
-
 # Create namespace
 info "Creating Dynamo namespace..."
 kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
 
 # Deploy Dynamo platform using the official deploy script approach
 info "Deploying Dynamo platform..."
-cd dynamo
+cd "${BLUEPRINT_DIR}"/dynamo
 
 # Use the deploy script from the dynamo repository
 if [ -f "deploy/helm/deploy.sh" ]; then
     info "Using official Dynamo deploy script..."
-    cd deploy/helm
+    cd deploy/cloud/helm
 
     # Set environment variables for the deploy script
     export NAMESPACE=${NAMESPACE}
     export DOCKER_SERVER=${DOCKER_SERVER}
+    export PIPELINES_DOCKER_SERVER=${DOCKER_SERVER}
     export OPERATOR_IMAGE=${DOCKER_SERVER}/${OPERATOR_ECR_REPOSITORY}:${IMAGE_TAG}
     export API_STORE_IMAGE=${DOCKER_SERVER}/${API_STORE_ECR_REPOSITORY}:${IMAGE_TAG}
 
@@ -309,13 +312,14 @@ cd "${SCRIPT_DIR}"
 
 success "Installation completed successfully!"
 
-echo ""
+echo "================================================"
 echo "Next steps:"
 echo "1. Navigate to blueprints/inference/nvidia-dynamo"
 echo "2. Activate the virtual environment: source dynamo_venv/bin/activate"
 echo "3. Use the deploy.sh script to deploy inference graphs"
 echo "4. Use the test.sh script to test deployments"
-echo ""
+echo "================================================"
 echo "Environment file: ${ENV_FILE}"
 echo "Virtual environment: ${BLUEPRINT_DIR}/dynamo_venv"
 echo "Dynamo repository: ${BLUEPRINT_DIR}/dynamo"
+echo "================================================"

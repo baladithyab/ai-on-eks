@@ -5,7 +5,14 @@
 #
 # This script builds and deploys inference graphs using the Dynamo
 # Cloud platform. It combines the functionality of the 5a and 6a
-# scripts from the dynamo-cloud reference implementation.
+# scripts from the dynamo-cloud reference implementation and includes
+# automatic Service and ServiceMonitor creation for monitoring.
+#
+# Phases:
+#   1. Build Inference Graph (5a equivalent)
+#   2. Deploy Inference Graph (6a equivalent)
+#   3. Create Service and ServiceMonitor for monitoring
+#   4. Service Exposure and Testing
 #
 # Usage:
 #   ./deploy.sh [example_type] [llm_architecture]
@@ -328,38 +335,139 @@ kubectl get pods -n ${NAMESPACE} -l app=${DEPLOYMENT_NAME} 2>/dev/null || kubect
 success "Phase 2 completed: Inference graph deployed"
 
 #---------------------------------------------------------------
-# Phase 3: Service Exposure and Testing
+# Phase 3: Create Service and ServiceMonitor
 #---------------------------------------------------------------
 
-section "Phase 3: Service Exposure"
+section "Phase 3: Creating Service and ServiceMonitor"
 
-# Try to find the service using deployment name
-SERVICE_NAME=$(kubectl get services -n ${NAMESPACE} -o name | grep -i ${DEPLOYMENT_NAME} | head -1 | cut -d'/' -f2)
+# Function to extract port from config file
+get_port_from_config() {
+    local config_file="$1"
+    if [ -f "$config_file" ]; then
+        # Extract port from YAML config (look for Frontend.port or similar)
+        local port=$(grep -E "^\s*port:\s*[0-9]+" "$config_file" | head -1 | sed 's/.*port:\s*//' | tr -d ' ')
+        if [ -n "$port" ]; then
+            echo "$port"
+        else
+            echo "8000"  # Default port
+        fi
+    else
+        echo "3000"  # Default port if no config file
+    fi
+}
 
-if [ -z "${SERVICE_NAME}" ]; then
-    # Try to find any service in the namespace
-    SERVICE_NAME=$(kubectl get services -n ${NAMESPACE} -o name | head -1 | cut -d'/' -f2)
+# Get the port from the config file used in deployment
+if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+    APP_PORT=$(get_port_from_config "$CONFIG_FILE")
+    info "Detected application port from config: $APP_PORT"
+else
+    APP_PORT="8000"
+    info "Using default application port: $APP_PORT"
 fi
 
-if [ -n "${SERVICE_NAME}" ]; then
-    info "Found service: ${SERVICE_NAME}"
+# Create config directory for monitoring resources
+CONFIG_DIR="${SCRIPT_DIR}/monitoring-config"
+mkdir -p "${CONFIG_DIR}"
+info "Created monitoring config directory: ${CONFIG_DIR}"
 
-    # Get service details
+# Create Service + ServiceMonitor for frontend
+info "Creating Service and ServiceMonitor configuration..."
+cat > "${CONFIG_DIR}/dynamo-frontend-service-monitor.yaml" << EOF
+# Service for frontend - exposes the actual application port (${APP_PORT}) for both app logic and metrics
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${DEPLOYMENT_NAME}-frontend-app
+  namespace: ${NAMESPACE}
+  labels:
+    app: ${DEPLOYMENT_NAME}-frontend
+    dynamo.ai/monitoring-type: metrics
+    nvidia.com/selector: ${DEPLOYMENT_NAME}-frontend-app
+spec:
+  ports:
+  - name: app
+    port: ${APP_PORT}
+    targetPort: ${APP_PORT}
+    protocol: TCP
+  selector:
+    nvidia.com/selector: ${DEPLOYMENT_NAME}-frontend
+---
+# ServiceMonitor for frontend metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ${DEPLOYMENT_NAME}-frontend-service-metrics
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+    dynamo.ai/monitoring-type: frontend-service
+    dynamo.ai/deployment-name: ${DEPLOYMENT_NAME}
+spec:
+  selector:
+    matchLabels:
+      nvidia.com/selector: ${DEPLOYMENT_NAME}-frontend-app
+  namespaceSelector:
+    matchNames:
+      - ${NAMESPACE}
+  endpoints:
+    - port: app
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+EOF
+
+# Apply Service and ServiceMonitor (only if monitoring namespace exists)
+if kubectl get namespace monitoring &>/dev/null; then
+    info "Applying Frontend Service + ServiceMonitor..."
+    kubectl apply -f "${CONFIG_DIR}/dynamo-frontend-service-monitor.yaml"
+    success "Frontend Service + ServiceMonitor created successfully."
+
+    info "Monitoring configured with service-based approach:"
+    info "- Service: ${DEPLOYMENT_NAME}-frontend-app on port ${APP_PORT}"
+    info "- ServiceMonitor: ${DEPLOYMENT_NAME}-frontend-service-metrics"
+    info "Frontend app service provides clean access to both LLM calls and metrics endpoint."
+else
+    warn "Monitoring namespace not found. Monitor files created but not applied."
+    info "To apply manually when monitoring is available:"
+    info "kubectl apply -f ${CONFIG_DIR}/dynamo-frontend-service-monitor.yaml"
+fi
+
+success "Phase 3 completed: Service and ServiceMonitor created"
+
+#---------------------------------------------------------------
+# Phase 4: Service Exposure and Testing
+#---------------------------------------------------------------
+
+section "Phase 4: Service Exposure"
+
+# Use the service we just created
+SERVICE_NAME="${DEPLOYMENT_NAME}-frontend-app"
+
+info "Using created service: ${SERVICE_NAME}"
+
+# Get service details
+if kubectl get service ${SERVICE_NAME} -n ${NAMESPACE} >/dev/null 2>&1; then
     kubectl describe service ${SERVICE_NAME} -n ${NAMESPACE}
 
     # Set up port forwarding for testing
-    SERVICE_PORT=$(kubectl get service ${SERVICE_NAME} -n ${NAMESPACE} -o jsonpath='{.spec.ports[0].port}')
-    LOCAL_PORT=${SERVICE_PORT:-8000}
+    LOCAL_PORT=${APP_PORT}
 
     info "Setting up port forwarding..."
     info "Service will be available at: http://localhost:${LOCAL_PORT}"
     info "To access the service, run:"
-    echo "  kubectl port-forward service/${SERVICE_NAME} ${LOCAL_PORT}:${SERVICE_PORT} -n ${NAMESPACE}"
-
+    echo "  kubectl port-forward service/${SERVICE_NAME} ${LOCAL_PORT}:${APP_PORT} -n ${NAMESPACE}"
 else
-    warn "No service found for the deployment"
-    info "Available services in namespace ${NAMESPACE}:"
-    kubectl get services -n ${NAMESPACE}
+    warn "Created service not found, checking for other services..."
+    # Try to find any service in the namespace
+    FALLBACK_SERVICE=$(kubectl get services -n ${NAMESPACE} -o name | head -1 | cut -d'/' -f2)
+    if [ -n "${FALLBACK_SERVICE}" ]; then
+        info "Found fallback service: ${FALLBACK_SERVICE}"
+        kubectl describe service ${FALLBACK_SERVICE} -n ${NAMESPACE}
+    else
+        warn "No services found in namespace ${NAMESPACE}"
+        info "Available services in namespace ${NAMESPACE}:"
+        kubectl get services -n ${NAMESPACE}
+    fi
 fi
 
 success "Deployment completed successfully!"
@@ -374,9 +482,18 @@ echo "  Build Target: ${BUILD_TARGET}"
 echo "  Dynamo Tag: ${DYNAMO_TAG}"
 echo "  Deployment Name: ${DEPLOYMENT_NAME}"
 echo "  Namespace: ${NAMESPACE}"
-echo "  Service: ${SERVICE_NAME:-'Not found'}"
+echo "  Service: ${SERVICE_NAME}"
+echo "  Application Port: ${APP_PORT}"
+echo "  Config Directory: ${CONFIG_DIR}"
+echo ""
+echo "Created Resources:"
+echo "  - Service: ${DEPLOYMENT_NAME}-frontend-app"
+echo "  - ServiceMonitor: ${DEPLOYMENT_NAME}-frontend-service-metrics"
+echo "  - Config File: ${CONFIG_DIR}/dynamo-frontend-service-monitor.yaml"
 echo ""
 echo "Next steps:"
-echo "1. Set up port forwarding to access the service"
+echo "1. Set up port forwarding to access the service:"
+echo "   kubectl port-forward service/${DEPLOYMENT_NAME}-frontend-app ${APP_PORT}:${APP_PORT} -n ${NAMESPACE}"
 echo "2. Run the test script: ./test.sh ${DEPLOYMENT_NAME}"
 echo "3. Monitor the deployment: kubectl get pods -n ${NAMESPACE} -w"
+echo "4. Check monitoring: kubectl get servicemonitors -n monitoring"

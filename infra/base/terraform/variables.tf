@@ -259,3 +259,17 @@ variable "aibrix_stack_version" {
   type        = string
   default     = "v0.2.1"
 }
+
+# Flag to enable Dynamo stack
+variable "enable_dynamo_stack" {
+  description = "Enable Dynamo addon"
+  type        = bool
+  default     = false
+}
+
+# Dynamo version
+variable "dynamo_stack_version" {
+  description = "Dynamo default version"
+  type        = string
+  default     = "v0.3.0"
+}

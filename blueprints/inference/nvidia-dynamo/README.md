@@ -4,18 +4,7 @@ This blueprint provides a complete implementation of NVIDIA Dynamo Cloud platfor
 
 ## Overview
 
-NVIDIA Dynamo is a cloud-native platform for deploying and managing AI inference graphs at scale. This implementation follows the v2 approach, using direct script deployment instead of ArgoCD for simpler, more reliable operations.
-
-## Why V2?
-
-This v2 implementation improves upon the original ArgoCD-based approach by:
-
-- **Simplified Deployment**: Direct script execution instead of ArgoCD complexity
-- **Faster Debugging**: Immediate feedback and easier troubleshooting
-- **Proven Patterns**: Follows the exact dynamo-cloud reference implementation
-- **Better Integration**: Uses ai-on-eks infrastructure patterns (aibrix)
-- **Reduced Dependencies**: No ArgoCD setup required
-- **Clearer Workflow**: Step-by-step script execution with clear error messages
+NVIDIA Dynamo is a cloud-native platform for deploying and managing AI inference graphs at scale. This implementation uses direct script deployment for simpler, more reliable operations.
 
 ### Key Features
 
@@ -67,9 +56,6 @@ Ensure you have the following tools installed:
 # Clone the ai-on-eks repository
 git clone https://github.com/awslabs/ai-on-eks.git
 cd ai-on-eks
-
-# Switch to the dynamo-v2 branch
-git checkout dynamo-v2
 ```
 
 ### 2. Deploy Infrastructure and Dynamo Platform
@@ -112,9 +98,9 @@ cd infra/nvidia-dynamo
 
 **What You Get**: A fully functional Dynamo Cloud platform ready for inference graph deployment
 
-### 3. Build Base Images (Optional)
+### 3. Build Base Images (Required)
 
-Different inference frameworks require different base images. You can build them as needed:
+Different inference frameworks require different base images. These are required for running inference graphs:
 
 ```bash
 # Navigate to the blueprint directory
@@ -147,9 +133,13 @@ cd blueprints/inference/nvidia-dynamo
 - Configures CUDA and GPU drivers
 - Pushes the image to your ECR repository
 
-**When to Build**: Only build base images when you need specific frameworks. The default Dynamo platform works without custom base images for basic testing.
+**When to Build**: Build base images for the inference frameworks you plan to use. These images are required for running inference graphs with the Dynamo platform.
 
 ### 4. Deploy Inference Graphs
+
+#### Primary Method: Interactive Picker (Recommended)
+
+The interactive picker guides you through selecting the appropriate example and architecture:
 
 ```bash
 # Navigate to the blueprint directory (if not already there)
@@ -158,10 +148,22 @@ cd blueprints/inference/nvidia-dynamo
 # Activate the virtual environment
 source dynamo_venv/bin/activate
 
-# Deploy an inference graph (interactive selection)
+# Deploy using interactive selection (recommended)
 ./deploy.sh
+```
 
-# Or deploy specific examples
+The interactive picker will:
+1. Prompt you to select example type (hello-world or llm)
+2. For LLM examples, let you choose the architecture (agg, disagg, agg_router, disagg_router)
+3. Automatically configure the deployment with appropriate settings
+4. Create monitoring resources (Service and ServiceMonitor)
+
+#### Alternative: Direct Deployment
+
+You can also deploy specific examples directly if you know exactly what you want:
+
+```bash
+# Deploy specific examples
 ./deploy.sh hello-world                    # Deploy hello-world example
 ./deploy.sh llm agg                        # Deploy LLM with aggregated architecture
 ./deploy.sh llm disagg                     # Deploy LLM with disaggregated architecture
@@ -186,12 +188,13 @@ source dynamo_venv/bin/activate
 - Deploys the service to the `dynamo-cloud` namespace
 - The Dynamo operator handles containerization and pod creation
 
-**Phase 3: Service Exposure** (immediate)
+**Phase 3: Service Exposure and Monitoring** (immediate)
 - Discovers the deployed service
+- Creates Service and ServiceMonitor resources for monitoring
 - Provides port forwarding instructions for local access
 - Shows testing commands and monitoring options
 
-**What You Get**: A running inference service accessible via Kubernetes service or port forwarding
+**What You Get**: A running inference service accessible via Kubernetes service or port forwarding, with monitoring configured
 
 ### 5. Test Deployments
 
@@ -277,11 +280,11 @@ enable_ai_ml_observability_stack = true
 # (automatically created by dynamo-ecr.tf)
 ```
 
-**Note**: The v2 implementation uses the base terraform modules from `infra/base/terraform` and adds Dynamo-specific resources via the files in `terraform/`. The ArgoCD approach has been replaced with direct script deployment.
+**Note**: This implementation uses the base terraform modules from `infra/base/terraform` and adds Dynamo-specific resources via the files in `terraform/`.
 
 ## Container Build Process
 
-The v2 implementation uses the correct build process from the Dynamo repository:
+This implementation uses the correct build process from the Dynamo repository:
 
 ### Platform Components (Built by install.sh)
 - **Operator and API Store**: Built using `earthly --push +all-docker` from the main Dynamo repository
@@ -364,9 +367,9 @@ Select the architecture that best fits your model:
 - **agg_router**: Load balancing across multiple nodes
 - **disagg_router**: Advanced load balancing with separate prefill/decode
 
-#### 2. Edit the Disaggregated Router Configuration
+#### 2. Configure Your Model Settings
 
-For a 70B model like DeepSeek-R1, the `disagg_router` architecture is ideal as it provides load balancing and can handle the large model efficiently:
+For custom models, you'll need to edit the appropriate configuration file. For example, to deploy DeepSeek-R1 70B with the `disagg_router` architecture:
 
 ```bash
 # Navigate to the blueprint directory
@@ -376,12 +379,18 @@ cd blueprints/inference/nvidia-dynamo
 nano dynamo/examples/llm/configs/disagg_router.yaml
 ```
 
+**Important Configuration Guidelines:**
+- Always update both `model` and `served_model_name` fields to match
+- Adjust `tensor-parallel-size` based on your GPU count
+- Set appropriate `max-model-len` for your model's context window
+- Configure GPU resource allocation based on model size
+
 #### 3. Update the Model Configuration
 
 In the `disagg_router.yaml` file, update the `model` field in the `Common` section:
 
 ```yaml
-# Change these key fields in disagg_router.yaml:
+# Example configuration for DeepSeek-R1 70B in disagg_router.yaml:
 
 Common:
   model: deepseek-ai/DeepSeek-R1-Distill-Llama-70B  # Change from 8B to 70B
@@ -473,41 +482,27 @@ Frontend:
   served_model_name: deepseek-ai/DeepSeek-R1-Distill-Llama-70B  # Must match model above
 ```
 
-#### 5. Deploy DeepSeek-R1 70B with Disaggregated Router
+#### 5. Deploy Your Custom Model
 
 ```bash
 # Navigate to the blueprint directory and activate environment
 cd blueprints/inference/nvidia-dynamo
 source dynamo_venv/bin/activate
 
-# Use the deploy script with disagg_router architecture
+# Use the interactive picker (recommended)
+./deploy.sh
+
+# Or deploy specific architecture directly
 ./deploy.sh llm disagg_router
 
 # This will:
 # 1. Build graphs.disagg_router:Frontend
 # 2. Use the modified configs/disagg_router.yaml
-# 3. Deploy with the DeepSeek-R1 70B model
-
-# Alternatively, deploy manually:
-cd dynamo/examples/llm
-
-# Build the disaggregated router graph
-BUILD_OUTPUT=$(dynamo build graphs.disagg_router:Frontend)
-echo "$BUILD_OUTPUT"
-
-# Extract the tag from build output
-DYNAMO_TAG=$(echo "$BUILD_OUTPUT" | grep "Successfully built" | awk '{ print $3 }' | sed 's/\.$//')
-echo "Built with tag: $DYNAMO_TAG"
-
-# Deploy with the modified disagg_router config
-dynamo deployment create "$DYNAMO_TAG" \
-  --no-wait \
-  -n "llm-disagg-router" \
-  -f "configs/disagg_router.yaml" \
-  --endpoint "${DYNAMO_CLOUD}"
+# 3. Deploy with your custom model (e.g., DeepSeek-R1 70B)
+# 4. Create Service and ServiceMonitor resources for monitoring
 
 # Check deployment status
-kubectl get pods -n dynamo-cloud -l app=llm-disagg-router
+kubectl get pods -n dynamo-cloud
 ```
 
 #### 6. Advanced Configuration Options
@@ -576,16 +571,16 @@ Decode:
 - **Add overhead**: +20-50% for KV cache, batching, and framework overhead
 - **Tensor parallelism**: Split model across multiple GPUs when needed
 
-### Testing DeepSeek-R1 70B Deployment
+### Testing Custom Model Deployments
 
 ```bash
-# Test the disagg_router deployment
-./test.sh llm-disagg-router
+# Test your deployment using the test script
+./test.sh
 
-# Or test manually with curl
-kubectl port-forward service/llm-disagg-router-frontend 8000:8000 -n dynamo-cloud &
+# Or test manually with curl (example for DeepSeek-R1 70B)
+kubectl port-forward service/llm-disagg-router-frontend-app 8000:8000 -n dynamo-cloud &
 
-# Test with a sample request for DeepSeek-R1 70B
+# Test with a sample request
 curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{
@@ -598,8 +593,8 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
   }'
 
 # Check deployment status and resource usage
-kubectl get pods -n dynamo-cloud -l app=llm-disagg-router
-kubectl top pods -n dynamo-cloud -l app=llm-disagg-router
+kubectl get pods -n dynamo-cloud
+kubectl top pods -n dynamo-cloud
 kubectl logs -n dynamo-cloud -l app=llm-disagg-router --tail=50
 
 # Monitor GPU usage across pods
@@ -637,20 +632,71 @@ kubectl exec -it $(kubectl get pods -n dynamo-cloud -l app=llm-disagg-router -o 
 
 ## Monitoring and Observability
 
-The deployment includes comprehensive monitoring:
+The deployment includes comprehensive monitoring with automatic service discovery:
 
 - **Prometheus**: Metrics collection from Dynamo components
 - **Grafana**: Visualization dashboards
 - **AI/ML Observability**: Specialized monitoring for inference workloads
+- **ServiceMonitor**: Automatic discovery and monitoring of deployed inference graphs
+- **Service Creation**: Dedicated services for both application access and metrics collection
 - **EFS**: Shared storage for model caching and data
 
-Access monitoring:
+### Automatic Monitoring Setup
+
+When you deploy inference graphs, the system automatically creates:
+- **Service**: Exposes your inference graph for both API calls and metrics
+- **ServiceMonitor**: Configures Prometheus to scrape metrics from your deployment
+
+### Access monitoring:
 ```bash
 # Port forward to Grafana
 kubectl port-forward -n kube-prometheus-stack svc/kube-prometheus-stack-grafana 3000:80
 
 # Access at http://localhost:3000
 # Default credentials: admin / (check secret)
+
+# View created services and monitors
+kubectl get services -n dynamo-cloud
+kubectl get servicemonitors -n monitoring
+```
+
+### Service and ServiceMonitor Creation Details
+
+The deployment process automatically creates monitoring resources:
+
+**Frontend Service**:
+- Exposes the application port (typically 8000) for both API calls and metrics
+- Named `{deployment-name}-frontend-app`
+- Provides clean access to both LLM calls and metrics endpoint
+
+**ServiceMonitor**:
+- Automatically discovers and monitors deployed inference graphs
+- Scrapes metrics from the `/metrics` endpoint
+- Configured with 15-second intervals and 10-second timeouts
+- Placed in the `monitoring` namespace for Prometheus discovery
+
+**Example ServiceMonitor Configuration**:
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: llm-disagg-router-frontend-service-metrics
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+    dynamo.ai/monitoring-type: frontend-service
+spec:
+  selector:
+    matchLabels:
+      nvidia.com/selector: llm-disagg-router-frontend-app
+  namespaceSelector:
+    matchNames:
+      - dynamo-cloud
+  endpoints:
+    - port: app
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
 ```
 
 ## Troubleshooting
@@ -659,12 +705,11 @@ kubectl port-forward -n kube-prometheus-stack svc/kube-prometheus-stack-grafana 
 
 1. **Branch not found error**
    ```bash
-   # If dynamo-v2 branch doesn't exist, you may need to fetch it
-   git fetch origin
-   git checkout dynamo-v2
-
-   # Or check available branches
+   # Check available branches
    git branch -a
+
+   # Use the main branch if specific branch doesn't exist
+   git checkout main
    ```
 
 2. **Installation fails during image build**
@@ -708,27 +753,24 @@ dynamo cloud status
 
 ## Cleanup
 
-To remove all resources:
+To remove all resources, use the cleanup script instead of terraform destroy:
 
 ```bash
 # Navigate to infrastructure directory
 cd infra/nvidia-dynamo
 
-# Run cleanup (if available)
+# Run the cleanup script (recommended)
 ./cleanup.sh
-
-# Or manually destroy terraform
-cd terraform/_LOCAL
-terraform destroy -auto-approve -var-file=../blueprint.tfvars
 ```
 
-## Branch Information
+The cleanup script handles proper resource removal in the correct order and is safer than using terraform destroy directly.
 
-This implementation is available on the `dynamo-v2` branch of the ai-on-eks repository:
+## Repository Information
+
+This implementation is available in the ai-on-eks repository:
 
 - **Repository**: [awslabs/ai-on-eks](https://github.com/awslabs/ai-on-eks)
-- **Branch**: `dynamo-v2`
-- **Approach**: Direct script deployment (v2) - simpler than ArgoCD approach
+- **Approach**: Direct script deployment for simpler operations
 - **Dynamo Version**: v0.3.0
 
 ## Support
