@@ -72,7 +72,7 @@ cd ai-on-eks
 git checkout dynamo-v2
 ```
 
-### 2. Deploy Infrastructure and Platform
+### 2. Deploy Infrastructure and Dynamo Platform
 
 ```bash
 # Navigate to the infrastructure directory
@@ -82,15 +82,35 @@ cd infra/nvidia-dynamo
 ./install.sh
 ```
 
-This script will:
-1. Set up base infrastructure (VPC, EKS, ECR repositories) using aibrix pattern
-2. Create Python virtual environment and install ai-dynamo[all] package
-3. Clone Dynamo repository (v0.3.0) for container builds and examples
-4. Build and push platform images (operator, api-store) using Earthly
-5. Deploy Dynamo platform to Kubernetes using official deploy script
-6. Create environment configuration for blueprint scripts
+#### What This Step Does:
 
-**Note**: The installation process takes 15-30 minutes depending on your internet connection and AWS region. The script will build and push several container images to ECR.
+**Phase 1: Infrastructure Setup (5-10 minutes)**
+- Creates VPC, subnets, security groups, and NAT gateways
+- Provisions EKS cluster with GPU-enabled node groups
+- Sets up ECR repositories for Dynamo container images
+- Configures IAM roles and policies for cluster access
+- Installs monitoring stack (Prometheus, Grafana) and EFS storage
+
+**Phase 2: Dynamo Platform Setup (10-15 minutes)**
+- Creates Python virtual environment in `blueprints/inference/nvidia-dynamo/`
+- Installs `ai-dynamo[all]` package with all dependencies
+- Clones official Dynamo repository (v0.3.0) for examples and container builds
+- Generates environment configuration file (`dynamo_env.sh`)
+
+**Phase 3: Container Build and Push (10-15 minutes)**
+- Builds Dynamo operator and API store images using Earthly
+- Pushes platform images to your ECR repositories
+- Uses official Dynamo build process: `earthly --push +all-docker`
+
+**Phase 4: Platform Deployment (2-5 minutes)**
+- Deploys Dynamo operator, API store, and dependencies to Kubernetes
+- Sets up NATS, PostgreSQL, MinIO for platform services
+- Configures networking and service discovery
+- Verifies all platform components are running
+
+**Total Time**: 15-30 minutes depending on internet speed and AWS region
+
+**What You Get**: A fully functional Dynamo Cloud platform ready for inference graph deployment
 
 ### 3. Build Base Images (Optional)
 
@@ -112,6 +132,22 @@ cd blueprints/inference/nvidia-dynamo
 # Build base image without inference framework
 ./build-base-image.sh none --push
 ```
+
+#### What This Step Does:
+
+**Framework Selection**: Choose the right inference framework for your models:
+- **vLLM**: Best for most LLMs, supports many model formats, good performance
+- **TensorRT-LLM**: Optimized for NVIDIA GPUs, fastest inference, requires model conversion
+- **SGLang**: Structured generation, good for complex prompting scenarios
+- **None**: Base image only, for custom inference frameworks
+
+**Build Process** (5-15 minutes per image):
+- Uses the official Dynamo `container/build.sh` script
+- Downloads and installs the selected framework
+- Configures CUDA and GPU drivers
+- Pushes the image to your ECR repository
+
+**When to Build**: Only build base images when you need specific frameworks. The default Dynamo platform works without custom base images for basic testing.
 
 ### 4. Deploy Inference Graphs
 
@@ -136,6 +172,27 @@ source dynamo_venv/bin/activate
 ./deploy.sh llm mutinode_disagg_r1         # Deploy LLM multinode disaggregated R1
 ```
 
+#### What This Step Does:
+
+**Phase 1: Build Inference Graph** (2-5 minutes)
+- Selects the appropriate example and architecture
+- Uses `dynamo build graphs.{architecture}:Frontend` to build the service
+- Extracts the service tag from build output
+- Configures deployment parameters
+
+**Phase 2: Deploy to Kubernetes** (1-3 minutes)
+- Sets up DYNAMO_CLOUD endpoint (auto-detects Istio or uses port forwarding)
+- Uses `dynamo deployment create` with the appropriate config file (`-f configs/{architecture}.yaml`)
+- Deploys the service to the `dynamo-cloud` namespace
+- The Dynamo operator handles containerization and pod creation
+
+**Phase 3: Service Exposure** (immediate)
+- Discovers the deployed service
+- Provides port forwarding instructions for local access
+- Shows testing commands and monitoring options
+
+**What You Get**: A running inference service accessible via Kubernetes service or port forwarding
+
 ### 5. Test Deployments
 
 ```bash
@@ -145,6 +202,24 @@ source dynamo_venv/bin/activate
 # Or test a specific service
 ./test.sh llm my-service-name
 ```
+
+#### What This Step Does:
+
+**Service Discovery**: Automatically finds deployed services in the `dynamo-cloud` namespace
+
+**Health Checks**: Tests basic connectivity and health endpoints (`/health`, `/metrics`)
+
+**API Testing**: Tests common endpoints like `/predict`, `/generate`, `/v1/completions`
+
+**Sample Inference**: Sends sample requests to verify the model is working:
+- **LLM services**: Tests with chat completions and text generation
+- **Hello-world**: Tests with simple text processing
+
+**Performance Testing**: Runs basic load testing with concurrent requests
+
+**Port Forwarding Setup**: Automatically sets up port forwarding for local access
+
+**What You Get**: Verification that your inference service is working correctly and performance metrics
 
 ## Directory Structure
 
@@ -274,6 +349,176 @@ dynamo/examples/
         ├── agg_router.py       # Aggregated + router graph
         └── disagg_router.py    # Disaggregated + router graph
 ```
+
+## Deploying Custom Models
+
+You can deploy your own models by modifying the `model_id` in the existing configuration files. This allows you to use any Hugging Face model or custom model with the Dynamo platform.
+
+### Step-by-Step Custom Model Deployment
+
+#### 1. Choose Your Base Architecture
+
+Select the architecture that best fits your model:
+- **agg**: Single node, good for smaller models (< 13B parameters)
+- **disagg**: Separate prefill/decode, good for larger models (13B+ parameters)
+- **agg_router**: Load balancing across multiple nodes
+- **disagg_router**: Advanced load balancing with separate prefill/decode
+
+#### 2. Modify the Configuration File
+
+```bash
+# Navigate to the blueprint directory
+cd blueprints/inference/nvidia-dynamo
+
+# Copy an existing config as a template
+cp dynamo/examples/llm/configs/agg.yaml dynamo/examples/llm/configs/my-custom-model.yaml
+
+# Edit the configuration file
+nano dynamo/examples/llm/configs/my-custom-model.yaml
+```
+
+#### 3. Update the Model ID
+
+In the configuration file, find and update the `model_id` field:
+
+```yaml
+# Example: Change from default model to your custom model
+Frontend:
+  model_id: "microsoft/DialoGPT-medium"  # Replace with your model
+  # OR for a local model path:
+  # model_id: "/path/to/your/model"
+
+  # Other configuration options you can modify:
+  max_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
+  port: 8000
+```
+
+#### 4. Common Model Examples
+
+Here are some popular models you can use:
+
+```yaml
+# Code generation models
+model_id: "Salesforce/codegen-350M-mono"
+model_id: "microsoft/CodeGPT-small-py"
+
+# Chat models
+model_id: "microsoft/DialoGPT-medium"
+model_id: "facebook/blenderbot-400M-distill"
+
+# Instruction-following models
+model_id: "google/flan-t5-base"
+model_id: "allenai/tk-instruct-base-def-pos"
+
+# Larger models (use disagg architecture)
+model_id: "meta-llama/Llama-2-7b-chat-hf"
+model_id: "mistralai/Mistral-7B-Instruct-v0.1"
+```
+
+#### 5. Deploy Your Custom Model
+
+```bash
+# Create a custom deployment using your modified config
+# First, you'll need to modify the deploy.sh script to support custom configs
+# Or manually deploy using the dynamo CLI:
+
+source dynamo_venv/bin/activate
+
+# Build the inference graph (use existing graph architecture)
+cd dynamo/examples/llm
+dynamo build graphs.agg:Frontend
+
+# Deploy with your custom config
+dynamo deployment create "frontend:your-tag-here" \
+  --no-wait \
+  -n "my-custom-model" \
+  -f "configs/my-custom-model.yaml" \
+  --endpoint "${DYNAMO_CLOUD}"
+```
+
+#### 6. Advanced Configuration Options
+
+You can also modify other aspects of the deployment:
+
+```yaml
+Frontend:
+  model_id: "your-model-id"
+
+  # Performance tuning
+  max_tokens: 1024
+  batch_size: 8
+  max_batch_size: 32
+
+  # Generation parameters
+  temperature: 0.8
+  top_p: 0.95
+  top_k: 50
+
+  # Resource allocation
+  gpu_memory_fraction: 0.9
+  tensor_parallel_size: 1
+
+  # Networking
+  port: 8000
+  host: "0.0.0.0"
+```
+
+### Model Requirements
+
+**Supported Model Formats**:
+- Hugging Face Transformers models
+- Models with `config.json` and PyTorch weights
+- GGML/GGUF models (with appropriate base image)
+- Custom models following Hugging Face structure
+
+**Model Size Guidelines**:
+- **< 1B parameters**: Use `agg` architecture, single GPU
+- **1B - 7B parameters**: Use `agg` or `disagg` architecture
+- **7B - 13B parameters**: Use `disagg` architecture, consider multiple GPUs
+- **13B+ parameters**: Use `disagg_router` or multinode architectures
+
+**GPU Memory Requirements**:
+- Estimate ~2GB per billion parameters for inference
+- Add extra memory for KV cache and batching
+- Use tensor parallelism for models that don't fit on single GPU
+
+### Testing Custom Models
+
+```bash
+# Test your custom model deployment
+./test.sh my-custom-model
+
+# Or test manually with curl
+kubectl port-forward service/my-custom-model-frontend 8000:8000 -n dynamo-cloud &
+
+# Test with a sample request
+curl -X POST "http://localhost:8000/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "your-model-id",
+    "messages": [{"role": "user", "content": "Hello, how are you?"}],
+    "max_tokens": 50
+  }'
+```
+
+### Troubleshooting Custom Models
+
+**Model Loading Issues**:
+- Verify the model ID is correct and accessible
+- Check if the model requires authentication (use Hugging Face tokens)
+- Ensure sufficient GPU memory for the model size
+
+**Performance Issues**:
+- Adjust `batch_size` and `max_batch_size` for your workload
+- Consider using `disagg` architecture for better throughput
+- Monitor GPU utilization with `nvidia-smi`
+
+**Configuration Errors**:
+- Validate YAML syntax in your config file
+- Check that all required fields are present
+- Review Dynamo operator logs for detailed error messages
 
 ## Monitoring and Observability
 
