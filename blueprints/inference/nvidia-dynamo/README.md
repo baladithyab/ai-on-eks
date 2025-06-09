@@ -99,8 +99,15 @@ source dynamo_venv/bin/activate
 # Deploy an inference graph (interactive selection)
 ./deploy.sh
 
-# Or deploy a specific example
-./deploy.sh llm
+# Or deploy specific examples
+./deploy.sh hello-world                    # Deploy hello-world example
+./deploy.sh llm agg                        # Deploy LLM with aggregated architecture
+./deploy.sh llm disagg                     # Deploy LLM with disaggregated architecture
+./deploy.sh llm agg_router                 # Deploy LLM with aggregated + router
+./deploy.sh llm disagg_router              # Deploy LLM with disaggregated + router
+./deploy.sh llm multinode-405b             # Deploy LLM multinode 405B model
+./deploy.sh llm multinode_agg_r1           # Deploy LLM multinode aggregated R1
+./deploy.sh llm mutinode_disagg_r1         # Deploy LLM multinode disaggregated R1
 ```
 
 ### 4. Test Deployments
@@ -194,16 +201,51 @@ earthly --push +all-docker --DOCKER_SERVER=$DOCKER_SERVER --IMAGE_TAG=$IMAGE_TAG
 
 ## Available Examples
 
-The Dynamo repository includes several example inference graphs:
+The Dynamo repository includes the following example types:
 
-- **LLM**: Large Language Model inference
-- **Multimodal**: Vision-language models
-- **Custom**: Template for custom inference graphs
+### Hello World
+- **hello-world**: Simple example for testing basic functionality
+- **Build target**: `hello_world:Frontend`
 
-Each example includes:
-- `service.py`: Dynamo service definition
-- `deployment.yaml`: Kubernetes deployment configuration
-- `README.md`: Example-specific documentation
+### LLM Examples
+The LLM examples support different graph architectures based on YAML configurations:
+
+#### Single Node Architectures
+- **agg**: Aggregated architecture - single node processing
+- **agg_router**: Aggregated with router - load balancing across nodes
+- **disagg**: Disaggregated architecture - separate prefill/decode
+- **disagg_router**: Disaggregated with router - advanced load balancing
+
+#### Multi-Node Architectures
+- **multinode-405b**: Multi-node setup for 405B parameter models
+- **multinode_agg_r1**: Multi-node aggregated architecture R1
+- **mutinode_disagg_r1**: Multi-node disaggregated architecture R1
+
+Each LLM architecture:
+- **Build target**: `graphs.{architecture}:Frontend` (e.g., `graphs.agg:Frontend`)
+- **Config file**: `configs/{architecture}.yaml`
+- **Graph definition**: `graphs/{architecture}.py` (multinode configs reuse existing graphs)
+
+### Example Structure
+```
+dynamo/examples/
+├── hello_world/
+│   └── hello_world.py          # Simple frontend service
+└── llm/
+    ├── configs/
+    │   ├── agg.yaml                # Aggregated config
+    │   ├── disagg.yaml             # Disaggregated config
+    │   ├── agg_router.yaml         # Aggregated + router config
+    │   ├── disagg_router.yaml      # Disaggregated + router config
+    │   ├── multinode-405b.yaml     # Multi-node 405B model config
+    │   ├── multinode_agg_r1.yaml   # Multi-node aggregated R1 config
+    │   └── mutinode_disagg_r1.yaml # Multi-node disaggregated R1 config
+    └── graphs/
+        ├── agg.py              # Aggregated graph
+        ├── disagg.py           # Disaggregated graph
+        ├── agg_router.py       # Aggregated + router graph
+        └── disagg_router.py    # Disaggregated + router graph
+```
 
 ## Monitoring and Observability
 

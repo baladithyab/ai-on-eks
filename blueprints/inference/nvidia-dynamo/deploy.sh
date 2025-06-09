@@ -8,12 +8,16 @@
 # scripts from the dynamo-cloud reference implementation.
 #
 # Usage:
-#   ./deploy.sh [example_name]
+#   ./deploy.sh [example_type] [llm_architecture]
 #
 # Examples:
-#   ./deploy.sh llm              # Deploy LLM example
-#   ./deploy.sh multimodal       # Deploy multimodal example
+#   ./deploy.sh llm agg          # Deploy LLM with aggregated architecture
+#   ./deploy.sh llm disagg       # Deploy LLM with disaggregated architecture
+#   ./deploy.sh hello-world      # Deploy hello-world example
 #   ./deploy.sh                  # Interactive selection
+#
+# LLM Architectures:
+#   agg, agg_router, disagg, disagg_router, multinode-405b, multinode_agg_r1, mutinode_disagg_r1
 #---------------------------------------------------------------
 
 set -euo pipefail
@@ -102,61 +106,134 @@ if [ ! -d "${SCRIPT_DIR}/dynamo" ]; then
     exit 1
 fi
 
+# Set up DYNAMO_CLOUD endpoint (6a pattern)
+section "Configuring Dynamo Cloud Endpoint"
+if [ -z "${DYNAMO_CLOUD:-}" ]; then
+    warn "DYNAMO_CLOUD environment variable is not set."
+
+    # Try to get the Istio ingress gateway address
+    info "Attempting to find Istio ingress gateway address..."
+    ISTIO_INGRESS=$(kubectl get svc -n istio-system istio-ingressgateway -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+    if [ -z "$ISTIO_INGRESS" ]; then
+        ISTIO_INGRESS=$(kubectl get svc -n istio-system istio-ingressgateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+    fi
+
+    if [ ! -z "$ISTIO_INGRESS" ]; then
+        success "Found Istio ingress gateway address: $ISTIO_INGRESS"
+        info "Setting DYNAMO_CLOUD to http://$ISTIO_INGRESS"
+        export DYNAMO_CLOUD="http://$ISTIO_INGRESS"
+    else
+        warn "Could not determine Istio ingress gateway address."
+        info "Setting DYNAMO_CLOUD to http://localhost:8080 for local testing."
+        info "You will need to set up port-forwarding to access the API store."
+        export DYNAMO_CLOUD="http://localhost:8080"
+
+        # Set up port forwarding for the API store
+        info "Setting up port forwarding for Dynamo API store..."
+        pkill -f "kubectl port-forward.* 8080:80" || true
+
+        # Try different service names
+        if kubectl get svc -n "${NAMESPACE}" dynamo-cloud-dynamo-api-store >/dev/null 2>&1; then
+            kubectl port-forward svc/dynamo-cloud-dynamo-api-store 8080:80 -n ${NAMESPACE} &
+        elif kubectl get svc -n "${NAMESPACE}" dynamo-store >/dev/null 2>&1; then
+            kubectl port-forward svc/dynamo-store 8080:80 -n ${NAMESPACE} &
+        else
+            warn "Could not find Dynamo API store service for port forwarding"
+        fi
+
+        # Wait for port forwarding to establish
+        sleep 3
+    fi
+else
+    success "DYNAMO_CLOUD is already set to: ${DYNAMO_CLOUD}"
+fi
+
 #---------------------------------------------------------------
-# Example Selection
+# Example Selection (5a pattern)
 #---------------------------------------------------------------
 
 section "Example Selection"
 
-# Available examples
-EXAMPLES_DIR="${SCRIPT_DIR}/dynamo/examples"
-AVAILABLE_EXAMPLES=()
+# Select example type
+EXAMPLE_TYPE=""
+LLM_GRAPH_ARCH=""
+BUILD_TARGET=""
+DEPLOYMENT_NAME=""
 
-if [ -d "${EXAMPLES_DIR}" ]; then
-    # Find available examples
-    for example_dir in "${EXAMPLES_DIR}"/*; do
-        if [ -d "${example_dir}" ]; then
-            example_name=$(basename "${example_dir}")
-            AVAILABLE_EXAMPLES+=("${example_name}")
-        fi
-    done
-fi
-
-if [ ${#AVAILABLE_EXAMPLES[@]} -eq 0 ]; then
-    error "No examples found in ${EXAMPLES_DIR}"
-    exit 1
-fi
-
-# Select example
-EXAMPLE_NAME=""
 if [ $# -gt 0 ]; then
-    EXAMPLE_NAME="$1"
-    # Validate provided example
-    if [[ ! " ${AVAILABLE_EXAMPLES[@]} " =~ " ${EXAMPLE_NAME} " ]]; then
-        error "Example '${EXAMPLE_NAME}' not found"
-        info "Available examples: ${AVAILABLE_EXAMPLES[*]}"
-        exit 1
+    EXAMPLE_TYPE="$1"
+    if [ "$EXAMPLE_TYPE" = "llm" ] && [ $# -gt 1 ]; then
+        LLM_GRAPH_ARCH="$2"
     fi
 else
     # Interactive selection
-    info "Available examples:"
-    for i in "${!AVAILABLE_EXAMPLES[@]}"; do
-        echo "  $((i+1)). ${AVAILABLE_EXAMPLES[i]}"
+    info "Please select an example type:"
+    select EXAMPLE_TYPE_CHOICE in "hello-world" "llm"; do
+        case $EXAMPLE_TYPE_CHOICE in
+            hello-world ) EXAMPLE_TYPE="hello_world"; break;;
+            llm ) EXAMPLE_TYPE="llm"; break;;
+            * ) error "Invalid selection. Please choose 1 or 2.";;
+        esac
     done
-
-    echo -n "Select an example (1-${#AVAILABLE_EXAMPLES[@]}): "
-    read -r selection
-
-    if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le ${#AVAILABLE_EXAMPLES[@]} ]; then
-        EXAMPLE_NAME="${AVAILABLE_EXAMPLES[$((selection-1))]}"
-    else
-        error "Invalid selection"
-        exit 1
-    fi
 fi
 
-info "Selected example: ${EXAMPLE_NAME}"
-EXAMPLE_DIR="${EXAMPLES_DIR}/${EXAMPLE_NAME}"
+info "Selected example type: ${EXAMPLE_TYPE}"
+
+# Handle LLM graph architecture selection
+if [ "$EXAMPLE_TYPE" = "llm" ]; then
+    if [ -z "$LLM_GRAPH_ARCH" ]; then
+        info "Please select an LLM graph architecture:"
+        # Include all available configs from the dynamo repository
+        LLM_ARCH_CHOICES=("agg" "agg_router" "disagg" "disagg_router" "multinode-405b" "multinode_agg_r1" "mutinode_disagg_r1")
+        select LLM_ARCH_CHOICE in "${LLM_ARCH_CHOICES[@]}"; do
+            if [[ " ${LLM_ARCH_CHOICES[@]} " =~ " ${LLM_ARCH_CHOICE} " ]]; then
+                LLM_GRAPH_ARCH=$LLM_ARCH_CHOICE
+                break
+            else
+                error "Invalid selection. Please choose from the list."
+            fi
+        done
+    fi
+
+    # Validate LLM graph architecture
+    LLM_ARCH_CHOICES=("agg" "agg_router" "disagg" "disagg_router" "multinode-405b" "multinode_agg_r1" "mutinode_disagg_r1")
+    if [[ ! " ${LLM_ARCH_CHOICES[@]} " =~ " ${LLM_GRAPH_ARCH} " ]]; then
+        error "Invalid LLM graph architecture: ${LLM_GRAPH_ARCH}"
+        info "Available architectures: ${LLM_ARCH_CHOICES[*]}"
+        exit 1
+    fi
+
+    # Set build target and config file based on architecture
+    if [[ "$LLM_GRAPH_ARCH" == multinode* ]]; then
+        # Multinode configs don't have corresponding graph files, they use existing graphs
+        if [[ "$LLM_GRAPH_ARCH" == *"agg"* ]]; then
+            BUILD_TARGET="graphs.agg:Frontend"
+        else
+            BUILD_TARGET="graphs.disagg:Frontend"
+        fi
+    else
+        BUILD_TARGET="graphs.${LLM_GRAPH_ARCH}:Frontend"
+    fi
+
+    CONFIG_FILE="${SCRIPT_DIR}/dynamo/examples/llm/configs/${LLM_GRAPH_ARCH}.yaml"
+    DEPLOYMENT_NAME="llm-${LLM_GRAPH_ARCH}"
+    EXAMPLE_PATH="llm"
+    info "Selected LLM graph architecture: ${LLM_GRAPH_ARCH}"
+    info "Build target: ${BUILD_TARGET}"
+    info "Config file: ${CONFIG_FILE}"
+else
+    BUILD_TARGET="hello_world:Frontend"
+    CONFIG_FILE="${SCRIPT_DIR}/dynamo/examples/hello_world/config.yaml"
+    DEPLOYMENT_NAME="hello-world"
+    EXAMPLE_PATH="hello_world"
+fi
+
+# Sanitize deployment name: replace underscores with dashes
+DEPLOYMENT_NAME=$(echo "${DEPLOYMENT_NAME}" | tr '_' '-')
+info "Deployment name: ${DEPLOYMENT_NAME}"
+
+# Set example directory
+EXAMPLE_DIR="${SCRIPT_DIR}/dynamo/examples/${EXAMPLE_PATH}"
 
 #---------------------------------------------------------------
 # Phase 1: Build Inference Graph (5a equivalent)
@@ -171,52 +248,38 @@ info "Working in example directory: ${EXAMPLE_DIR}"
 # Set Docker platform for compatibility
 export DOCKER_DEFAULT_PLATFORM=linux/amd64
 
-# Check if there's a build script or service definition
-if [ -f "service.py" ]; then
-    info "Found service.py, building Dynamo service..."
-
-    # Check if DYNAMO_IMAGE is set, if not, suggest building base image
-    if [ -z "${DYNAMO_IMAGE:-}" ]; then
-        warn "DYNAMO_IMAGE environment variable not set"
-        info "You may need to build a base image first:"
-        info "  cd ${SCRIPT_DIR}"
-        info "  ./build-base-image.sh vllm --push"
-        info "  export DYNAMO_IMAGE=\${AWS_ACCOUNT_ID}.dkr.ecr.\${AWS_REGION}.amazonaws.com/dynamo-base:latest-vllm"
-        info ""
-        info "Continuing with default base image..."
-    fi
-
-    # Build the service and capture the tag
-    info "Building Dynamo service..."
-    BUILD_OUTPUT=$(dynamo build service.py 2>&1)
-    echo "${BUILD_OUTPUT}"
-
-    # Extract the service tag from build output
-    SERVICE_TAG=$(echo "${BUILD_OUTPUT}" | grep -o "dynamo-[a-zA-Z0-9-]*:[a-zA-Z0-9-]*" | head -1)
-
-    if [ -n "${SERVICE_TAG}" ]; then
-        success "Service built successfully with tag: ${SERVICE_TAG}"
-        export DYNAMO_SERVICE_TAG="${SERVICE_TAG}"
-    else
-        error "Failed to extract service tag from build output"
-        exit 1
-    fi
-
-elif [ -f "build.sh" ]; then
-    info "Found build.sh, executing custom build script..."
-    chmod +x build.sh
-    ./build.sh
-
-    if [ $? -eq 0 ]; then
-        success "Custom build script completed successfully"
-    else
-        error "Custom build script failed"
-        exit 1
-    fi
-
-else
-    warn "No service.py or build.sh found, skipping build phase"
+# Check if DYNAMO_IMAGE is set, if not, suggest building base image
+if [ -z "${DYNAMO_IMAGE:-}" ]; then
+    warn "DYNAMO_IMAGE environment variable not set"
+    info "You may need to build a base image first:"
+    info "  cd ${SCRIPT_DIR}"
+    info "  ./build-base-image.sh vllm --push"
+    info "  export DYNAMO_IMAGE=\${AWS_ACCOUNT_ID}.dkr.ecr.\${AWS_REGION}.amazonaws.com/dynamo-base:latest-vllm"
+    info ""
+    info "Continuing with default base image..."
 fi
+
+# Build the service using the target determined from selection
+info "Building ${BUILD_TARGET} service for Dynamo Cloud deployment..."
+BUILD_OUTPUT=$(DYNAMO_IMAGE="${DYNAMO_IMAGE}" dynamo build "${BUILD_TARGET}" 2>&1)
+echo "${BUILD_OUTPUT}"
+
+# Extract the tag from build output (5a pattern)
+info "Extracting tag from build output..."
+extract_dynamo_tag() {
+    local output="$1"
+    echo "$output" | grep "Successfully built" | awk '{ print $3 }' | sed 's/\.$//'
+}
+DYNAMO_TAG=$(extract_dynamo_tag "$BUILD_OUTPUT")
+
+if [ -z "$DYNAMO_TAG" ]; then
+    error "Failed to parse DYNAMO_TAG from build output. BUILD_OUTPUT was:"
+    error "$BUILD_OUTPUT"
+    exit 1
+fi
+
+success "Built service with tag: ${DYNAMO_TAG}"
+export DYNAMO_TAG
 
 success "Phase 1 completed: Inference graph built"
 
@@ -230,46 +293,28 @@ section "Phase 2: Deploying Inference Graph"
 info "Updating kubeconfig..."
 aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
 
-# Check if there's a deployment configuration
-DEPLOYMENT_FILE=""
-for file in "deployment.yaml" "deploy.yaml" "k8s.yaml" "kubernetes.yaml"; do
-    if [ -f "${file}" ]; then
-        DEPLOYMENT_FILE="${file}"
-        break
-    fi
-done
+# Deploy using Dynamo Cloud platform
+info "Using Dynamo Cloud platform for deployment..."
+info "Deploying service with tag: ${DYNAMO_TAG}"
 
-if [ -n "${DEPLOYMENT_FILE}" ]; then
-    info "Found deployment file: ${DEPLOYMENT_FILE}"
-
-    # Apply the deployment
-    info "Applying Kubernetes deployment..."
-    kubectl apply -f "${DEPLOYMENT_FILE}" -n ${NAMESPACE}
-
-    if [ $? -eq 0 ]; then
-        success "Deployment applied successfully"
-    else
-        error "Deployment failed"
-        exit 1
-    fi
-
-elif [ -n "${SERVICE_TAG:-}" ]; then
-    info "Using Dynamo Cloud platform for deployment..."
-
-    # Deploy using Dynamo CLI
-    info "Deploying service with tag: ${SERVICE_TAG}"
-    dynamo deploy "${SERVICE_TAG}" --namespace ${NAMESPACE}
-
-    if [ $? -eq 0 ]; then
-        success "Service deployed successfully via Dynamo Cloud"
-    else
-        error "Dynamo Cloud deployment failed"
-        exit 1
-    fi
-
+# Check if config file exists and deploy accordingly (6a pattern)
+if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+    info "Using configuration file: $CONFIG_FILE"
+    info "Running: dynamo deployment create \"${DYNAMO_TAG}\" --no-wait -n \"${DEPLOYMENT_NAME}\" -f \"${CONFIG_FILE}\" --endpoint \"${DYNAMO_CLOUD}\""
+    dynamo deployment create "${DYNAMO_TAG}" --no-wait -n "${DEPLOYMENT_NAME}" -f "${CONFIG_FILE}" --endpoint "${DYNAMO_CLOUD}"
 else
-    error "No deployment method found"
-    error "Expected either a deployment YAML file or a built service tag"
+    if [ -n "$CONFIG_FILE" ]; then
+        warn "Configuration file not found: $CONFIG_FILE"
+        warn "Attempting to deploy without configuration file, but this may fail."
+    fi
+    info "Running: dynamo deployment create \"${DYNAMO_TAG}\" --no-wait -n \"${DEPLOYMENT_NAME}\" --endpoint \"${DYNAMO_CLOUD}\""
+    dynamo deployment create "${DYNAMO_TAG}" --no-wait -n "${DEPLOYMENT_NAME}" --endpoint "${DYNAMO_CLOUD}"
+fi
+
+if [ $? -eq 0 ]; then
+    success "Service deployed successfully via Dynamo Cloud"
+else
+    error "Dynamo Cloud deployment failed"
     exit 1
 fi
 
@@ -278,7 +323,7 @@ info "Waiting for deployment to be ready..."
 sleep 10
 
 # Check deployment status
-kubectl get pods -n ${NAMESPACE} -l app=${EXAMPLE_NAME} 2>/dev/null || kubectl get pods -n ${NAMESPACE}
+kubectl get pods -n ${NAMESPACE} -l app=${DEPLOYMENT_NAME} 2>/dev/null || kubectl get pods -n ${NAMESPACE}
 
 success "Phase 2 completed: Inference graph deployed"
 
@@ -288,8 +333,8 @@ success "Phase 2 completed: Inference graph deployed"
 
 section "Phase 3: Service Exposure"
 
-# Try to find the service
-SERVICE_NAME=$(kubectl get services -n ${NAMESPACE} -o name | grep -i ${EXAMPLE_NAME} | head -1 | cut -d'/' -f2)
+# Try to find the service using deployment name
+SERVICE_NAME=$(kubectl get services -n ${NAMESPACE} -o name | grep -i ${DEPLOYMENT_NAME} | head -1 | cut -d'/' -f2)
 
 if [ -z "${SERVICE_NAME}" ]; then
     # Try to find any service in the namespace
@@ -321,11 +366,17 @@ success "Deployment completed successfully!"
 
 echo ""
 echo "Summary:"
-echo "  Example: ${EXAMPLE_NAME}"
+echo "  Example Type: ${EXAMPLE_TYPE}"
+if [ "$EXAMPLE_TYPE" = "llm" ]; then
+    echo "  LLM Architecture: ${LLM_GRAPH_ARCH}"
+fi
+echo "  Build Target: ${BUILD_TARGET}"
+echo "  Dynamo Tag: ${DYNAMO_TAG}"
+echo "  Deployment Name: ${DEPLOYMENT_NAME}"
 echo "  Namespace: ${NAMESPACE}"
 echo "  Service: ${SERVICE_NAME:-'Not found'}"
 echo ""
 echo "Next steps:"
 echo "1. Set up port forwarding to access the service"
-echo "2. Run the test script: ./test.sh ${EXAMPLE_NAME}"
+echo "2. Run the test script: ./test.sh ${DEPLOYMENT_NAME}"
 echo "3. Monitor the deployment: kubectl get pods -n ${NAMESPACE} -w"
