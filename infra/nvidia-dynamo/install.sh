@@ -222,25 +222,7 @@ section "Phase 3: Container Build and Push"
 info "Logging in to ECR..."
 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
 
-# Build and push base image
-info "Building and pushing Dynamo base image..."
-cd dynamo/container
-
-# Set environment variables for container build
-export REGISTRY=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-
-# Build base image using container/build.sh
-./build.sh --registry ${REGISTRY} --repository ${BASE_ECR_REPOSITORY} --tag ${IMAGE_TAG}
-
-if [ $? -eq 0 ]; then
-    success "Base image built and pushed successfully"
-else
-    error "Base image build failed"
-    exit 1
-fi
-
 # Build operator and api-store images using Earthly
-cd ..
 info "Building and pushing Dynamo operator and API store images..."
 
 # Check if earthly is available
@@ -249,15 +231,18 @@ if ! command_exists earthly; then
     exit 1
 fi
 
-# Build and push operator image
-info "Building operator image..."
-earthly --push +operator --DOCKER_SERVER=${DOCKER_SERVER} --OPERATOR_ECR_REPOSITORY=${OPERATOR_ECR_REPOSITORY} --IMAGE_TAG=${IMAGE_TAG}
+# Build and push all platform components using the main Earthfile
+info "Building and pushing operator and API store images..."
+earthly --push +all-docker --DOCKER_SERVER=${DOCKER_SERVER} --IMAGE_TAG=${IMAGE_TAG}
 
-# Build and push api-store image  
-info "Building API store image..."
-earthly --push +api-store --DOCKER_SERVER=${DOCKER_SERVER} --API_STORE_ECR_REPOSITORY=${API_STORE_ECR_REPOSITORY} --IMAGE_TAG=${IMAGE_TAG}
+if [ $? -eq 0 ]; then
+    success "Operator and API store images built and pushed successfully"
+else
+    error "Operator and API store build failed"
+    exit 1
+fi
 
-success "All container images built and pushed successfully"
+success "Platform container images built and pushed successfully"
 
 cd "${BLUEPRINT_DIR}"
 

@@ -175,6 +175,17 @@ export DOCKER_DEFAULT_PLATFORM=linux/amd64
 if [ -f "service.py" ]; then
     info "Found service.py, building Dynamo service..."
 
+    # Check if DYNAMO_IMAGE is set, if not, suggest building base image
+    if [ -z "${DYNAMO_IMAGE:-}" ]; then
+        warn "DYNAMO_IMAGE environment variable not set"
+        info "You may need to build a base image first:"
+        info "  cd ${SCRIPT_DIR}"
+        info "  ./build-base-image.sh vllm --push"
+        info "  export DYNAMO_IMAGE=\${AWS_ACCOUNT_ID}.dkr.ecr.\${AWS_REGION}.amazonaws.com/dynamo-base:latest-vllm"
+        info ""
+        info "Continuing with default base image..."
+    fi
+
     # Build the service and capture the tag
     info "Building Dynamo service..."
     BUILD_OUTPUT=$(dynamo build service.py 2>&1)

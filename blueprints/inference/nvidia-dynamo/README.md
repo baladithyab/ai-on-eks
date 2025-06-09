@@ -66,10 +66,31 @@ This script will:
 4. Deploy Dynamo platform to Kubernetes
 5. Set up blueprint scripts for inference deployment
 
-### 2. Deploy Inference Graphs
+### 2. Build Base Images (Optional)
+
+Different inference frameworks require different base images. You can build them as needed:
 
 ```bash
 # Navigate to the blueprint directory
+cd blueprints/inference/nvidia-dynamo
+
+# Build and push vLLM base image (most common)
+./build-base-image.sh vllm --push
+
+# Build TensorRT-LLM base image
+./build-base-image.sh tensorrtllm --push
+
+# Build SGLang base image
+./build-base-image.sh sglang --push
+
+# Build base image without inference framework
+./build-base-image.sh none --push
+```
+
+### 3. Deploy Inference Graphs
+
+```bash
+# Navigate to the blueprint directory (if not already there)
 cd blueprints/inference/nvidia-dynamo
 
 # Activate the virtual environment
@@ -82,7 +103,7 @@ source dynamo_venv/bin/activate
 ./deploy.sh llm
 ```
 
-### 3. Test Deployments
+### 4. Test Deployments
 
 ```bash
 # Test the deployed service
@@ -108,6 +129,7 @@ blueprints/inference/nvidia-dynamo/
 ├── README.md               # This file
 ├── deploy.sh              # Inference graph deployment script
 ├── test.sh                # Testing and validation script
+├── build-base-image.sh    # Base image builder for different frameworks
 ├── dynamo_env.sh          # Environment configuration (created by install.sh)
 ├── dynamo_venv/           # Python virtual environment (created by install.sh)
 └── dynamo/                # Dynamo repository clone (created by install.sh)
@@ -145,6 +167,29 @@ enable_ai_ml_observability_stack = true
 
 # Dynamo configuration
 dynamo_stack_version = "v0.3.0"
+```
+
+## Container Build Process
+
+The v2 implementation uses the correct build process from the Dynamo repository:
+
+### Platform Components (Built by install.sh)
+- **Operator and API Store**: Built using `earthly --push +all-docker` from the main Dynamo repository
+- **ECR Repositories**: Created via Terraform for storing all container images
+
+### Base Images (Built in blueprints folder)
+- **Framework-specific images**: Built using `./build-base-image.sh` in the blueprint directory
+- **Supports multiple frameworks**: vLLM, TensorRT-LLM, SGLang, or base-only
+- **Uses container/build.sh**: The official Dynamo container build script
+
+### Build Commands
+```bash
+# Platform components (done by install.sh)
+earthly --push +all-docker --DOCKER_SERVER=$DOCKER_SERVER --IMAGE_TAG=$IMAGE_TAG
+
+# Base images (done in blueprints folder)
+./build-base-image.sh vllm --push
+./build-base-image.sh tensorrtllm --push
 ```
 
 ## Available Examples
