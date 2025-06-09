@@ -57,3 +57,4 @@ node_modules
 gen-ai/inference/stable-diffusion-rayserve-gpu/locust/__pycache__/*
 website/package-lock.json
 website/package.json
+*venv*
