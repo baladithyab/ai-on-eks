@@ -6,6 +6,17 @@ This blueprint provides a complete implementation of NVIDIA Dynamo Cloud platfor
 
 NVIDIA Dynamo is a cloud-native platform for deploying and managing AI inference graphs at scale. This implementation follows the v2 approach, using direct script deployment instead of ArgoCD for simpler, more reliable operations.
 
+## Why V2?
+
+This v2 implementation improves upon the original ArgoCD-based approach by:
+
+- **Simplified Deployment**: Direct script execution instead of ArgoCD complexity
+- **Faster Debugging**: Immediate feedback and easier troubleshooting
+- **Proven Patterns**: Follows the exact dynamo-cloud reference implementation
+- **Better Integration**: Uses ai-on-eks infrastructure patterns (aibrix)
+- **Reduced Dependencies**: No ArgoCD setup required
+- **Clearer Workflow**: Step-by-step script execution with clear error messages
+
 ### Key Features
 
 - **Complete Infrastructure Setup**: VPC, EKS cluster, ECR repositories, and monitoring
@@ -46,10 +57,22 @@ Ensure you have the following tools installed:
 - kubectl
 - Docker
 - Terraform
-- Earthly
+- Earthly (for building platform components)
 - Python 3.8+
+- Git
 
-### 1. Deploy Infrastructure and Platform
+### 1. Clone the Repository
+
+```bash
+# Clone the ai-on-eks repository
+git clone https://github.com/awslabs/ai-on-eks.git
+cd ai-on-eks
+
+# Switch to the dynamo-v2 branch
+git checkout dynamo-v2
+```
+
+### 2. Deploy Infrastructure and Platform
 
 ```bash
 # Navigate to the infrastructure directory
@@ -60,13 +83,16 @@ cd infra/nvidia-dynamo
 ```
 
 This script will:
-1. Set up base infrastructure (VPC, EKS, ECR repositories)
-2. Create Python virtual environment and install Dynamo
-3. Clone Dynamo repository and build container images
-4. Deploy Dynamo platform to Kubernetes
-5. Set up blueprint scripts for inference deployment
+1. Set up base infrastructure (VPC, EKS, ECR repositories) using aibrix pattern
+2. Create Python virtual environment and install ai-dynamo[all] package
+3. Clone Dynamo repository (v0.3.0) for container builds and examples
+4. Build and push platform images (operator, api-store) using Earthly
+5. Deploy Dynamo platform to Kubernetes using official deploy script
+6. Create environment configuration for blueprint scripts
 
-### 2. Build Base Images (Optional)
+**Note**: The installation process takes 15-30 minutes depending on your internet connection and AWS region. The script will build and push several container images to ECR.
+
+### 3. Build Base Images (Optional)
 
 Different inference frameworks require different base images. You can build them as needed:
 
@@ -87,7 +113,7 @@ cd blueprints/inference/nvidia-dynamo
 ./build-base-image.sh none --push
 ```
 
-### 3. Deploy Inference Graphs
+### 4. Deploy Inference Graphs
 
 ```bash
 # Navigate to the blueprint directory (if not already there)
@@ -110,7 +136,7 @@ source dynamo_venv/bin/activate
 ./deploy.sh llm mutinode_disagg_r1         # Deploy LLM multinode disaggregated R1
 ```
 
-### 4. Test Deployments
+### 5. Test Deployments
 
 ```bash
 # Test the deployed service
@@ -162,19 +188,21 @@ export IMAGE_TAG="latest"
 Key settings in `terraform/blueprint.tfvars`:
 
 ```hcl
-name                = "dynamo-on-eks"
-enable_dynamo_stack = true
-enable_argocd       = true
+# Cluster configuration
+name = "dynamo-on-eks"
+region = "us-west-2"
 
-# Infrastructure components
+# Infrastructure components (inherited from base terraform)
 enable_aws_efs_csi_driver = true
 enable_kube_prometheus_stack = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
 
-# Dynamo configuration
-dynamo_stack_version = "v0.3.0"
+# Dynamo-specific ECR repositories
+# (automatically created by dynamo-ecr.tf)
 ```
+
+**Note**: The v2 implementation uses the base terraform modules from `infra/base/terraform` and adds Dynamo-specific resources via the files in `terraform/`. The ArgoCD approach has been replaced with direct script deployment.
 
 ## Container Build Process
 
@@ -269,22 +297,36 @@ kubectl port-forward -n kube-prometheus-stack svc/kube-prometheus-stack-grafana 
 
 ### Common Issues
 
-1. **Installation fails during image build**
-   - Ensure Docker is running and you have sufficient disk space
-   - Check ECR permissions and AWS credentials
+1. **Branch not found error**
+   ```bash
+   # If dynamo-v2 branch doesn't exist, you may need to fetch it
+   git fetch origin
+   git checkout dynamo-v2
 
-2. **Dynamo CLI not found**
+   # Or check available branches
+   git branch -a
+   ```
+
+2. **Installation fails during image build**
+   - Ensure Docker is running and you have sufficient disk space (at least 10GB free)
+   - Check ECR permissions and AWS credentials
+   - Verify Earthly is installed: `earthly --version`
+
+3. **Dynamo CLI not found**
    - Activate the virtual environment: `source dynamo_venv/bin/activate`
    - Verify installation: `pip list | grep dynamo`
+   - Check Python version: `python --version` (should be 3.8+)
 
-3. **Service deployment fails**
+4. **Service deployment fails**
    - Check cluster connectivity: `kubectl get nodes`
    - Verify namespace exists: `kubectl get ns dynamo-cloud`
    - Check pod logs: `kubectl logs -n dynamo-cloud -l app=dynamo-operator`
+   - Verify DYNAMO_CLOUD endpoint: `echo $DYNAMO_CLOUD`
 
-4. **Port forwarding issues**
+5. **Port forwarding issues**
    - Ensure service is running: `kubectl get svc -n dynamo-cloud`
    - Check for port conflicts on localhost
+   - Kill existing port forwards: `pkill -f "kubectl port-forward"`
 
 ### Debugging Commands
 
@@ -320,13 +362,29 @@ cd terraform/_LOCAL
 terraform destroy -auto-approve -var-file=../blueprint.tfvars
 ```
 
+## Branch Information
+
+This implementation is available on the `dynamo-v2` branch of the ai-on-eks repository:
+
+- **Repository**: [awslabs/ai-on-eks](https://github.com/awslabs/ai-on-eks)
+- **Branch**: `dynamo-v2`
+- **Approach**: Direct script deployment (v2) - simpler than ArgoCD approach
+- **Dynamo Version**: v0.3.0
+
 ## Support
 
 For issues and questions:
 
 1. Check the [NVIDIA Dynamo documentation](https://github.com/ai-dynamo/dynamo)
 2. Review the [ai-on-eks repository](https://github.com/awslabs/ai-on-eks)
-3. Open an issue in the appropriate repository
+3. Compare with the [dynamo-cloud reference implementation](https://github.com/ai-dynamo/dynamo-on-eks)
+4. Open an issue in the appropriate repository
+
+### Related Resources
+
+- **Dynamo Repository**: [ai-dynamo/dynamo](https://github.com/ai-dynamo/dynamo)
+- **Dynamo on EKS Reference**: [ai-dynamo/dynamo-on-eks](https://github.com/ai-dynamo/dynamo-on-eks)
+- **AI on EKS Main Repository**: [awslabs/ai-on-eks](https://github.com/awslabs/ai-on-eks)
 
 ## License
 
