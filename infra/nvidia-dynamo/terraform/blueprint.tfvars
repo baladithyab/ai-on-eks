@@ -86,7 +86,24 @@ dynamo_stack_version = "v0.3.0"
 # Hugging Face token for model downloads (replace with your token)
 # huggingface_token = "your-huggingface-token-here"
 
+# For large language models (70B+ parameters)
+karpenter_cpu_limits = 10000
+karpenter_memory_limits = 10000
 
+# -------------------------------------------------------------------------------------
+# Custom Karpenter Node Pools Configuration
+#
+# High-priority node pools with BuildKit support for Dynamo workloads
+# These have higher weights (200) than base addons (100) for priority scheduling
+# -------------------------------------------------------------------------------------
+
+# Enable custom Karpenter node pools with higher weights and BuildKit support
+enable_custom_karpenter_nodepools = true
+
+# AMI family selection: AL2023 (default, recommended) or Bottlerocket
+# AL2023: Better compatibility, user namespaces enabled by default
+# Bottlerocket: Enhanced security, requires custom user namespace configuration
+use_bottlerocket = false
 
 # -------------------------------------------------------------------------------------
 # Node Configuration (Optional Overrides)

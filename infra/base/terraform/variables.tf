@@ -273,3 +273,5 @@ variable "dynamo_stack_version" {
   type        = string
   default     = "v0.3.0"
 }
+
+

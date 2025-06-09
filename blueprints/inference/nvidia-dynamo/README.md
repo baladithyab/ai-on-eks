@@ -765,6 +765,70 @@ cd infra/nvidia-dynamo
 
 The cleanup script handles proper resource removal in the correct order and is safer than using terraform destroy directly.
 
+Troubleshooting 
+
+Common Issues 
+
+    Image Pull Errors: 
+
+    Symptom: Pods stuck in ImagePullBackOff or ErrImagePull state 
+
+    Cause: ECR access issues or misconfigured image pull secrets 
+
+    Solution: Verify ECR access and secrets with kubectl describe pod <pod-name> 
+
+    Fix: Recreate the image pull secret or check IAM permissions for the node role 
+
+    Service Communication Issues: 
+
+    Symptom: Services unable to communicate with each other 
+
+    Cause: Networking issues, misconfigured services, or Istio sidecar issues 
+
+    Solution: Check endpoints with kubectl get endpoints and service definitions 
+
+    Fix: Ensure services are correctly defined and Istio is properly configured 
+
+    Worker Initialization Failures: 
+
+    Symptom: Pods stuck in Init:CrashLoopBackOff or CrashLoopBackOff state 
+
+    Cause: Configuration errors, resource constraints, or compatibility issues 
+
+    Solution: Check logs with kubectl logs <pod-name> and events with kubectl describe pod <pod-name> 
+
+    Fix: Address specific errors in the logs, adjust resource requests/limits, or update configurations 
+
+    Deployment Stuck in Pending State: 
+
+    Symptom: Deployment shows as "pending" in dynamo deployment get output 
+
+    Cause: Image builder issues, resource constraints, or operator problems 
+
+    Solution: Check image builder logs and operator logs 
+
+    Fix: Address specific errors in the logs or adjust resource configurations 
+
+Specific Troubleshooting Steps 
+
+Dynamo Cloud Platform Issues 
+
+Check Dynamo operator logs 
+
+kubectl logs -f deployment/dynamo-operator -n dynamo-cloud 
+
+Check Dynamo API store logs 
+
+kubectl logs -f deployment/dynamo-api-store -n dynamo-cloud 
+
+Check image builder logs for a specific deployment 
+
+kubectl logs -f $(kubectl get pods -n dynamo-cloud -l app.kubernetes.io/component=image-builder,dynamo.nvidia.com/deployment-name= -o name) -n dynamo-cloud 
+
+Check events in the namespace 
+
+kubectl get events -n dynamo-cloud --sort-by='.lastTimestamp' 
+
 ## Repository Information
 
 This implementation is available in the ai-on-eks repository:

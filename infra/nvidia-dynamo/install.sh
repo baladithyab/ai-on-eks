@@ -108,6 +108,34 @@ cd "${SCRIPT_DIR}"
 success "Phase 1 completed: Infrastructure is ready"
 
 #---------------------------------------------------------------
+# Phase 1.5: AWS Service-Linked Role Setup for Karpenter
+#---------------------------------------------------------------
+
+section "Phase 1.5: AWS Service-Linked Role Setup"
+
+info "Checking and creating AWS Spot service-linked role for Karpenter..."
+
+# Check if the Spot service-linked role exists
+if aws iam get-role --role-name AWSServiceRoleForEC2Spot >/dev/null 2>&1; then
+    info "AWS Spot service-linked role already exists"
+else
+    info "Creating AWS Spot service-linked role..."
+    if aws iam create-service-linked-role --aws-service-name spot.amazonaws.com >/dev/null 2>&1; then
+        success "AWS Spot service-linked role created successfully"
+    else
+        warn "Failed to create Spot service-linked role. This may be due to insufficient permissions."
+        warn "Karpenter may have issues provisioning spot instances."
+        warn "You can create it manually later with: aws iam create-service-linked-role --aws-service-name spot.amazonaws.com"
+    fi
+fi
+
+# Wait a moment for the role to propagate
+info "Waiting for service-linked role to propagate..."
+sleep 5
+
+success "Phase 1.5 completed: AWS service-linked roles are ready"
+
+#---------------------------------------------------------------
 # Phase 2: Dynamo Platform Setup
 #---------------------------------------------------------------
 
@@ -297,6 +325,45 @@ cd "${BLUEPRINT_DIR}"
 success "Phase 4 completed: Dynamo platform is deployed"
 
 #---------------------------------------------------------------
+# Phase 4.5: Karpenter Verification
+#---------------------------------------------------------------
+
+section "Phase 4.5: Karpenter Verification"
+
+info "Verifying Karpenter NodePools are ready..."
+
+# Wait for NodePools to be created
+info "Waiting for Karpenter NodePools to be ready..."
+for i in {1..30}; do
+    NODEPOOL_COUNT=$(kubectl get nodepool --no-headers 2>/dev/null | wc -l)
+    if [ "$NODEPOOL_COUNT" -ge 5 ]; then
+        success "Found $NODEPOOL_COUNT NodePools - Karpenter is ready"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        warn "NodePools not ready after 5 minutes. Karpenter may need manual intervention."
+        warn "Check with: kubectl get nodepool -o wide"
+    else
+        info "Waiting for NodePools... ($i/30)"
+        sleep 10
+    fi
+done
+
+# Display NodePool status
+info "Current NodePool status:"
+kubectl get nodepool -o wide 2>/dev/null || warn "Unable to get NodePool status"
+
+# Check for any failed NodeClaims
+FAILED_NODECLAIMS=$(kubectl get nodeclaims --no-headers 2>/dev/null | grep -v "True\|Unknown" | wc -l)
+if [ "$FAILED_NODECLAIMS" -gt 0 ]; then
+    warn "Found $FAILED_NODECLAIMS failed NodeClaims. Check with: kubectl get nodeclaims -o wide"
+else
+    info "No failed NodeClaims detected"
+fi
+
+success "Phase 4.5 completed: Karpenter verification complete"
+
+#---------------------------------------------------------------
 # Phase 5: Blueprint Scripts Setup
 #---------------------------------------------------------------
 
@@ -322,4 +389,9 @@ echo "================================================"
 echo "Environment file: ${ENV_FILE}"
 echo "Virtual environment: ${BLUEPRINT_DIR}/dynamo_venv"
 echo "Dynamo repository: ${BLUEPRINT_DIR}/dynamo"
+echo "================================================"
+echo "Karpenter Status:"
+echo "- Check NodePools: kubectl get nodepool -o wide"
+echo "- Check NodeClaims: kubectl get nodeclaims -o wide"
+echo "- Check nodes: kubectl get nodes"
 echo "================================================"
