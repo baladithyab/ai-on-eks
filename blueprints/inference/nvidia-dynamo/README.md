@@ -364,78 +364,150 @@ Select the architecture that best fits your model:
 - **agg_router**: Load balancing across multiple nodes
 - **disagg_router**: Advanced load balancing with separate prefill/decode
 
-#### 2. Modify the Configuration File
+#### 2. Edit the Disaggregated Router Configuration
+
+For a 70B model like DeepSeek-R1, the `disagg_router` architecture is ideal as it provides load balancing and can handle the large model efficiently:
 
 ```bash
 # Navigate to the blueprint directory
 cd blueprints/inference/nvidia-dynamo
 
-# Copy an existing config as a template
-cp dynamo/examples/llm/configs/agg.yaml dynamo/examples/llm/configs/my-custom-model.yaml
-
-# Edit the configuration file
-nano dynamo/examples/llm/configs/my-custom-model.yaml
+# Edit the existing disagg_router config for DeepSeek-R1 70B
+nano dynamo/examples/llm/configs/disagg_router.yaml
 ```
 
-#### 3. Update the Model ID
+#### 3. Update the Model Configuration
 
-In the configuration file, find and update the `model_id` field:
+In the `disagg_router.yaml` file, update the `model` field in the `Common` section:
 
 ```yaml
-# Example: Change from default model to your custom model
+# Change these key fields in disagg_router.yaml:
+
+Common:
+  model: deepseek-ai/DeepSeek-R1-Distill-Llama-70B  # Change from 8B to 70B
+  block-size: 64
+  max-model-len: 32768  # Increase context length for 70B model
+  router: kv
+  kv-transfer-config: '{"kv_connector":"DynamoNixlConnector"}'
+
 Frontend:
-  model_id: "microsoft/DialoGPT-medium"  # Replace with your model
-  # OR for a local model path:
-  # model_id: "/path/to/your/model"
-
-  # Other configuration options you can modify:
-  max_tokens: 512
-  temperature: 0.7
-  top_p: 0.9
+  served_model_name: deepseek-ai/DeepSeek-R1-Distill-Llama-70B  # Must match model above
+  endpoint: dynamo.Processor.chat/completions
   port: 8000
+
+# Increase GPU resources for 70B model:
+VllmWorker:
+  max-num-batched-tokens: 32768  # Match max-model-len
+  remote-prefill: true
+  conditional-disagg: true
+  max-local-prefill-length: 10
+  max-prefill-queue-size: 2
+  tensor-parallel-size: 4  # Use 4 GPUs for 70B model
+  enable-prefix-caching: true
+  ServiceArgs:
+    workers: 1
+    resources:
+      gpu: '4'  # Allocate 4 GPUs
+  common-configs: [model, block-size, max-model-len, router, kv-transfer-config]
+
+PrefillWorker:
+  max-num-batched-tokens: 32768  # Match max-model-len
+  ServiceArgs:
+    workers: 1
+    resources:
+      gpu: '2'  # Allocate 2 GPUs for prefill
+  common-configs: [model, block-size, max-model-len, kv-transfer-config]
 ```
 
-#### 4. Common Model Examples
+#### 4. Key Changes for DeepSeek-R1 70B
 
-Here are some popular models you can use:
+When editing `disagg_router.yaml` for the 70B model, make these essential changes:
+
+**Model Configuration**:
+- Change `model` from `DeepSeek-R1-Distill-Llama-8B` to `DeepSeek-R1-Distill-Llama-70B`
+- Update `served_model_name` to match the new model
+- Increase `max-model-len` from `16384` to `32768` for longer contexts
+
+**Resource Allocation**:
+- Set `tensor-parallel-size: 4` in VllmWorker (split across 4 GPUs)
+- Increase GPU allocation: `gpu: '4'` for VllmWorker, `gpu: '2'` for PrefillWorker
+- Update `max-num-batched-tokens` to match `max-model-len`
+
+**Why Disaggregated Router?**:
+- **Load Balancing**: Distributes requests across multiple workers
+- **Efficient Resource Use**: Separates prefill and decode operations
+- **Scalability**: Can handle high throughput for large models
+- **KV Cache Transfer**: Optimizes memory usage between prefill and decode
+
+#### 5. Common Model Examples
+
+Here are some popular models you can use (update the `model` field in `Common` section):
 
 ```yaml
+# Small models (< 7B) - use agg architecture
+Common:
+  model: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+  # OR
+  model: deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+
+# Medium models (7B-13B) - use agg or disagg architecture
+Common:
+  model: meta-llama/Llama-3.2-7B-Instruct
+  # OR
+  model: mistralai/Mistral-7B-Instruct-v0.3
+
+# Large models (13B+) - use disagg or multinode architecture
+Common:
+  model: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+  # OR
+  model: meta-llama/Llama-3.1-70B-Instruct
+
 # Code generation models
-model_id: "Salesforce/codegen-350M-mono"
-model_id: "microsoft/CodeGPT-small-py"
+Common:
+  model: deepseek-ai/deepseek-coder-33b-instruct
+  # OR
+  model: Qwen/CodeQwen1.5-7B-Chat
 
-# Chat models
-model_id: "microsoft/DialoGPT-medium"
-model_id: "facebook/blenderbot-400M-distill"
-
-# Instruction-following models
-model_id: "google/flan-t5-base"
-model_id: "allenai/tk-instruct-base-def-pos"
-
-# Larger models (use disagg architecture)
-model_id: "meta-llama/Llama-2-7b-chat-hf"
-model_id: "mistralai/Mistral-7B-Instruct-v0.1"
+# Remember to also update the served_model_name in Frontend section:
+Frontend:
+  served_model_name: deepseek-ai/DeepSeek-R1-Distill-Llama-70B  # Must match model above
 ```
 
-#### 5. Deploy Your Custom Model
+#### 5. Deploy DeepSeek-R1 70B with Disaggregated Router
 
 ```bash
-# Create a custom deployment using your modified config
-# First, you'll need to modify the deploy.sh script to support custom configs
-# Or manually deploy using the dynamo CLI:
-
+# Navigate to the blueprint directory and activate environment
+cd blueprints/inference/nvidia-dynamo
 source dynamo_venv/bin/activate
 
-# Build the inference graph (use existing graph architecture)
-cd dynamo/examples/llm
-dynamo build graphs.agg:Frontend
+# Use the deploy script with disagg_router architecture
+./deploy.sh llm disagg_router
 
-# Deploy with your custom config
-dynamo deployment create "frontend:your-tag-here" \
+# This will:
+# 1. Build graphs.disagg_router:Frontend
+# 2. Use the modified configs/disagg_router.yaml
+# 3. Deploy with the DeepSeek-R1 70B model
+
+# Alternatively, deploy manually:
+cd dynamo/examples/llm
+
+# Build the disaggregated router graph
+BUILD_OUTPUT=$(dynamo build graphs.disagg_router:Frontend)
+echo "$BUILD_OUTPUT"
+
+# Extract the tag from build output
+DYNAMO_TAG=$(echo "$BUILD_OUTPUT" | grep "Successfully built" | awk '{ print $3 }' | sed 's/\.$//')
+echo "Built with tag: $DYNAMO_TAG"
+
+# Deploy with the modified disagg_router config
+dynamo deployment create "$DYNAMO_TAG" \
   --no-wait \
-  -n "my-custom-model" \
-  -f "configs/my-custom-model.yaml" \
+  -n "llm-disagg-router" \
+  -f "configs/disagg_router.yaml" \
   --endpoint "${DYNAMO_CLOUD}"
+
+# Check deployment status
+kubectl get pods -n dynamo-cloud -l app=llm-disagg-router
 ```
 
 #### 6. Advanced Configuration Options
@@ -443,26 +515,44 @@ dynamo deployment create "frontend:your-tag-here" \
 You can also modify other aspects of the deployment:
 
 ```yaml
+Common:
+  model: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+  block-size: 64
+  max-model-len: 32768  # Increase for longer contexts
+
 Frontend:
-  model_id: "your-model-id"
-
-  # Performance tuning
-  max_tokens: 1024
-  batch_size: 8
-  max_batch_size: 32
-
-  # Generation parameters
-  temperature: 0.8
-  top_p: 0.95
-  top_k: 50
-
-  # Resource allocation
-  gpu_memory_fraction: 0.9
-  tensor_parallel_size: 1
-
-  # Networking
+  served_model_name: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+  endpoint: dynamo.Processor.chat/completions
   port: 8000
-  host: "0.0.0.0"
+
+Processor:
+  router: round-robin
+  router-num-threads: 8  # Increase for better throughput
+
+VllmWorker:
+  enforce-eager: true
+  max-num-batched-tokens: 32768  # Match max-model-len
+  enable-prefix-caching: true
+  tensor-parallel-size: 4  # For multi-GPU setups
+  ServiceArgs:
+    workers: 1
+    resources:
+      gpu: '4'  # Number of GPUs needed
+      memory: '200Gi'  # Memory allocation
+  common-configs: [model, block-size, max-model-len]
+
+# For disaggregated architecture, you can also configure:
+Prefill:
+  ServiceArgs:
+    workers: 2
+    resources:
+      gpu: '2'
+
+Decode:
+  ServiceArgs:
+    workers: 2
+    resources:
+      gpu: '2'
 ```
 
 ### Model Requirements
@@ -474,51 +564,76 @@ Frontend:
 - Custom models following Hugging Face structure
 
 **Model Size Guidelines**:
-- **< 1B parameters**: Use `agg` architecture, single GPU
-- **1B - 7B parameters**: Use `agg` or `disagg` architecture
-- **7B - 13B parameters**: Use `disagg` architecture, consider multiple GPUs
-- **13B+ parameters**: Use `disagg_router` or multinode architectures
+- **< 1B parameters**: Use `agg` architecture, single GPU (A10G/T4)
+- **1B - 7B parameters**: Use `agg` architecture, single GPU (A10G/V100)
+- **7B - 13B parameters**: Use `agg` or `disagg` architecture, 1-2 GPUs (A100)
+- **13B - 70B parameters**: Use `disagg` or `disagg_router` architecture, 2-4 GPUs (A100)
+- **70B+ parameters**: Use `multinode` architectures, 4+ GPUs across multiple nodes
 
 **GPU Memory Requirements**:
-- Estimate ~2GB per billion parameters for inference
-- Add extra memory for KV cache and batching
-- Use tensor parallelism for models that don't fit on single GPU
+- **DeepSeek-R1 70B**: Requires ~140GB GPU memory (4x A100 40GB or 2x A100 80GB)
+- **General estimate**: ~2GB per billion parameters for FP16 inference
+- **Add overhead**: +20-50% for KV cache, batching, and framework overhead
+- **Tensor parallelism**: Split model across multiple GPUs when needed
 
-### Testing Custom Models
+### Testing DeepSeek-R1 70B Deployment
 
 ```bash
-# Test your custom model deployment
-./test.sh my-custom-model
+# Test the disagg_router deployment
+./test.sh llm-disagg-router
 
 # Or test manually with curl
-kubectl port-forward service/my-custom-model-frontend 8000:8000 -n dynamo-cloud &
+kubectl port-forward service/llm-disagg-router-frontend 8000:8000 -n dynamo-cloud &
 
-# Test with a sample request
+# Test with a sample request for DeepSeek-R1 70B
 curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "your-model-id",
-    "messages": [{"role": "user", "content": "Hello, how are you?"}],
-    "max_tokens": 50
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+    "messages": [
+      {"role": "user", "content": "Explain quantum computing in simple terms"}
+    ],
+    "max_tokens": 200,
+    "temperature": 0.7
   }'
+
+# Check deployment status and resource usage
+kubectl get pods -n dynamo-cloud -l app=llm-disagg-router
+kubectl top pods -n dynamo-cloud -l app=llm-disagg-router
+kubectl logs -n dynamo-cloud -l app=llm-disagg-router --tail=50
+
+# Monitor GPU usage across pods
+kubectl exec -it $(kubectl get pods -n dynamo-cloud -l app=llm-disagg-router -o jsonpath='{.items[0].metadata.name}') -n dynamo-cloud -- nvidia-smi
 ```
 
 ### Troubleshooting Custom Models
 
 **Model Loading Issues**:
-- Verify the model ID is correct and accessible
-- Check if the model requires authentication (use Hugging Face tokens)
-- Ensure sufficient GPU memory for the model size
+- Verify the model ID is correct and accessible on Hugging Face
+- **For DeepSeek models**: Some may require Hugging Face authentication:
+  ```bash
+  # Set up Hugging Face token in your environment
+  export HUGGING_FACE_HUB_TOKEN="your_token_here"
+
+  # Or configure in the deployment
+  kubectl create secret generic hf-token \
+    --from-literal=token="your_token_here" \
+    -n dynamo-cloud
+  ```
+- Ensure sufficient GPU memory for the model size (70B needs ~140GB)
+- Check if model files are downloading correctly
 
 **Performance Issues**:
-- Adjust `batch_size` and `max_batch_size` for your workload
-- Consider using `disagg` architecture for better throughput
-- Monitor GPU utilization with `nvidia-smi`
+- For 70B models, ensure you have adequate GPU resources (4x A100 40GB minimum)
+- Adjust `tensor-parallel-size` to match your GPU count
+- Monitor GPU utilization: `kubectl exec -it <pod-name> -n dynamo-cloud -- nvidia-smi`
+- Consider using `disagg` architecture for better throughput on large models
 
 **Configuration Errors**:
-- Validate YAML syntax in your config file
-- Check that all required fields are present
-- Review Dynamo operator logs for detailed error messages
+- Validate YAML syntax in your config file: `yamllint configs/my-custom-model.yaml`
+- Ensure `model` and `served_model_name` fields match exactly
+- Check that GPU resource requests don't exceed node capacity
+- Review Dynamo operator logs: `kubectl logs -n dynamo-cloud -l app=dynamo-operator`
 
 ## Monitoring and Observability
 
