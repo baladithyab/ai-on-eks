@@ -87,14 +87,14 @@ dynamo_stack_version = "v0.3.0"
 # huggingface_token = "your-huggingface-token-here"
 
 # For large language models (70B+ parameters)
-karpenter_cpu_limits = 10000
+karpenter_cpu_limits    = 10000
 karpenter_memory_limits = 10000
 
 # -------------------------------------------------------------------------------------
 # Custom Karpenter Node Pools Configuration
 #
 # High-priority node pools with BuildKit support for Dynamo workloads
-# These have higher weights (200) than base addons (100) for priority scheduling
+# These have the same weight (100) as base addons for equal priority scheduling
 # -------------------------------------------------------------------------------------
 
 # Enable custom Karpenter node pools with higher weights and BuildKit support

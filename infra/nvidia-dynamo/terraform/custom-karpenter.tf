@@ -23,7 +23,7 @@ resource "kubectl_manifest" "dynamo_c7i_cpu_nodeclass" {
     }
     spec = merge({
       amiFamily = local.ami_family
-      role = data.aws_iam_role.karpenter_node_role.name
+      role      = data.aws_iam_role.karpenter_node_role.name
       subnetSelectorTerms = [
         {
           tags = {
@@ -34,7 +34,7 @@ resource "kubectl_manifest" "dynamo_c7i_cpu_nodeclass" {
       securityGroupSelectorTerms = [
         {
           tags = {
-            "karpenter.sh/discovery" = module.eks.cluster_name
+            "Name" = "${module.eks.cluster_name}-node"
           }
         }
       ]
@@ -42,7 +42,7 @@ resource "kubectl_manifest" "dynamo_c7i_cpu_nodeclass" {
         {
           deviceName = "/dev/xvda"
           ebs = {
-            volumeSize = 100
+            volumeSize = "100Gi"
             volumeType = "gp3"
             encrypted  = true
           }
@@ -50,37 +50,28 @@ resource "kubectl_manifest" "dynamo_c7i_cpu_nodeclass" {
         {
           deviceName = "/dev/xvdb"
           ebs = {
-            volumeSize = 300
+            volumeSize = "300Gi"
             volumeType = "gp3"
             encrypted  = true
           }
         }
-      ] : [
+        ] : [
         {
           deviceName = "/dev/xvda"
           ebs = {
-            volumeSize = 100
+            volumeSize = "100Gi"
             volumeType = "gp3"
             encrypted  = true
           }
         }
       ]
       tags = merge(local.custom_karpenter_tags, {
-        Name = "dynamo-c7i-cpu-karpenter"
+        Name        = "dynamo-c7i-cpu-karpenter"
         Environment = "dynamo"
-        AMIFamily = local.ami_family
+        AMIFamily   = local.ami_family
       })
-    },
-    var.use_bottlerocket ? {
-      amiSelectorTerms = [
-        {
-          alias = "bottlerocket@latest"
-        }
-      ]
-      userData = local.bottlerocket_user_data
-    } : {
-      userData = local.al2023_user_data
-    })
+      },
+      local.ami_config)
   })
 
   depends_on = [module.eks_blueprints_addons]
@@ -100,14 +91,15 @@ resource "kubectl_manifest" "dynamo_c7i_cpu_nodepool" {
       template = {
         metadata = {
           labels = {
-            "dynamo.ai/node-type" = "c7i-cpu"
+            "dynamo.ai/node-type"           = "c7i-cpu"
             "dynamo.ai/buildkit-compatible" = "true"
-            "type" = "karpenter"
-            "instanceType" = "dynamo-c7i-cpu"
+            "type"                          = "karpenter"
+            "instanceType"                  = "dynamo-c7i-cpu"
           }
         }
         spec = {
           nodeClassRef = {
+            group      = "karpenter.k8s.aws"
             apiVersion = "karpenter.k8s.aws/v1"
             kind       = "EC2NodeClass"
             name       = "dynamo-c7i-cpu-nodeclass"
@@ -145,8 +137,8 @@ resource "kubectl_manifest" "dynamo_c7i_cpu_nodepool" {
         consolidateAfter    = "300s"
         expireAfter         = "720h"
       }
-      # Higher weight than base addons (which use 100)
-      weight = 200
+      # Same weight as base addons (maximum allowed is 100)
+      weight = 100
     }
   })
 
@@ -167,7 +159,7 @@ resource "kubectl_manifest" "dynamo_g6_gpu_nodeclass" {
     }
     spec = merge({
       amiFamily = local.ami_family
-      role = data.aws_iam_role.karpenter_node_role.name
+      role      = data.aws_iam_role.karpenter_node_role.name
       subnetSelectorTerms = [
         {
           tags = {
@@ -178,7 +170,7 @@ resource "kubectl_manifest" "dynamo_g6_gpu_nodeclass" {
       securityGroupSelectorTerms = [
         {
           tags = {
-            "karpenter.sh/discovery" = module.eks.cluster_name
+            "Name" = "${module.eks.cluster_name}-node"
           }
         }
       ]
@@ -187,7 +179,7 @@ resource "kubectl_manifest" "dynamo_g6_gpu_nodeclass" {
         {
           deviceName = "/dev/xvda"
           ebs = {
-            volumeSize = 100
+            volumeSize = "100Gi"
             volumeType = "gp3"
             encrypted  = true
           }
@@ -195,37 +187,28 @@ resource "kubectl_manifest" "dynamo_g6_gpu_nodeclass" {
         {
           deviceName = "/dev/xvdb"
           ebs = {
-            volumeSize = 500
+            volumeSize = "500Gi"
             volumeType = "gp3"
             encrypted  = true
           }
         }
-      ] : [
+        ] : [
         {
           deviceName = "/dev/xvda"
           ebs = {
-            volumeSize = 100
+            volumeSize = "100Gi"
             volumeType = "gp3"
             encrypted  = true
           }
         }
       ]
       tags = merge(local.custom_karpenter_tags, {
-        Name = "dynamo-g6-gpu-karpenter"
+        Name        = "dynamo-g6-gpu-karpenter"
         Environment = "dynamo"
-        AMIFamily = local.ami_family
+        AMIFamily   = local.ami_family
       })
-    },
-    var.use_bottlerocket ? {
-      amiSelectorTerms = [
-        {
-          alias = "bottlerocket@latest"
-        }
-      ]
-      userData = local.bottlerocket_user_data
-    } : {
-      userData = local.al2023_user_data
-    })
+      },
+      local.ami_config)
   })
 
   depends_on = [module.eks_blueprints_addons]
@@ -244,16 +227,17 @@ resource "kubectl_manifest" "dynamo_g6_gpu_nodepool" {
       template = {
         metadata = {
           labels = {
-            "dynamo.ai/node-type" = "g6-gpu"
+            "dynamo.ai/node-type"           = "g6-gpu"
             "dynamo.ai/buildkit-compatible" = "true"
-            "type" = "karpenter"
-            "instanceType" = "dynamo-g6-gpu"
-            "accelerator" = "nvidia"
-            "gpuType" = "l4"
+            "type"                          = "karpenter"
+            "instanceType"                  = "dynamo-g6-gpu"
+            "accelerator"                   = "nvidia"
+            "gpuType"                       = "l4"
           }
         }
         spec = {
           nodeClassRef = {
+            group      = "karpenter.k8s.aws"
             apiVersion = "karpenter.k8s.aws/v1"
             kind       = "EC2NodeClass"
             name       = "dynamo-g6-gpu-nodeclass"
@@ -298,8 +282,8 @@ resource "kubectl_manifest" "dynamo_g6_gpu_nodepool" {
         consolidateAfter    = "300s"
         expireAfter         = "720h"
       }
-      # Higher weight than base addons (which use 100)
-      weight = 200
+      # Same weight as base addons (maximum allowed is 100)
+      weight = 100
     }
   })
 

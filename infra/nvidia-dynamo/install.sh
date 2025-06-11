@@ -78,6 +78,7 @@ cp -r ../base/terraform/* ./terraform/_LOCAL
 # Copy dynamo-specific terraform files
 info "Adding Dynamo-specific terraform configurations..."
 cp ./terraform/dynamo-*.tf ./terraform/_LOCAL/
+cp ./terraform/custom-*.tf ./terraform/_LOCAL/
 cp ./terraform/blueprint.tfvars ./terraform/_LOCAL/
 
 # Apply terraform

@@ -49,27 +49,42 @@ locals {
   ami_family = var.use_bottlerocket ? "Bottlerocket" : "AL2023"
 
   # User data for Bottlerocket with user namespace configuration
-  bottlerocket_user_data = base64encode(<<-EOT
+  bottlerocket_user_data = <<-EOT
     [settings.kernel.sysctl]
     "user.max_user_namespaces" = "16384"
 
     [settings]
     motd = "Dynamo Custom Node - User Namespaces Enabled for BuildKit"
   EOT
-  )
 
   # User data for AL2023 (user namespaces enabled by default)
-  al2023_user_data = base64encode(<<-EOT
+  al2023_user_data = <<-EOT
     #!/bin/bash
     # AL2023 user data - user namespaces enabled by default
     echo "Dynamo AL2023 Custom Node - Ready for BuildKit"
   EOT
-  )
 
   # Common tags for all custom Karpenter resources
   custom_karpenter_tags = {
     "dynamo.ai/managed-by" = "terraform"
     "dynamo.ai/component"  = "karpenter"
     "dynamo.ai/buildkit"   = "enabled"
+  }
+
+  # Conditional AMI and user data configuration
+  ami_config = var.use_bottlerocket ? {
+    amiSelectorTerms = [
+      {
+        alias = "bottlerocket@latest"
+      }
+    ]
+    userData = base64encode(local.bottlerocket_user_data)
+  } : {
+    amiSelectorTerms = [
+      {
+        alias = "al2023@latest"
+      }
+    ]
+    userData = base64encode(local.al2023_user_data)
   }
 }
