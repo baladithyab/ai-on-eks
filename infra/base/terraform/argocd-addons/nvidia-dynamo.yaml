@@ -1,0 +1,111 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dynamo-crds
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts
+    chart: dynamo-crds
+    targetRevision: ${dynamo_version}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - ServerSideApply=true
+      - Replace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dynamo-platform
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts
+    chart: dynamo-platform
+    targetRevision: ${dynamo_version}
+    helm:
+      values: |
+        # NVIDIA Dynamo Platform Configuration for ai-on-eks
+        dynamo-operator:
+          enabled: true
+          controllerManager:
+            manager:
+              image:
+                repository: nvcr.io/nvidia/ai-dynamo/dynamo-operator
+                tag: ${dynamo_version}
+          # Use public NGC images - no authentication required for most Dynamo components
+          imagePullSecrets: []
+        
+        # NATS configuration
+        nats:
+          enabled: true
+          jetstream:
+            enabled: true
+            memoryStore:
+              enabled: true
+              maxSize: 1Gi
+        
+        # etcd configuration
+        etcd:
+          enabled: true
+          auth:
+            rbac:
+              create: false
+            token:
+              enabled: false
+          persistence:
+            enabled: true
+            size: 8Gi
+            storageClass: gp2
+        
+        # Global configuration for EKS
+        global:
+          storageClass: gp2
+        
+        # Enable monitoring integration
+        serviceMonitor:
+          enabled: true
+          namespace: monitoring
+          labels:
+            release: prometheus-stack
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dynamo-cloud
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true
+  ignoreDifferences:
+    # Ignore differences in webhook configurations during upgrades
+    - group: admissionregistration.k8s.io
+      kind: ValidatingAdmissionWebhook
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle
+    - group: admissionregistration.k8s.io
+      kind: MutatingAdmissionWebhook
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle

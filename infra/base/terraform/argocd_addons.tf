@@ -98,3 +98,13 @@ resource "kubectl_manifest" "slurm_operator_yaml" {
     kubectl_manifest.cert_manager_yaml
   ]
 }
+
+# NVIDIA Dynamo Platform
+resource "kubectl_manifest" "nvidia_dynamo_yaml" {
+  count     = var.enable_dynamo_stack ? 1 : 0
+  yaml_body = templatefile("${path.module}/argocd-addons/nvidia-dynamo.yaml", { dynamo_version = var.dynamo_stack_version })
+
+  depends_on = [
+    module.eks_blueprints_addons
+  ]
+}

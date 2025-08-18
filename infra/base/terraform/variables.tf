@@ -239,6 +239,20 @@ variable "aibrix_stack_version" {
   default     = "v0.2.1"
 }
 
+# Flag to enable NVIDIA Dynamo stack
+variable "enable_dynamo_stack" {
+  description = "Enable NVIDIA Dynamo addon"
+  type        = bool
+  default     = false
+}
+
+# NVIDIA Dynamo version
+variable "dynamo_stack_version" {
+  description = "NVIDIA Dynamo default version"
+  type        = string
+  default     = "v0.4.0"
+}
+
 # Enable NVIDIA DRA Driver addon
 variable "enable_nvidia_dra_driver" {
   description = "Enable NVIDIA DRA Driver addon"

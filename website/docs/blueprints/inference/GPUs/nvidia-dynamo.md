@@ -322,17 +322,24 @@ VllmWorker:
       gpu: '4'
 ```
 
-### Karpenter Node Pools
+### Karpenter Node Pool Optimization
 
-The deployment can optionally use custom Karpenter node pools optimized for NVIDIA Dynamo:
+The deployment automatically optimizes Karpenter node pools for NVIDIA Dynamo workloads using **kubectl patches**:
 
-- **C7i CPU Pools**: For general compute and BuildKit (newer than base M5 instances)
-- **G6 GPU Pools**: For inference workloads with NVIDIA L4 GPUs
-- **Higher Priority**: Weight 100 vs base addons weight 50 for priority scheduling
-- **BuildKit Support**: User namespace configuration for container builds
-- **EFA Support**: Low-latency networking for multi-node setups
+**New Dynamo-Specific Pool:**
+- **dynamo-c7i-cpu-nodepool**: Latest C7i instances with BuildKit support (weight: 100)
 
-**Note**: Custom node pools are disabled by default. The base infrastructure provides existing Karpenter node pools (G6 GPU, G5 GPU, M5 CPU) that work well for most Dynamo workloads. Enable custom pools only if you need BuildKit support or higher scheduling priority.
+**Existing Pool Optimizations:**
+- **g6-gpu-karpenter**: Patched with Dynamo labels and increased weight to 100
+- **g5-gpu-karpenter & x86-cpu-karpenter**: Weight reduced to 50 for balanced scheduling
+- **trainium-trn1 & inferentia-inf2**: Weight reduced to 20 to conserve resources for Dynamo
+
+**BuildKit Support:**
+- **Bottlerocket UserData**: Patches existing NodeClasses with `user.max_user_namespaces = 65536`
+- **Container Build Capability**: Enables rootless BuildKit for Dynamo's container build requirements
+- **Security**: Maintains Bottlerocket's security model while enabling user namespaces
+
+This approach provides higher priority scheduling for Dynamo workloads while maintaining compatibility with existing infrastructure.
 
 ### Configuration Options
 
