@@ -1,41 +1,13 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: dynamo-crds
-  namespace: argocd
-spec:
-  project: default
-  source:
-    repoURL: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts
-    chart: dynamo-crds
-    targetRevision: ${dynamo_version}
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: default
-  syncPolicy:
-    automated:
-      prune: false
-      selfHeal: true
-    retry:
-      limit: 3
-      backoff:
-        duration: 5s
-        factor: 2
-        maxDuration: 3m
-    syncOptions:
-      - ServerSideApply=true
-      - Replace=true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
   name: dynamo-platform
   namespace: argocd
 spec:
   project: default
   source:
-    repoURL: https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts
-    chart: dynamo-platform
+    repoURL: https://github.com/ai-dynamo/dynamo.git
+    path: deploy/cloud/helm/platform
     targetRevision: ${dynamo_version}
     helm:
       values: |
@@ -45,10 +17,11 @@ spec:
           controllerManager:
             manager:
               image:
-                repository: nvcr.io/nvidia/ai-dynamo/dynamo-operator
-                tag: ${dynamo_version}
-          # Use public NGC images - no authentication required for most Dynamo components
-          imagePullSecrets: []
+                repository: nvcr.io/nvidia/ai-dynamo/kubernetes-operator
+                tag: ${trimprefix(dynamo_version, "v")}
+          # Use NGC images with authentication
+          imagePullSecrets:
+            - name: docker-imagepullsecret
         
         # NATS configuration
         nats:
@@ -62,6 +35,8 @@ spec:
         # etcd configuration
         etcd:
           enabled: true
+          preUpgradeJob:
+            enabled: false
           auth:
             rbac:
               create: false

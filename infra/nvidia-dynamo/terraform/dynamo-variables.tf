@@ -12,5 +12,5 @@ variable "enable_dynamo_stack" {
 variable "dynamo_stack_version" {
   description = "NVIDIA Dynamo default version"
   type        = string
-  default     = "v0.4.0"
+  default     = "0.4.0"
 }
