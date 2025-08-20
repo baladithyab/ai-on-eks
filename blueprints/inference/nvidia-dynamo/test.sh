@@ -171,7 +171,24 @@ section "Service Information"
 # Get service details
 SERVICE_PORT=$(kubectl get service "$SERVICE_NAME" -n "${NAMESPACE}" -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo "8000")
 SERVICE_TYPE=$(kubectl get service "$SERVICE_NAME" -n "${NAMESPACE}" -o jsonpath='{.spec.type}' 2>/dev/null || echo "ClusterIP")
-LOCAL_PORT=${SERVICE_PORT:-8000}
+
+# Find available local port
+find_available_port() {
+    local start_port=${1:-8000}
+    local max_port=$((start_port + 100))
+    
+    for ((port=start_port; port<=max_port; port++)); do
+        if ! ss -tuln | grep -q ":${port} "; then
+            echo "$port"
+            return 0
+        fi
+    done
+    
+    # Fallback to a high port if nothing found
+    echo "9000"
+}
+
+LOCAL_PORT=$(find_available_port ${SERVICE_PORT:-8000})
 
 info "Service: ${SERVICE_NAME}"
 info "Port: ${SERVICE_PORT}"
@@ -193,14 +210,32 @@ section "Port Forwarding Setup"
 
 # Start port forwarding in background
 info "Setting up port forwarding to localhost:${LOCAL_PORT}..."
+
+# Clean up any existing port forwards for this service
+pkill -f "port-forward.*${SERVICE_NAME}" 2>/dev/null || true
+
 kubectl port-forward service/"$SERVICE_NAME" "$LOCAL_PORT:$SERVICE_PORT" -n "$NAMESPACE" &
 PORT_FORWARD_PID=$!
+
+# Verify port forwarding started successfully
+sleep 2
+if ! kill -0 $PORT_FORWARD_PID 2>/dev/null; then
+    error "Port forwarding failed to start"
+    # Try with a different port
+    LOCAL_PORT=$(find_available_port $((LOCAL_PORT + 1)))
+    warn "Retrying with port ${LOCAL_PORT}..."
+    kubectl port-forward service/"$SERVICE_NAME" "$LOCAL_PORT:$SERVICE_PORT" -n "$NAMESPACE" &
+    PORT_FORWARD_PID=$!
+    sleep 2
+fi
 
 # Function to cleanup port forwarding
 cleanup() {
     if [ -n "${PORT_FORWARD_PID:-}" ]; then
         info "Cleaning up port forwarding..."
         kill ${PORT_FORWARD_PID} 2>/dev/null || true
+        # Also kill any lingering port-forward processes for this service
+        pkill -f "port-forward.*${SERVICE_NAME}" 2>/dev/null || true
     fi
 }
 

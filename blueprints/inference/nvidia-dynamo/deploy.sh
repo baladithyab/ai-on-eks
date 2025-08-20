@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #---------------------------------------------------------------
-# NVIDIA Dynamo v0.4.0 Example Deployment Script
+# NVIDIA Dynamo Example Deployment Script
 #
 # This script simplifies deployment of Dynamo examples using 
 # prebuilt NGC containers and DynamoGraphDeployment manifests.
@@ -16,6 +16,11 @@
 #   ./deploy.sh trtllm         # Deploy TensorRT-LLM aggregated serving
 #   ./deploy.sh multinode-vllm # Deploy multi-node vLLM with KV routing
 #   ./deploy.sh                # Interactive selection
+#
+# Version Management:
+#   - Automatically reads version from ../infra/nvidia-dynamo/terraform/blueprint.tfvars
+#   - Can override with DYNAMO_VERSION environment variable
+#   - Example: DYNAMO_VERSION=v0.5.0 ./deploy.sh vllm
 #---------------------------------------------------------------
 
 set -euo pipefail
@@ -32,6 +37,11 @@ NC='\033[0m' # No Color
 
 # Default namespace
 NAMESPACE="dynamo-cloud"
+
+# Dynamo version management
+TFVARS_FILE="${SCRIPT_DIR}/../../../infra/nvidia-dynamo/terraform/blueprint.tfvars"
+DEFAULT_VERSION="v0.4.0"  # Fallback if tfvars file not found
+VERSION_SOURCE=""  # Track where version came from
 
 # Utility functions
 info() {
@@ -64,7 +74,27 @@ print_banner() {
     echo -e "${BLUE}${line}${NC}\n"
 }
 
-print_banner "DYNAMO v0.4.0 EXAMPLE DEPLOYMENT"
+# Get Dynamo version and source
+# Priority 1: Environment variable
+if [ -n "${DYNAMO_VERSION:-}" ]; then
+    VERSION_SOURCE="env"
+# Priority 2: Read from tfvars file
+elif [ -f "${TFVARS_FILE}" ]; then
+    tfvars_version=$(grep '^dynamo_stack_version' "${TFVARS_FILE}" 2>/dev/null | sed 's/.*= *"\(.*\)"/\1/' | tr -d ' ')
+    if [ -n "${tfvars_version}" ]; then
+        DYNAMO_VERSION="${tfvars_version}"
+        VERSION_SOURCE="tfvars"
+    else
+        DYNAMO_VERSION="${DEFAULT_VERSION}"
+        VERSION_SOURCE="default"
+    fi
+else
+    # Priority 3: Default fallback
+    DYNAMO_VERSION="${DEFAULT_VERSION}"
+    VERSION_SOURCE="default"
+fi
+
+print_banner "DYNAMO ${DYNAMO_VERSION} EXAMPLE DEPLOYMENT"
 
 #---------------------------------------------------------------
 # Available Examples
@@ -82,6 +112,25 @@ AVAILABLE_EXAMPLES=(
     "kv-routing:KV-aware routing demo with multiple workers"
     "sla-planner:SLA-based autoscaling with performance targets"
 )
+
+#---------------------------------------------------------------
+# Version Information
+#---------------------------------------------------------------
+
+section "Version Information"
+
+info "Using Dynamo version: ${DYNAMO_VERSION}"
+
+# Show where version came from
+if [ "${VERSION_SOURCE}" = "env" ]; then
+    info "Source: Environment variable (DYNAMO_VERSION)"
+elif [ "${VERSION_SOURCE}" = "tfvars" ]; then
+    info "Source: terraform/blueprint.tfvars"
+else
+    info "Source: Default fallback"
+fi
+
+info "To override: export DYNAMO_VERSION=<version> or edit terraform/blueprint.tfvars"
 
 #---------------------------------------------------------------
 # Example Selection
@@ -125,6 +174,25 @@ fi
 # Set example directory and manifest file
 EXAMPLE_DIR="${SCRIPT_DIR}/${EXAMPLE}"
 MANIFEST_FILE="${EXAMPLE_DIR}/${EXAMPLE}.yaml"
+
+# Create temporary manifest with correct version if needed
+# This allows using different Dynamo versions without modifying the example YAML files
+TEMP_MANIFEST=""
+if [ -f "${MANIFEST_FILE}" ]; then
+    # Check if manifest contains version references that need updating
+    if grep -q 'nvcr.io/nvidia/ai-dynamo/.*:0\.4\.0' "${MANIFEST_FILE}" 2>/dev/null; then
+        # Extract just the version number without 'v' prefix if present
+        VERSION_TAG="${DYNAMO_VERSION#v}"
+        
+        # Only update if version is different from 0.4.0
+        if [ "${VERSION_TAG}" != "0.4.0" ]; then
+            TEMP_MANIFEST="$(mktemp)"
+            info "Updating manifest to use Dynamo version ${VERSION_TAG}..."
+            sed "s/:0\.4\.0/:${VERSION_TAG}/g" "${MANIFEST_FILE}" > "${TEMP_MANIFEST}"
+            MANIFEST_FILE="${TEMP_MANIFEST}"
+        fi
+    fi
+fi
 
 #---------------------------------------------------------------
 # Prerequisites Check
@@ -229,8 +297,16 @@ info "Namespace: ${NAMESPACE}"
 # Deploy the example
 if kubectl apply -f "${MANIFEST_FILE}" -n "${NAMESPACE}"; then
     success "Manifest applied successfully"
+    # Clean up temporary manifest if created
+    if [ -n "${TEMP_MANIFEST}" ] && [ -f "${TEMP_MANIFEST}" ]; then
+        rm -f "${TEMP_MANIFEST}"
+    fi
 else
     error "Failed to apply manifest"
+    # Clean up temporary manifest if created
+    if [ -n "${TEMP_MANIFEST}" ] && [ -f "${TEMP_MANIFEST}" ]; then
+        rm -f "${TEMP_MANIFEST}"
+    fi
     exit 1
 fi
 
