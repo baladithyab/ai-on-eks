@@ -38,7 +38,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:v0.4.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.4.0
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
@@ -83,6 +83,8 @@ spec:
         - name: DYN_LOG
           value: "info"
       extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
           startupProbe:
             httpGet:
@@ -90,7 +92,7 @@ spec:
               port: 9090
             periodSeconds: 10
             failureThreshold: 60
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:v0.4.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.4.0
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
@@ -135,6 +137,8 @@ spec:
         - name: DYN_LOG
           value: "info"
       extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
           startupProbe:
             httpGet:
@@ -142,7 +146,7 @@ spec:
               port: 9090
             periodSeconds: 10
             failureThreshold: 60
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:v0.4.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.4.0
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh

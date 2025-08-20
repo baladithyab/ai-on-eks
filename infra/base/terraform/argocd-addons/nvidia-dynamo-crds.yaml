@@ -6,9 +6,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/ai-dynamo/dynamo.git
-    path: deploy/cloud/helm/crds
-    targetRevision: ${dynamo_version}
+    repoURL: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+    chart: dynamo-crds
+    targetRevision: ${trimprefix(dynamo_version, "v")}
   destination:
     server: https://kubernetes.default.svc
     namespace: default

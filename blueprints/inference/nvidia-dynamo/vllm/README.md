@@ -9,16 +9,130 @@ Client Requests → Frontend → vLLM Worker (Aggregated)
 ```
 
 This example demonstrates:
-- vLLM backend integration
-- OpenAI-compatible API serving
+- vLLM backend integration with NVIDIA Dynamo
+- OpenAI-compatible API serving (`/v1/chat/completions`, `/v1/models`)
 - Aggregated serving mode (prefill + decode in same worker)
+- G5 GPU node selection for cost-effective inference
+- Production-ready health checks and resource management
 
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
 - `dynamo-cloud` namespace with secrets configured
-- GPU nodes available (at least 1 GPU required)
+- G5 GPU nodes available (at least 1 GPU with 24GB VRAM)
 - HuggingFace token secret configured
+
+## YAML Structure Explained
+
+### Frontend Configuration
+```yaml
+Frontend:
+  dynamoNamespace: vllm             # Service discovery namespace
+  componentType: main               # HTTP API entry point
+  replicas: 1                       # Single frontend instance
+  resources:
+    requests:
+      cpu: "1"                      # Lightweight for request routing
+      memory: "2Gi"                 # Minimal memory for HTTP server
+  extraPodSpec:
+    nodeSelector:
+      karpenter.sh/nodepool: cpu-karpenter  # CPU-only node (cost effective)
+    mainContainer:
+      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.4.0
+      workingDir: /workspace/components/backends/vllm
+      args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+  readinessProbe:
+    exec:
+      command: ["/bin/sh", "-c", 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""']
+```
+
+**Key Points:**
+- **OpenAI API**: Provides standard `/v1/chat/completions` endpoint
+- **Service Discovery**: Automatically finds vLLM workers in same namespace
+- **Health Checks**: Comprehensive HTTP and shell-based probes
+- **CPU Placement**: Frontend doesn't need GPU, runs on cheaper CPU nodes
+
+### Worker Configuration
+```yaml
+VllmWorker:
+  dynamoNamespace: vllm             # Must match frontend namespace
+  componentType: worker             # Inference processing unit
+  envFromSecret: hf-token-secret    # HuggingFace authentication
+  replicas: 1                       # Single worker (can scale horizontally)
+  resources:
+    requests:
+      gpu: "1"                      # Single GPU requirement
+      cpu: "10"                     # High CPU for model operations
+      memory: "20Gi"                # Large memory for model + KV cache
+  extraPodSpec:
+    nodeSelector:
+      karpenter.sh/nodepool: g5-gpu-karpenter  # G5 GPU instances
+    tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    mainContainer:
+      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.4.0
+      workingDir: /workspace/components/backends/vllm
+      args: ["python3", "-m", "dynamo.vllm", "--model", "Qwen/Qwen3-0.6B", "2>&1", "|", "tee", "/tmp/vllm.log"]
+  envs:
+    - name: DYN_SYSTEM_ENABLED
+      value: "true"                 # Enable Dynamo system integration
+    - name: DYN_SYSTEM_USE_ENDPOINT_HEALTH_STATUS
+      value: "[\"generate\"]"       # Health check endpoint
+    - name: DYN_SYSTEM_PORT
+      value: "9090"                 # Internal health port
+```
+
+**Key Parameters:**
+- **Model Loading**: Uses `Qwen/Qwen3-0.6B` (small, fast model for testing)
+- **Resource Allocation**: Balanced CPU/memory for aggregated serving
+- **Health Integration**: Dynamo system handles service health reporting
+- **GPU Scheduling**: Automatically scheduled on G5 GPU nodes
+
+## Node Selection Strategy
+
+### GPU Worker Placement
+```yaml
+extraPodSpec:
+  nodeSelector:
+    karpenter.sh/nodepool: g5-gpu-karpenter
+  tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+```
+
+**Why G5 for vLLM:**
+- **Memory Capacity**: 24GB VRAM handles models up to ~20B parameters
+- **Price/Performance**: Best cost efficiency for development and production
+- **Availability**: Good regional availability, reliable provisioning
+- **vLLM Optimization**: A10G GPUs well-supported by vLLM
+
+### Alternative Configurations
+
+**For Large Models (8B+ parameters):**
+```yaml
+nodeSelector:
+  karpenter.sh/nodepool: g6-gpu-karpenter  # L4 GPUs with higher bandwidth
+```
+
+**For Multi-GPU Tensor Parallelism:**
+```yaml
+nodeSelector:
+  karpenter.sh/nodepool: g5-gpu-karpenter
+  node.kubernetes.io/instance-type: g5.12xlarge  # 4 GPU instance
+resources:
+  requests:
+    gpu: "2"                        # Request multiple GPUs
+args:
+  - "--tensor-parallel-size"
+  - "2"                             # Enable tensor parallelism
+```
 
 ## Deployment
 

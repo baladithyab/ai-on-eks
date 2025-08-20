@@ -171,18 +171,46 @@ fi
 success "Manifest file found: ${MANIFEST_FILE}"
 
 # Check for HF token secret (for models that need it)
-if [[ "$EXAMPLE" =~ ^(vllm|sglang|trtllm|multinode-vllm)$ ]]; then
+if [[ "$EXAMPLE" =~ ^(vllm|sglang|trtllm|multinode-vllm|vllm-disagg|sglang-disagg|trtllm-disagg)$ ]]; then
     if ! kubectl get secret hf-token-secret -n "${NAMESPACE}" >/dev/null 2>&1; then
         warn "HuggingFace token secret not found"
-        warn "Some models may require authentication. To create the secret:"
-        warn "  kubectl create secret generic hf-token-secret \\"
-        warn "    --from-literal=HF_TOKEN=\${HF_TOKEN} -n ${NAMESPACE}"
-        warn ""
-        warn "Continue anyway? (y/N)"
-        read -r confirm
-        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-            info "Deployment cancelled"
-            exit 0
+        
+        # Check for HF_TOKEN environment variable first
+        if [ -n "${HF_TOKEN:-}" ]; then
+            info "Found HF_TOKEN environment variable, creating secret..."
+            if kubectl create secret generic hf-token-secret \
+                --from-literal=HF_TOKEN="${HF_TOKEN}" -n "${NAMESPACE}"; then
+                success "HuggingFace token secret created from environment variable"
+            else
+                error "Failed to create HuggingFace token secret"
+                exit 1
+            fi
+        else
+            warn "Some models require HuggingFace authentication for downloading."
+            warn ""
+            warn "Options:"
+            warn "  1. Set HF_TOKEN environment variable and re-run this script"
+            warn "  2. Enter token now to create the secret"
+            warn "  3. Continue without token (may fail for some models)"
+            warn ""
+            echo -n "Enter HuggingFace token (or press Enter to continue): "
+            read -r hf_token
+            
+            if [ -n "$hf_token" ]; then
+                info "Creating HuggingFace token secret..."
+                if kubectl create secret generic hf-token-secret \
+                    --from-literal=HF_TOKEN="${hf_token}" -n "${NAMESPACE}"; then
+                    success "HuggingFace token secret created"
+                else
+                    error "Failed to create HuggingFace token secret"
+                    exit 1
+                fi
+            else
+                warn "Proceeding without HuggingFace token"
+                warn "If model download fails, create the secret manually:"
+                warn "  kubectl create secret generic hf-token-secret \\"
+                warn "    --from-literal=HF_TOKEN=your-token-here -n ${NAMESPACE}"
+            fi
         fi
     else
         success "HuggingFace token secret found"

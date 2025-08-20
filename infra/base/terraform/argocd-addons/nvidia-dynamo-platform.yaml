@@ -6,20 +6,15 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/ai-dynamo/dynamo.git
-    path: deploy/cloud/helm/platform
-    targetRevision: ${dynamo_version}
+    repoURL: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+    chart: dynamo-platform
+    targetRevision: ${trimprefix(dynamo_version, "v")}
     helm:
       values: |
-        # NVIDIA Dynamo Platform Configuration for ai-on-eks
+        # NVIDIA Dynamo Platform Configuration for ai-on-eks using NGC
         dynamo-operator:
           enabled: true
-          controllerManager:
-            manager:
-              image:
-                repository: nvcr.io/nvidia/ai-dynamo/kubernetes-operator
-                tag: ${trimprefix(dynamo_version, "v")}
-          # Use NGC images with authentication
+          # NGC containers already configured in the chart
           imagePullSecrets:
             - name: docker-imagepullsecret
         
@@ -32,7 +27,7 @@ spec:
               enabled: true
               maxSize: 1Gi
         
-        # etcd configuration
+        # etcd configuration - CRITICAL FIX
         etcd:
           enabled: true
           preUpgradeJob:

@@ -39,7 +39,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:v0.4.0
+          image: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.4.0
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
@@ -82,6 +82,8 @@ spec:
         - name: DYN_SYSTEM_PORT
           value: "9090"
       extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
           startupProbe:
             httpGet:
@@ -90,7 +92,7 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 120  # Allow extra time for TensorRT compilation
-          image: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:v0.4.0
+          image: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.4.0
           workingDir: /workspace/components/backends/trtllm
           args:
             - "python3"
@@ -140,6 +142,8 @@ spec:
         - name: DYN_SYSTEM_PORT
           value: "9090"
       extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
           startupProbe:
             httpGet:
@@ -148,7 +152,7 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 120  # Allow extra time for TensorRT compilation
-          image: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:v0.4.0
+          image: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.4.0
           workingDir: /workspace/components/backends/trtllm
           args:
             - "python3"
