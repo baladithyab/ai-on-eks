@@ -27,7 +27,7 @@ This example demonstrates:
 ### 1. Cache Tracking
 Each worker publishes KV cache events when blocks are:
 - **Created**: New token sequences cached
-- **Accessed**: Existing cache blocks reused  
+- **Accessed**: Existing cache blocks reused
 - **Evicted**: Cache blocks removed due to memory pressure
 
 ### 2. Global Indexing
@@ -46,7 +46,7 @@ For each request, the router:
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace with secrets configured  
+- `dynamo-cloud` namespace with secrets configured
 - **Multi-GPU setup**: At least 4 GPUs for meaningful demonstration
 - HuggingFace token secret configured
 
@@ -121,7 +121,7 @@ conversation.append({"role": "assistant", "content": assistant_reply})
 conversation.append({"role": "user", "content": "What did I tell you about my profession?"})
 
 response2 = requests.post(base_url, headers=headers, json={
-    "model": "Qwen/Qwen3-0.6B", 
+    "model": "Qwen/Qwen3-0.6B",
     "messages": conversation,
     "max_tokens": 50
 })
@@ -158,7 +158,7 @@ kubectl logs -n dynamo-cloud -l app=kv-routing-frontend -f | grep -E "(routing|o
 # Example output:
 # [DEBUG] KV overlap scores: {worker-1: 25 blocks, worker-2: 5 blocks, worker-3: 15 blocks}
 # [DEBUG] Load scores: {worker-1: 0.3, worker-2: 0.8, worker-3: 0.5}
-# [DEBUG] Final scores: {worker-1: 22.0, worker-2: -3.0, worker-3: 10.0}  
+# [DEBUG] Final scores: {worker-1: 22.0, worker-2: -3.0, worker-3: 10.0}
 # [DEBUG] Selected worker-1 (best score: 22.0)
 ```
 
@@ -206,7 +206,7 @@ kubectl patch dynamographdeployment kv-routing -n dynamo-cloud -p \
 ### Performance Optimization Tips
 
 1. **High Cache Reuse Workloads**: Increase `kv-overlap-score-weight`
-2. **Load Balance Priority**: Decrease `kv-overlap-score-weight` 
+2. **Load Balance Priority**: Decrease `kv-overlap-score-weight`
 3. **Deterministic Routing**: Set `router-temperature` to 0
 4. **Probabilistic Routing**: Increase `router-temperature` for exploration
 

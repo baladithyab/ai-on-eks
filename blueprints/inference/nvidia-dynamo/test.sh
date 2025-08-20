@@ -93,14 +93,14 @@ else
             DEPLOYED_EXAMPLES+=("$example")
         fi
     done
-    
+
     if [ ${#DEPLOYED_EXAMPLES[@]} -eq 0 ]; then
         error "No deployed examples found in namespace ${NAMESPACE}"
         info "Available examples to deploy: ${VALID_EXAMPLES[*]}"
         info "Deploy an example first: ./deploy.sh <example-name>"
         exit 1
     fi
-    
+
     if [ ${#DEPLOYED_EXAMPLES[@]} -eq 1 ]; then
         EXAMPLE="${DEPLOYED_EXAMPLES[0]}"
         info "Found deployed example: ${EXAMPLE}"
@@ -110,7 +110,7 @@ else
             echo "  $((i+1)). ${DEPLOYED_EXAMPLES[i]}"
         done
         echo ""
-        
+
         while true; do
             read -p "Select an example to test (1-${#DEPLOYED_EXAMPLES[@]}): " selection
             if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le ${#DEPLOYED_EXAMPLES[@]} ]; then
@@ -151,7 +151,7 @@ if ! kubectl get service "$SERVICE_NAME" -n "${NAMESPACE}" >/dev/null 2>&1; then
             break
         fi
     done
-    
+
     if [[ "$SERVICE_NAME" == "${EXAMPLE}-frontend" ]]; then
         error "No suitable service found for example '${EXAMPLE}'"
         info "Available services in namespace ${NAMESPACE}:"
@@ -176,14 +176,14 @@ SERVICE_TYPE=$(kubectl get service "$SERVICE_NAME" -n "${NAMESPACE}" -o jsonpath
 find_available_port() {
     local start_port=${1:-8000}
     local max_port=$((start_port + 100))
-    
+
     for ((port=start_port; port<=max_port; port++)); do
         if ! ss -tuln | grep -q ":${port} "; then
             echo "$port"
             return 0
         fi
     done
-    
+
     # Fallback to a high port if nothing found
     echo "9000"
 }
@@ -266,7 +266,7 @@ if curl -s -f "$HEALTH_URL" >/dev/null 2>&1; then
 else
     warn "Health endpoint not accessible, trying root endpoint..."
     ROOT_URL="${BASE_URL}/"
-    
+
     if curl -s -f "$ROOT_URL" >/dev/null 2>&1; then
         success "Root endpoint is accessible"
         curl -s "$ROOT_URL" | head -10
@@ -290,10 +290,10 @@ case "$EXAMPLE" in
         info "Testing hello-world specific endpoints..."
         # Test any hello-world specific endpoints
         ;;
-    
+
     "vllm"|"sglang"|"trtllm"|"multinode-vllm"|"vllm-disagg"|"sglang-disagg"|"trtllm-disagg"|"kv-routing")
         info "Testing LLM service endpoints..."
-        
+
         # Test models endpoint
         MODELS_URL="${BASE_URL}/v1/models"
         if curl -s -f "$MODELS_URL" >/dev/null 2>&1; then
@@ -303,20 +303,20 @@ case "$EXAMPLE" in
         else
             warn "✗ /v1/models - not accessible"
         fi
-        
+
         echo ""
-        
+
         # Test chat completions with a simple request
         info "Testing chat completions endpoint..."
         COMPLETIONS_URL="${BASE_URL}/v1/chat/completions"
-        
+
         # Determine model name based on example
         case "$EXAMPLE" in
             "vllm"|"multinode-vllm"|"vllm-disagg"|"kv-routing") MODEL_NAME="Qwen/Qwen3-0.6B" ;;
             "sglang"|"trtllm"|"sglang-disagg"|"trtllm-disagg") MODEL_NAME="deepseek-ai/DeepSeek-R1-Distill-Llama-8B" ;;
             *) MODEL_NAME="default" ;;
         esac
-        
+
         CHAT_PAYLOAD=$(cat <<EOF
 {
     "model": "${MODEL_NAME}",
@@ -328,12 +328,12 @@ case "$EXAMPLE" in
 }
 EOF
 )
-        
+
         echo "Testing with model: ${MODEL_NAME}"
         RESPONSE=$(curl -s -X POST "$COMPLETIONS_URL" \
             -H "Content-Type: application/json" \
             -d "$CHAT_PAYLOAD" 2>/dev/null || echo "")
-        
+
         if [ -n "$RESPONSE" ] && ! echo "$RESPONSE" | grep -q -i "error"; then
             success "✓ Chat completions endpoint responded successfully"
             echo "Response preview:"
@@ -345,7 +345,7 @@ EOF
                 echo "$RESPONSE" | head -5
             fi
         fi
-        
+
         # Advanced testing for specific examples
         case "$EXAMPLE" in
             "vllm-disagg"|"sglang-disagg"|"trtllm-disagg")
@@ -365,14 +365,14 @@ EOF
                 LONG_RESPONSE=$(curl -s -X POST "$COMPLETIONS_URL" \
                     -H "Content-Type: application/json" \
                     -d "$LONG_PAYLOAD" 2>/dev/null || echo "")
-                    
+
                 if [ -n "$LONG_RESPONSE" ] && ! echo "$LONG_RESPONSE" | grep -q -i "error"; then
                     success "✓ Long context request (disaggregation test) succeeded"
                 else
                     warn "✗ Long context request failed (check disaggregation setup)"
                 fi
                 ;;
-                
+
             "kv-routing")
                 echo ""
                 info "Testing KV routing with shared prefixes..."
@@ -394,16 +394,16 @@ EOF
                         -d "$KV_PAYLOAD" > /tmp/kv_test_$i.json &
                 done
                 wait
-                
+
                 success_count=$(ls /tmp/kv_test_*.json 2>/dev/null | wc -l)
                 success "✓ KV routing test: ${success_count}/3 requests completed"
                 ;;
         esac
         ;;
-        
+
     "sla-planner")
         info "Testing SLA planner specific endpoints..."
-        
+
         # Check if Prometheus is available
         PROMETHEUS_URL="${BASE_URL}:9090"
         if curl -s -f "${PROMETHEUS_URL}/-/healthy" >/dev/null 2>&1; then
@@ -411,7 +411,7 @@ EOF
         else
             warn "✗ Prometheus not accessible (may affect SLA planner metrics)"
         fi
-        
+
         # Test the main LLM endpoint
         MODELS_URL="${BASE_URL}/v1/models"
         if curl -s -f "$MODELS_URL" >/dev/null 2>&1; then

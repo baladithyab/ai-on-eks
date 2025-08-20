@@ -1,7 +1,7 @@
-name                             = "dynamo-on-eks"
-enable_dynamo_stack              = true
-enable_argocd                    = true
-eks_cluster_version              = "1.33"
+name                = "dynamo-on-eks"
+enable_dynamo_stack = true
+enable_argocd       = true
+eks_cluster_version = "1.33"
 
 # Enable required infrastructure for Dynamo
 enable_aws_efs_csi_driver        = true

@@ -3,7 +3,7 @@
 #---------------------------------------------------------------
 # NVIDIA Dynamo Example Deployment Script
 #
-# This script simplifies deployment of Dynamo examples using 
+# This script simplifies deployment of Dynamo examples using
 # prebuilt NGC containers and DynamoGraphDeployment manifests.
 #
 # Usage:
@@ -12,7 +12,7 @@
 # Examples:
 #   ./deploy.sh hello-world     # Deploy hello-world example
 #   ./deploy.sh vllm           # Deploy vLLM aggregated serving
-#   ./deploy.sh sglang         # Deploy SGLang aggregated serving  
+#   ./deploy.sh sglang         # Deploy SGLang aggregated serving
 #   ./deploy.sh trtllm         # Deploy TensorRT-LLM aggregated serving
 #   ./deploy.sh multinode-vllm # Deploy multi-node vLLM with KV routing
 #   ./deploy.sh                # Interactive selection
@@ -157,7 +157,7 @@ else
         echo "  $((i+1)). ${name} - ${desc}"
     done
     echo ""
-    
+
     while true; do
         read -p "Select an example (1-${#AVAILABLE_EXAMPLES[@]}): " selection
         if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le ${#AVAILABLE_EXAMPLES[@]} ]; then
@@ -167,7 +167,7 @@ else
             error "Invalid selection. Please choose 1-${#AVAILABLE_EXAMPLES[@]}."
         fi
     done
-    
+
     info "Selected example: ${EXAMPLE}"
 fi
 
@@ -183,7 +183,7 @@ if [ -f "${MANIFEST_FILE}" ]; then
     if grep -q 'nvcr.io/nvidia/ai-dynamo/.*:0\.4\.0' "${MANIFEST_FILE}" 2>/dev/null; then
         # Extract just the version number without 'v' prefix if present
         VERSION_TAG="${DYNAMO_VERSION#v}"
-        
+
         # Only update if version is different from 0.4.0
         if [ "${VERSION_TAG}" != "0.4.0" ]; then
             TEMP_MANIFEST="$(mktemp)"
@@ -242,7 +242,7 @@ success "Manifest file found: ${MANIFEST_FILE}"
 if [[ "$EXAMPLE" =~ ^(vllm|sglang|trtllm|multinode-vllm|vllm-disagg|sglang-disagg|trtllm-disagg)$ ]]; then
     if ! kubectl get secret hf-token-secret -n "${NAMESPACE}" >/dev/null 2>&1; then
         warn "HuggingFace token secret not found"
-        
+
         # Check for HF_TOKEN environment variable first
         if [ -n "${HF_TOKEN:-}" ]; then
             info "Found HF_TOKEN environment variable, creating secret..."
@@ -263,7 +263,7 @@ if [[ "$EXAMPLE" =~ ^(vllm|sglang|trtllm|multinode-vllm|vllm-disagg|sglang-disag
             warn ""
             echo -n "Enter HuggingFace token (or press Enter to continue): "
             read -r hf_token
-            
+
             if [ -n "$hf_token" ]; then
                 info "Creating HuggingFace token secret..."
                 if kubectl create secret generic hf-token-secret \

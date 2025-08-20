@@ -492,7 +492,7 @@ This blueprint is designed for users who want:
 - [Dynamo Collection (NGC)](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/collections/ai-dynamo): Complete collection of Dynamo resources
 - [Dynamo Platform Helm Chart](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/helm-charts/dynamo-platform): Official Kubernetes deployment
 - [vLLM Runtime Container](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/containers/vllm-runtime): vLLM backend (v0.4.0)
-- [SGLang Runtime Container](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/containers/sglang-runtime): SGLang backend (v0.4.0) 
+- [SGLang Runtime Container](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/containers/sglang-runtime): SGLang backend (v0.4.0)
 - [TensorRT-LLM Runtime Container](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/containers/trtllm-runtime): TRT-LLM backend (v0.4.0)
 
 ### AI-on-EKS Blueprint Resources
@@ -542,7 +542,7 @@ cd infra/nvidia-dynamo
 - **Dynamo Examples**: All deployed inference graphs and workloads
 - **Dynamo Platform**: Operator, API Store, and supporting services
 - **ArgoCD Applications**: GitOps-managed resources
-- **Kubernetes Resources**: Namespaces, secrets, and configurations  
+- **Kubernetes Resources**: Namespaces, secrets, and configurations
 - **Infrastructure**: EKS cluster, VPC, security groups, and all AWS resources
 - **Cost Optimization**: Ensures no lingering resources continue billing
 

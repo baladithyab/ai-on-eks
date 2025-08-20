@@ -135,7 +135,7 @@ Separates prefill (compute-bound) and decode (memory-bound) phases:
 VllmPrefillWorker:    # Optimized for compute
   replicas: 1
   args: ["--is-prefill-worker"]
-VllmDecodeWorker:     # Optimized for memory/throughput  
+VllmDecodeWorker:     # Optimized for memory/throughput
   replicas: 2
 ```
 **Benefits:**
@@ -190,7 +190,7 @@ spec:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.4.0
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
-    
+
     Worker:                      # Inference backend (GPU required)
       dynamoNamespace: example
       componentType: worker      # Marks as processing unit
@@ -314,14 +314,14 @@ Frontend:
   extraPodSpec:
     nodeSelector:
       karpenter.sh/nodepool: cpu-karpenter
-    
+
 # Prefill Worker - Compute optimized
 PrefillWorker:
   extraPodSpec:
     nodeSelector:
       karpenter.sh/nodepool: g6-gpu-karpenter
-      
-# Decode Worker - Memory optimized  
+
+# Decode Worker - Memory optimized
 DecodeWorker:
   extraPodSpec:
     nodeSelector:
@@ -401,12 +401,12 @@ Choose appropriate instance types based on your workload:
 extraPodSpec:
   nodeSelector:
     karpenter.sh/nodepool: g5-gpu-karpenter
-    
+
 # For production (high performance)
 extraPodSpec:
   nodeSelector:
     karpenter.sh/nodepool: g6-gpu-karpenter
-    
+
 # For large models (multi-GPU)
 extraPodSpec:
   nodeSelector:
@@ -447,7 +447,7 @@ spec:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.4.0
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
-    
+
     MyCustomWorker:
       dynamoNamespace: my-custom
       componentType: worker
@@ -511,7 +511,7 @@ args:
 ```yaml
 args:
   - "python3"
-  - "-m" 
+  - "-m"
   - "dynamo.trtllm"
   - "--model-path"
   - "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
@@ -608,9 +608,9 @@ Examples support different models by modifying worker args:
 # vLLM worker with custom model
 args: ["python3", "-m", "dynamo.vllm", "--model", "microsoft/DialoGPT-medium"]
 
-# SGLang worker with custom parameters  
-args: ["python3", "-m", "dynamo.sglang.worker", 
-       "--model-path", "your-model", 
+# SGLang worker with custom parameters
+args: ["python3", "-m", "dynamo.sglang.worker",
+       "--model-path", "your-model",
        "--tp", "2",  # Tensor parallelism
        "--page-size", "32"]
 
@@ -636,7 +636,7 @@ extraPodSpec:
 ```
 
 **Instance Selection:**
-- **G5**: Tested and recommended (good availability)  
+- **G5**: Tested and recommended (good availability)
 - **G6**: High performance but limited capacity
 - **P4/P5**: For large-scale production deployments
 
@@ -647,8 +647,8 @@ resources:
   requests:
     cpu: "1-2"      # Scale based on request volume
     memory: "2-4Gi" # Router memory requirements
-    
-# Workers (GPU + CPU)  
+
+# Workers (GPU + CPU)
 resources:
   requests:
     gpu: "1"        # Single GPU per worker

@@ -124,7 +124,7 @@ extraPodSpec:
 
 **Why G5 for SGLang:**
 - **Memory Bandwidth**: A10G GPUs provide sufficient bandwidth for RadixAttention
-- **Cost Effectiveness**: Best price/performance for cache-heavy workloads  
+- **Cost Effectiveness**: Best price/performance for cache-heavy workloads
 - **Availability**: Good availability across regions
 - **Model Size**: 24GB VRAM handles most models up to 20B parameters
 

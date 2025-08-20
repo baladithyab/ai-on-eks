@@ -165,7 +165,7 @@ kubectl logs -n dynamo-cloud -l app=sla-planner-planner -f | grep -E "(scaling|r
 # Example output:
 # [INFO] Current TTFT: 2500ms, Target: 2000ms (exceeding SLA)
 # [INFO] Scaling prefill workers: 1 -> 2 (predicted load increase: 20%)
-# [INFO] Current ITL: 120ms, Target: 100ms (exceeding SLA)  
+# [INFO] Current ITL: 120ms, Target: 100ms (exceeding SLA)
 # [INFO] Scaling decode workers: 2 -> 3 (performance interpolation suggests +1)
 ```
 
@@ -179,7 +179,7 @@ kubectl port-forward svc/sla-planner-prometheus 9090:9090 -n dynamo-cloud
 # Access Prometheus UI at http://localhost:9090
 # Key metrics to monitor:
 # - dynamo_ttft_ms
-# - dynamo_itl_ms  
+# - dynamo_itl_ms
 # - dynamo_request_rate
 # - dynamo_prefill_workers
 # - dynamo_decode_workers
@@ -242,7 +242,7 @@ args:
 
 ### Scaling Up Scenarios
 - **High TTFT**: Adds prefill workers
-- **High ITL**: Adds decode workers  
+- **High ITL**: Adds decode workers
 - **Load Spike**: Proactive scaling based on predictions
 - **Long Context**: Adjusts based on sequence length trends
 

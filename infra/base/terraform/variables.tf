@@ -381,3 +381,16 @@ variable "kms_key_admin_roles" {
   type        = list(string)
   default     = []
 }
+
+# NVIDIA Dynamo Stack Variables
+variable "enable_dynamo_stack" {
+  description = "Enable NVIDIA Dynamo Stack addon"
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_stack_version" {
+  description = "NVIDIA Dynamo Stack version"
+  type        = string
+  default     = "v0.4.0"
+}

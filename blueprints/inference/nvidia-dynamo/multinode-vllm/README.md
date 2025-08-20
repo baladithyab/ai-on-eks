@@ -51,7 +51,7 @@ This example uses `Qwen/Qwen3-0.6B` for demonstration. For production workloads,
 
 ### Disaggregated Serving
 - **Prefill Workers**: Optimized for parallel processing of input tokens
-- **Decode Workers**: Optimized for sequential token generation  
+- **Decode Workers**: Optimized for sequential token generation
 - **Independent Scaling**: Scale prefill and decode workers based on workload
 
 ### KV-Aware Routing
@@ -109,7 +109,7 @@ kubectl get pods -n dynamo-cloud -l app=multinode-vllm
 # Check prefill worker logs
 kubectl logs -n dynamo-cloud -l app=multinode-vllm-prefill -f
 
-# Check decode worker logs  
+# Check decode worker logs
 kubectl logs -n dynamo-cloud -l app=multinode-vllm-decode -f
 
 # Check frontend logs for routing decisions (with DYN_LOG=debug)
@@ -125,7 +125,7 @@ Multi-node disaggregated serving provides:
 
 1. **Better Resource Utilization**: Separate optimization for compute vs memory-bound phases
 2. **Improved Latency**: No head-of-line blocking between prefill and decode
-3. **Enhanced Scalability**: Independent scaling of prefill and decode capacity  
+3. **Enhanced Scalability**: Independent scaling of prefill and decode capacity
 4. **KV Cache Efficiency**: Intelligent routing maximizes cache reuse
 
 ## Scaling

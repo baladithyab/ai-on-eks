@@ -6,12 +6,12 @@ if [ -z "$NGC_API_KEY" ]; then
   echo "You can get your NGC API key from: https://ngc.nvidia.com/setup/api-key"
   echo ""
   read -p "Please enter your NGC API key: " NGC_API_KEY
-  
+
   if [ -z "$NGC_API_KEY" ]; then
     echo "Error: NGC API key is required for NVIDIA Dynamo deployment"
     exit 1
   fi
-  
+
   # Export for use in terraform and kubectl commands
   export NGC_API_KEY
 fi
@@ -94,10 +94,10 @@ spec:
   userData: |
     [settings.kernel]
     lockdown = "integrity"
-    
+
     [settings.kernel.sysctl]
     "user.max_user_namespaces" = "65536"
-    
+
     [settings.container-runtime]
     max_container_log_line_size = 65536
   blockDeviceMappings:
@@ -201,7 +201,7 @@ kubectl patch nodepool trainium-trn1 --type='merge' -p='{
   }
 }' || echo "Trainium NodePool patch skipped (may not exist yet)"
 
-# Reduce priority on Inferentia pools to conserve resources for Dynamo  
+# Reduce priority on Inferentia pools to conserve resources for Dynamo
 echo "Reducing Inferentia NodePool priority..."
 kubectl patch nodepool inferentia-inf2 --type='merge' -p='{
   "spec": {

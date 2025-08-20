@@ -84,7 +84,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "Qwen/Qwen3-0.6B", 
+    "model": "Qwen/Qwen3-0.6B",
     "messages": [{"role": "user", "content": "'"$(python3 -c "print('Please analyze this long text: ' + 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. ' * 50)")"'"}],
     "max_tokens": 100
   }'
@@ -123,7 +123,7 @@ The system uses smart thresholds to decide between local and remote prefill:
 kubectl patch dynamographdeployment vllm-disagg -n dynamo-cloud -p \
   '{"spec":{"services":{"VllmPrefillWorker":{"replicas":3}}}}'
 
-# Scale decode workers for high concurrent request scenarios  
+# Scale decode workers for high concurrent request scenarios
 kubectl patch dynamographdeployment vllm-disagg -n dynamo-cloud -p \
   '{"spec":{"services":{"VllmDecodeWorker":{"replicas":4}}}}'
 ```

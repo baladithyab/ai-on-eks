@@ -21,7 +21,7 @@ This example demonstrates:
 TensorRT-LLM provides the highest performance inference, and disaggregation adds:
 
 1. **Phase-Specific Optimization**: Different TensorRT optimizations for prefill vs decode
-2. **Memory Layout**: Optimal memory patterns for compute vs memory-bound phases  
+2. **Memory Layout**: Optimal memory patterns for compute vs memory-bound phases
 3. **Kernel Specialization**: Different kernel fusion strategies per phase
 4. **Precision Control**: Fine-tuned mixed precision for each worker type
 
@@ -106,7 +106,7 @@ LONG_PROMPT=$(python3 -c "print('Analyze this comprehensive dataset: ' + 'Data p
 time curl -X POST http://localhost:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", 
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
     "messages": [{"role": "user", "content": "'"$LONG_PROMPT"'"}],
     "max_tokens": 300
   }'
@@ -178,7 +178,7 @@ kubectl logs -n dynamo-cloud -l app=trtllm-disagg -f | grep -E "(NIXL|transfer|c
 
 ### TensorRT Benefits
 - **TTFT Improvement**: 40-60% faster than standard implementations
-- **ITL Improvement**: 30-50% faster token generation  
+- **ITL Improvement**: 30-50% faster token generation
 - **Memory Efficiency**: 20-40% reduced memory usage
 - **Throughput**: 50-100% higher requests/second
 

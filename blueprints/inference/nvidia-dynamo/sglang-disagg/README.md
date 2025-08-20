@@ -118,14 +118,14 @@ headers = {"Content-Type": "application/json"}
 
 # Start with a detailed system prompt
 conversation = [{
-    "role": "system", 
+    "role": "system",
     "content": "You are an AI tutor specializing in computer science. Always provide detailed explanations with examples."
 }]
 
 # Multi-turn conversation to build up cache
 topics = [
     "What is a hash table?",
-    "How does collision resolution work in hash tables?", 
+    "How does collision resolution work in hash tables?",
     "What are the time complexities of hash table operations?",
     "Compare hash tables with binary search trees",
     "When should I use hash tables vs other data structures?"
@@ -133,16 +133,16 @@ topics = [
 
 for i, question in enumerate(topics):
     conversation.append({"role": "user", "content": question})
-    
+
     response = requests.post(base_url, headers=headers, json={
         "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
         "messages": conversation,
         "max_tokens": 150
     })
-    
+
     assistant_reply = response.json()["choices"][0]["message"]["content"]
     conversation.append({"role": "assistant", "content": assistant_reply})
-    
+
     print(f"Turn {i+1}: {len(conversation)} messages in conversation")
 ```
 
