@@ -48,7 +48,7 @@ cd infra/nvidia-dynamo
 | **[vllm](vllm/)** | vLLM aggregated serving | Qwen3-0.6B | OpenAI API, G5 GPU |
 | **[sglang](sglang/)** | SGLang with advanced caching | DeepSeek-R1-Distill-Llama-8B | RadixAttention, Multi-model |
 | **[trtllm](trtllm/)** | TensorRT-LLM optimized | DeepSeek-R1-Distill-Llama-8B | Maximum performance |
-| **[multinode-vllm](multinode-vllm/)** | Multi-node deployment | Multiple models | KV routing, scaling |
+| **[multi-replica-vllm](multi-replica-vllm/)** | Multi-replica HA deployment | Multiple models | KV routing, load balancing |
 
 ### Advanced Examples (Beta)
 | Example | Description | Use Case |
@@ -130,7 +130,20 @@ Dynamo frontends automatically discover workers across the cluster:
 ## Advanced Features
 
 ### Disaggregated Serving
-Separates prefill (compute-bound) and decode (memory-bound) phases:
+
+**Overview**: Separates prefill (compute-bound) and decode (memory-bound) phases into specialized workers for optimal resource utilization and performance.
+
+**Key Benefits**:
+- **Better Hardware Utilization**: Each phase uses optimal GPU configurations
+- **Improved Latency**: No head-of-line blocking between long prefills and ongoing decodes
+- **Independent Scaling**: Scale prefill and decode workers based on workload characteristics
+
+**Conditional Disaggregation**: Dynamo automatically decides at runtime whether to:
+- **Handle locally**: Short prefills or high cache hits processed by decode workers directly
+- **Route remotely**: Long prefills sent to dedicated prefill workers to avoid blocking
+- **Automatic fallback**: System continues operating even without prefill workers
+
+**Architecture**:
 ```yaml
 VllmPrefillWorker:    # Optimized for compute
   replicas: 1

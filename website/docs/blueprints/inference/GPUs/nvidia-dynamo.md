@@ -181,7 +181,7 @@ cd ../../blueprints/inference/nvidia-dynamo
 - **vllm**: vLLM aggregated serving with OpenAI API
 - **sglang**: SGLang with advanced RadixAttention caching
 - **trtllm**: TensorRT-LLM optimized inference
-- **multinode-vllm**: Multi-node deployment with KV routing
+- **multi-replica-vllm**: Multi-replica deployment with KV routing and high availability
 - **vllm-disagg**: Disaggregated prefill/decode workers
 - **sglang-disagg**: SGLang disaggregated with RadixAttention
 - **trtllm-disagg**: TensorRT-LLM disaggregated serving
@@ -209,7 +209,7 @@ The following examples are fully tested and production-ready with comprehensive 
 | **[vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm)** | vLLM | Qwen3-0.6B | Aggregated | G5 GPU | OpenAI API, balanced performance |
 | **[sglang](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/sglang)** | SGLang | DeepSeek-R1-Distill-8B | Aggregated | G5 GPU | RadixAttention caching |
 | **[trtllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/trtllm)** | TensorRT-LLM | DeepSeek-R1-Distill-8B | Aggregated | G5 GPU | Maximum inference performance |
-| **[multinode-vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multinode-vllm)** | vLLM | Multiple models | Multi-node | G5 GPU | KV routing, horizontal scaling |
+| **[multi-replica-vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multi-replica-vllm)** | vLLM | Multiple models | Multi-replica HA | G5 GPU | KV routing, load balancing |
 
 ### Advanced Examples (Beta)
 
@@ -249,11 +249,11 @@ These examples demonstrate advanced Dynamo features and are suitable for experim
 - Custom CUDA kernels
 - Best for production serving
 
-**🌐 **[multinode-vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multinode-vllm)**: Scalable deployments**
-- Multiple worker nodes with KV routing
-- Automatic load balancing
-- Cross-node cache sharing
-- Ideal for large-scale deployments
+**🌐 **[multi-replica-vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multi-replica-vllm)**: High availability deployments**
+- Multiple independent worker replicas with KV routing
+- Automatic load balancing and failover
+- Intelligent cache-aware request routing
+- Ideal for production workloads requiring high availability
 
 ## Test and Validate
 
@@ -471,6 +471,147 @@ For advanced customization and development:
 
 Refer to the individual README files in each blueprint example for specific customization guidance.
 
+## Multi-Node Tensor Parallelism Limitations
+
+### Understanding Multi-Replica vs Multi-Node
+
+It's important to distinguish between **multi-replica deployments** (what our examples provide) and **true multi-node tensor parallelism** (which requires specialized infrastructure):
+
+#### What Our Examples Provide (Multi-Replica)
+- **Multiple Independent Workers**: Each worker replica runs the complete model independently (TP=1)
+- **High Availability**: Service continues operating if individual workers fail
+- **Load Balancing**: Requests distributed across workers for increased throughput
+- **KV-Aware Routing**: Intelligent request routing based on cache overlap to maximize performance
+- **Kubernetes Native**: Works seamlessly with standard Kubernetes deployments
+
+#### What Our Examples Do NOT Provide (True Multi-Node TP)
+- **Cross-Node Model Sharding**: Models are not split across multiple nodes
+- **Memory Scaling for Large Models**: Each worker must fit the complete model (no cross-node memory sharing)
+- **Tensor Parallelism Across Nodes**: No cross-node tensor operations
+
+### Current Kubernetes Limitations
+
+**Kubernetes does not currently support true multi-node tensor parallelism** for distributed inference workloads due to several technical constraints:
+
+#### Infrastructure Requirements
+True multi-node tensor parallelism requires:
+- **MPI/Slurm Environment**: Uses `mpirun` or `srun` for coordinated distributed model loading
+- **Synchronized Initialization**: All participating nodes must start simultaneously and maintain coordination
+- **Low-Latency Interconnects**: Requires InfiniBand, NVLink, or similar high-performance networking
+- **Shared Process Groups**: Distributed training/inference frameworks need process group management not available in K8s
+
+#### Why Kubernetes Doesn't Support This (Currently)
+
+1. **Pod Isolation**: Kubernetes pods are designed to be isolated units, making cross-pod tensor operations challenging
+2. **Dynamic Scheduling**: K8s dynamic pod placement conflicts with the static, coordinated startup required for multi-node TP
+3. **Network Abstraction**: K8s networking abstractions don't expose the low-level network primitives needed for efficient tensor communication
+4. **Missing MPI Integration**: No native MPI job management in Kubernetes (though projects like MPI-Operator exist, they're not widely adopted for inference)
+
+### Current Support in Dynamo Backends
+
+Based on the official Dynamo documentation and examples, here's what each backend supports:
+
+#### SGLang Multi-Node Support ✅
+- **Status**: Fully supported for multi-node tensor parallelism
+- **Requirements**: Slurm environment with MPI coordination
+- **Configuration**: Uses `--nnodes`, `--node-rank`, and `--dist-init-addr` parameters
+- **Example**: DeepSeek-R1 across 4 nodes with TP16 (16 GPUs total)
+- **Kubernetes**: Not supported - requires Slurm/MPI environment
+
+```bash
+# SGLang multi-node example (Slurm only)
+python3 -m dynamo.sglang.worker \
+  --model-path /model/ \
+  --tp 16 \
+  --nnodes 2 \
+  --node-rank 0 \
+  --dist-init-addr ${HEAD_NODE_IP}:29500
+```
+
+#### TensorRT-LLM Multi-Node Support ✅
+- **Status**: Fully supported with WideEP (Wide Expert Parallelism)
+- **Requirements**: Slurm environment with MPI launcher (`srun` or `mpirun`)
+- **Configuration**: Multi-node TP16/EP16 configurations available
+- **Example**: DeepSeek-R1 across 4x GB200 nodes
+- **Kubernetes**: Not supported - requires MPI coordination
+
+```bash
+# TRT-LLM multi-node example (Slurm only)
+srun --nodes=4 --ntasks-per-node=4 \
+  python3 -m dynamo.trtllm \
+  --model-path /model/ \
+  --engine-config wide_ep_config.yaml
+```
+
+#### vLLM Multi-Node Support ❌
+- **Status**: Currently not supported for true multi-node tensor parallelism
+- **Current Capability**: Single-node tensor parallelism only (multiple GPUs on same node)
+- **Our Implementation**: Multi-replica for high availability (each replica runs full model)
+- **Future**: May be added in future vLLM releases
+
+### Workarounds for Large Models
+
+If you need to run models that don't fit on a single node, consider these alternatives:
+
+#### 1. High-Memory Single-Node Instances
+Use AWS instances with large GPU memory:
+
+```yaml
+# Example: P5.48xlarge with 8x H100 (80GB each = 640GB total)
+extraPodSpec:
+  nodeSelector:
+    karpenter.sh/nodepool: p5-gpu-karpenter
+    node.kubernetes.io/instance-type: p5.48xlarge
+resources:
+  requests:
+    gpu: "8"
+```
+
+#### 2. Model Optimization Techniques
+- **Quantization**: Use FP16, FP8, or INT8 quantized models
+- **Model Pruning**: Remove less important parameters
+- **LoRA/QLoRA**: Use parameter-efficient fine-tuned models
+
+#### 3. Slurm-Based Deployments
+For models requiring true multi-node TP, deploy outside Kubernetes:
+
+```bash
+# Use official Dynamo examples with Slurm
+cd ~/dynamo/docs/components/backends/trtllm/
+./srun_disaggregated.sh  # 8-node disaggregated deployment
+```
+
+#### 4. Disaggregated Architecture
+Use our disaggregated examples for better resource utilization:
+
+- **Prefill Workers**: Handle input processing (can be smaller instances)
+- **Decode Workers**: Handle token generation (optimized for throughput)
+- **Independent Scaling**: Scale each component based on workload
+
+### Future Development
+
+**Multi-Node Tensor Parallelism in Kubernetes** may become available in future versions through:
+
+1. **Enhanced MPI Integration**: Projects like Kubeflow's MPI-Operator for inference workloads
+2. **Native K8s Support**: Kubernetes SIG-Scheduling working on gang scheduling and coordinated pod startup
+3. **Vendor Solutions**: Cloud providers may develop custom solutions for managed inference
+4. **Framework Evolution**: Inference frameworks adding Kubernetes-native distributed execution
+
+### Recommendations
+
+**For Current Deployments:**
+
+1. **Small to Medium Models (≤70B)**: Use single-node deployments with multi-GPU instances
+2. **High Availability Needs**: Use our multi-replica examples with KV routing
+3. **Large Models (70B+)**: Consider Slurm-based deployments outside Kubernetes
+4. **Maximum Performance**: Use disaggregated architecture with optimized worker ratios
+
+**Monitoring Future Developments:**
+
+- Follow [Dynamo releases](https://github.com/ai-dynamo/dynamo/releases) for Kubernetes multi-node TP updates
+- Check [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) and [vLLM](https://github.com/vllm-project/vllm) roadmaps
+- Monitor [Kubernetes SIG-Scheduling](https://github.com/kubernetes/community/tree/master/sig-scheduling) for gang scheduling improvements
+
 ## Alternative Deployment Options
 
 ### For Existing EKS Clusters
@@ -521,7 +662,7 @@ This blueprint is designed for users who want:
 - [vLLM Example](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm/README.md): vLLM aggregated serving
 - [SGLang Example](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/sglang/README.md): RadixAttention caching
 - [TensorRT-LLM Example](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/trtllm/README.md): Optimized inference
-- [Multi-node vLLM](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multinode-vllm/README.md): Scalable deployments
+- [Multi-Replica vLLM](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multi-replica-vllm/README.md): High availability deployments
 
 ### Related Technologies
 

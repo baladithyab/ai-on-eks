@@ -14,7 +14,7 @@
 #   ./deploy.sh vllm           # Deploy vLLM aggregated serving
 #   ./deploy.sh sglang         # Deploy SGLang aggregated serving
 #   ./deploy.sh trtllm         # Deploy TensorRT-LLM aggregated serving
-#   ./deploy.sh multinode-vllm # Deploy multi-node vLLM with KV routing
+#   ./deploy.sh multi-replica-vllm # Deploy multi-replica vLLM with KV routing
 #   ./deploy.sh                # Interactive selection
 #
 # Version Management:
@@ -105,7 +105,7 @@ AVAILABLE_EXAMPLES=(
     "vllm:vLLM-based LLM serving with aggregated architecture"
     "sglang:SGLang-based LLM serving with advanced caching"
     "trtllm:TensorRT-LLM optimized inference"
-    "multinode-vllm:Multi-node vLLM deployment with KV routing"
+    "multi-replica-vllm:Multi-replica vLLM deployment with KV routing and high availability"
     "vllm-disagg:vLLM disaggregated serving (separate prefill/decode workers)"
     "sglang-disagg:SGLang disaggregated serving with RadixAttention"
     "trtllm-disagg:TensorRT-LLM disaggregated serving for maximum performance"
@@ -142,7 +142,7 @@ EXAMPLE=""
 if [ $# -gt 0 ]; then
     EXAMPLE="$1"
     # Validate provided example
-    VALID_EXAMPLES=("hello-world" "vllm" "sglang" "trtllm" "multinode-vllm" "vllm-disagg" "sglang-disagg" "trtllm-disagg" "kv-routing" "sla-planner")
+    VALID_EXAMPLES=("hello-world" "vllm" "sglang" "trtllm" "multi-replica-vllm" "vllm-disagg" "sglang-disagg" "trtllm-disagg" "kv-routing" "sla-planner")
     if [[ ! " ${VALID_EXAMPLES[@]} " =~ " ${EXAMPLE} " ]]; then
         error "Invalid example: ${EXAMPLE}"
         info "Available examples: ${VALID_EXAMPLES[*]}"
@@ -239,7 +239,7 @@ fi
 success "Manifest file found: ${MANIFEST_FILE}"
 
 # Check for HF token secret (for models that need it)
-if [[ "$EXAMPLE" =~ ^(vllm|sglang|trtllm|multinode-vllm|vllm-disagg|sglang-disagg|trtllm-disagg)$ ]]; then
+if [[ "$EXAMPLE" =~ ^(vllm|sglang|trtllm|multi-replica-vllm|vllm-disagg|sglang-disagg|trtllm-disagg)$ ]]; then
     if ! kubectl get secret hf-token-secret -n "${NAMESPACE}" >/dev/null 2>&1; then
         warn "HuggingFace token secret not found"
 
@@ -373,11 +373,11 @@ case "$EXAMPLE" in
         echo "    -H 'Content-Type: application/json' \\"
         echo "    -d '{\"model\": \"model-name\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]}'"
         ;;
-    "multinode-vllm")
-        echo "Test the multinode-vllm service:"
+    "multi-replica-vllm")
+        echo "Test the multi-replica-vllm service:"
         echo "  kubectl port-forward svc/${EXAMPLE}-frontend 8000:8000 -n ${NAMESPACE}"
         echo "  curl http://localhost:8000/health"
-        echo "  # Multi-node deployment may take longer to fully initialize"
+        echo "  # Multi-replica deployment may take longer to fully initialize"
         ;;
 esac
 

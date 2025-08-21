@@ -4,7 +4,7 @@
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: multinode-vllm
+  name: multi-replica-vllm
 spec:
   services:
     Frontend:
@@ -26,7 +26,7 @@ spec:
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
-      dynamoNamespace: multinode-vllm
+      dynamoNamespace: multi-replica-vllm
       componentType: main
       replicas: 1
       resources:
@@ -64,7 +64,7 @@ spec:
         periodSeconds: 10
         timeoutSeconds: 30
         failureThreshold: 60
-      dynamoNamespace: multinode-vllm
+      dynamoNamespace: multi-replica-vllm
       componentType: worker
       replicas: 2
       resources:
@@ -118,7 +118,7 @@ spec:
         periodSeconds: 10
         timeoutSeconds: 30
         failureThreshold: 60
-      dynamoNamespace: multinode-vllm
+      dynamoNamespace: multi-replica-vllm
       componentType: worker
       replicas: 2
       resources:
