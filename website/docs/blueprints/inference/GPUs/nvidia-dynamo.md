@@ -349,19 +349,18 @@ The deployment automatically manages Dynamo versions with flexible override opti
 **Override Options:**
 ```bash
 # Environment variable (highest priority)
-export DYNAMO_VERSION=v0.5.0
+export DYNAMO_VERSION=v0.4.0
 ./deploy.sh vllm
 
 # Inline override
-DYNAMO_VERSION=v0.5.0 ./deploy.sh sglang
+DYNAMO_VERSION=v0.4.0 ./deploy.sh sglang
 
 # Update terraform/blueprint.tfvars (persistent)
-dynamo_stack_version = "v0.5.0"
+dynamo_stack_version = "v0.4.0"
 ```
 
 **Supported Versions:**
 - **v0.4.0**: Current stable release (default)
-- **v0.5.0**: Next release (when available)
 - Custom versions from private builds
 
 ### Custom Model Deployment
@@ -390,39 +389,23 @@ VllmWorker:
       gpu: '4'
 ```
 
-### Karpenter Node Pool Optimization
-
-The deployment automatically optimizes Karpenter node pools for NVIDIA Dynamo workloads using **kubectl patches**:
-
-**New Dynamo-Specific Pool:**
-- **dynamo-c7i-cpu-nodepool**: Latest C7i instances with BuildKit support (weight: 100)
-
-**Existing Pool Optimizations:**
-- **g6-gpu-karpenter**: Patched with Dynamo labels and increased weight to 100
-- **g5-gpu-karpenter & x86-cpu-karpenter**: Weight reduced to 50 for balanced scheduling
-- **trainium-trn1 & inferentia-inf2**: Weight reduced to 20 to conserve resources for Dynamo
-
-**BuildKit Support:**
-- **Bottlerocket UserData**: Patches existing NodeClasses with `user.max_user_namespaces = 65536`
-- **Container Build Capability**: Enables rootless BuildKit for Dynamo's container build requirements
-- **Security**: Maintains Bottlerocket's security model while enabling user namespaces
-
-This approach provides higher priority scheduling for Dynamo workloads while maintaining compatibility with existing infrastructure.
 
 ### Configuration Options
 
-Modify `terraform/blueprint.tfvars` for customization:
+The main configuration is in `terraform/blueprint.tfvars`:
 
 ```hcl
-# Enable custom node pools (optional - disabled by default)
-enable_custom_karpenter_nodepools = true
+# Required for Dynamo deployment
+enable_dynamo_stack = true
+enable_argocd       = true
 
-# Choose AMI (AL2023 recommended)
-use_bottlerocket = false
+# Dynamo platform version
+dynamo_stack_version = "v0.4.0"
 
-# Resource limits
-karpenter_cpu_limits = 10000
-karpenter_memory_limits = 10000
+# Required infrastructure components
+enable_aws_efs_csi_driver        = true
+enable_aws_efa_k8s_device_plugin = true
+enable_ai_ml_observability_stack = true
 ```
 
 ## Troubleshooting
@@ -430,9 +413,9 @@ karpenter_memory_limits = 10000
 ### Common Issues
 
 1. **GPU Nodes Not Available**: Check Karpenter logs and instance availability
-2. **Image Pull Errors**: Verify ECR repositories and image push success
-3. **Pod Failures**: Check resource limits and cluster capacity
-4. **Deployment Timeouts**: Ensure base images are built and available
+2. **Pod Failures**: Check resource limits and cluster capacity  
+3. **Model Download Failures**: Verify HuggingFace token and network connectivity
+4. **API 503 Errors**: Wait for model loading or check worker health
 
 ### Debug Commands
 
@@ -442,20 +425,51 @@ kubectl get nodes
 kubectl get pods -n dynamo-cloud
 
 # View logs
-kubectl logs -n dynamo-cloud deployment/dynamo-operator
-kubectl logs -n dynamo-cloud deployment/dynamo-api-store
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server
+kubectl logs -n dynamo-cloud -l app=vllm-worker
 
 # Check deployments
-source dynamo_venv/bin/activate
-dynamo deployment list --endpoint "$DYNAMO_CLOUD"
+kubectl get dynamographdeployment -n dynamo-cloud
+kubectl describe dynamographdeployment <name> -n dynamo-cloud
 ```
 
-### Performance Optimization
+## Node Selection and Customization
 
-- **Model Size Guidelines**: Use appropriate architecture for model parameters
-- **Resource Allocation**: Match GPU count to model requirements
-- **Network Configuration**: Ensure EFA is enabled for multi-node setups
-- **Storage**: Use EFS for shared model storage and caching
+### Selecting Instance Types
+
+You can customize which Karpenter node pool your Dynamo components deploy to by modifying the `nodeSelector` in your DynamoGraphDeployment:
+
+```yaml
+# Example: Deploy GPU worker to G5 instances
+VllmWorker:
+  extraPodSpec:
+    nodeSelector:
+      karpenter.sh/nodepool: g5-gpu-karpenter
+  resources:
+    requests:
+      gpu: "1"
+
+# Example: Deploy frontend to CPU instances      
+Frontend:
+  extraPodSpec:
+    nodeSelector:
+      karpenter.sh/nodepool: cpu-karpenter
+```
+
+**Available Node Pools** (configured in base infrastructure):
+- `g5-gpu-karpenter`: G5 instances with NVIDIA A10G GPUs
+- `g6-gpu-karpenter`: G6 instances with NVIDIA L4 GPUs (if configured)
+- `cpu-karpenter`: CPU-only instances for frontends
+
+### Custom Development
+
+For advanced customization and development:
+
+1. **Source Code**: Full Dynamo source code is available at [~/dynamo](https://github.com/ai-dynamo/dynamo) with comprehensive documentation and examples
+2. **Blueprint Examples**: Each example in the `blueprints/inference/nvidia-dynamo/` folder includes detailed README files
+3. **Container Source**: All source code is included in NGC containers at `/workspace/` for in-container customization
+
+Refer to the individual README files in each blueprint example for specific customization guidance.
 
 ## Alternative Deployment Options
 

@@ -22,8 +22,6 @@ echo "Using NGC API key: ${NGC_API_KEY:0:10}..."
 mkdir -p ./terraform/_LOCAL
 cp -r ../base/terraform/* ./terraform/_LOCAL
 
-# Merge Dynamo-specific variables with base variables
-cat ./terraform/dynamo-variables.tf >> ./terraform/_LOCAL/variables.tf
 
 cd terraform/_LOCAL
 source ./install.sh
