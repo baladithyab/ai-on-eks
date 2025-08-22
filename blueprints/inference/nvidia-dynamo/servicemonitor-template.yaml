@@ -1,0 +1,24 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dynamo-frontend-metrics
+  namespace: dynamo-cloud
+  labels:
+    # Required label for Prometheus to discover this ServiceMonitor
+    release: kube-prometheus-stack
+    app.kubernetes.io/name: dynamo-metrics
+spec:
+  selector:
+    matchLabels:
+      # Match frontend services created by DynamoGraphDeployment
+      nvidia.com/dynamo-component: Frontend
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    # Only scrape after inference requests have been made
+    honorLabels: true
+  namespaceSelector:
+    matchNames:
+    - dynamo-cloud

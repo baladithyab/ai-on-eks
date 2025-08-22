@@ -313,6 +313,19 @@ fi
 # Wait a moment for resources to be created
 sleep 3
 
+# Deploy ServiceMonitor for metrics collection
+SERVICEMONITOR_FILE="${SCRIPT_DIR}/servicemonitor-template.yaml"
+if [ -f "${SERVICEMONITOR_FILE}" ]; then
+    info "Deploying ServiceMonitor for Prometheus metrics collection..."
+    if kubectl apply -f "${SERVICEMONITOR_FILE}"; then
+        success "ServiceMonitor deployed successfully"
+    else
+        warn "Failed to deploy ServiceMonitor, continuing..."
+    fi
+else
+    warn "ServiceMonitor template not found at ${SERVICEMONITOR_FILE}"
+fi
+
 #---------------------------------------------------------------
 # Post-Deployment Information
 #---------------------------------------------------------------

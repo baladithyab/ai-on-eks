@@ -193,7 +193,7 @@ cd ../../blueprints/inference/nvidia-dynamo
 - **Faster Deployment**: Skip 20+ minute build process
 - **Consistent Experience**: NVIDIA-tested and validated images
 - **Version Management**: Automatic version detection from `blueprint.tfvars`
-- **Override Support**: Use `DYNAMO_VERSION=v0.5.0 ./deploy.sh` to override version
+- **Override Support**: Use `DYNAMO_VERSION=v0.4.0 ./deploy.sh` to override version
 
 </CollapsibleContent>
 

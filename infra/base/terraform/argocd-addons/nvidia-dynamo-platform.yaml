@@ -12,24 +12,15 @@ spec:
     helm:
       values: |
         # NVIDIA Dynamo Platform Configuration for ai-on-eks using NGC
+        # Using minimal config - NGC chart defaults should work
+        
+        # NGC authentication (required)
         dynamo-operator:
-          enabled: true
-          # NGC containers already configured in the chart
           imagePullSecrets:
             - name: docker-imagepullsecret
 
-        # NATS configuration
-        nats:
-          enabled: true
-          jetstream:
-            enabled: true
-            memoryStore:
-              enabled: true
-              maxSize: 1Gi
-
-        # etcd configuration - CRITICAL FIX
+        # etcd configuration - disable problematic features for EKS
         etcd:
-          enabled: true
           preUpgradeJob:
             enabled: false
           auth:
@@ -37,21 +28,10 @@ spec:
               create: false
             token:
               enabled: false
-          persistence:
-            enabled: true
-            size: 8Gi
-            storageClass: gp2
-
-        # Global configuration for EKS
+        
+        # Use EFS for shared storage
         global:
-          storageClass: gp2
-
-        # Enable monitoring integration
-        serviceMonitor:
-          enabled: true
-          namespace: monitoring
-          labels:
-            release: prometheus-stack
+          storageClass: efs-sc-dynamic
   destination:
     server: https://kubernetes.default.svc
     namespace: dynamo-cloud
