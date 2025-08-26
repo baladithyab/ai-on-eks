@@ -66,15 +66,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Detect if we're in blueprints or infra directory
 if [[ "$SCRIPT_DIR" == *"blueprints/inference/nvidia-dynamo"* ]]; then
     PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-    INFRA_DIR="$PROJECT_ROOT/infra/dynamo"
+    INFRA_DIR="$PROJECT_ROOT/infra/nvidia-dynamo"
     CONTEXT="blueprint"
-elif [[ "$SCRIPT_DIR" == *"infra/dynamo"* ]]; then
+elif [[ "$SCRIPT_DIR" == *"infra/nvidia-dynamo"* ]]; then
     PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
     INFRA_DIR="$SCRIPT_DIR"
     CONTEXT="infra"
 else
     PROJECT_ROOT="$(cd "$SCRIPT_DIR" && pwd)"
-    INFRA_DIR="$PROJECT_ROOT/infra/dynamo"
+    INFRA_DIR="$PROJECT_ROOT/infra/nvidia-dynamo"
     CONTEXT="standalone"
 fi
 
@@ -267,7 +267,7 @@ echo ""
 info "Next Steps:"
 echo "  1. Deploy infrastructure using the appropriate install scripts:"
 if [[ "$CONTEXT" == "blueprint" ]]; then
-    echo "     - Run: ../../../infra/dynamo/install.sh (for Dynamo infrastructure)"
+    echo "     - Run: ../../../infra/nvidia-dynamo/install.sh (for Dynamo infrastructure)"
     echo "  2. Set up inference environment: ./setup.sh"
     echo "  3. Deploy inference graph: ./deploy.sh"
     echo "  4. Test deployment: ./test.sh"

@@ -20,7 +20,7 @@
 # Version Management:
 #   - Automatically reads version from ../infra/nvidia-dynamo/terraform/blueprint.tfvars
 #   - Can override with DYNAMO_VERSION environment variable
-#   - Example: DYNAMO_VERSION=v0.5.0 ./deploy.sh vllm
+#   - Example: DYNAMO_VERSION=v0.4.0 ./deploy.sh vllm
 #---------------------------------------------------------------
 
 set -euo pipefail

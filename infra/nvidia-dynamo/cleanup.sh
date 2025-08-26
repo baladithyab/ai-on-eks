@@ -129,14 +129,6 @@ info "Phase 2: Cleaning up other conflicting resources..."
 info "Removing existing CloudWatch log group..."
 aws logs delete-log-group --log-group-name "/aws/eks/${CLUSTER_NAME}/cluster" --region ${REGION} 2>/dev/null || info "Log group not found or already deleted"
 
-# Clean up manually created Karpenter resources (only if cluster is accessible)
-if [ "$CLUSTER_ACCESSIBLE" = true ]; then
-    info "Cleaning up manually created Karpenter resources..."
-    kubectl delete nodepool dynamo-c7i-cpu --ignore-not-found=true 2>/dev/null || info "NodePool not found"
-    kubectl delete nodeclass dynamo-c7i-nodeclass --ignore-not-found=true 2>/dev/null || info "NodeClass not found"
-else
-    info "Skipping Karpenter resource cleanup (cluster not accessible)"
-fi
 
 # Phase 3: Run base cleanup and remove _LOCAL directory
 info "Phase 3: Running Terraform cleanup..."
@@ -201,7 +193,6 @@ if [ "$TERRAFORM_SUCCESS" = true ]; then
     echo "Cleaned up:"
     if [ "$CLUSTER_ACCESSIBLE" = true ]; then
         echo "  ✓ DynamoGraphDeployments and DynamoComponentDeployments"
-        echo "  ✓ Manual Karpenter resources"
     else
         echo "  ⚠ Kubernetes resources (skipped - cluster not accessible)"
     fi
@@ -222,7 +213,6 @@ else
     echo "Cleaned up:"
     if [ "$CLUSTER_ACCESSIBLE" = true ]; then
         echo "  ✓ DynamoGraphDeployments and DynamoComponentDeployments"
-        echo "  ✓ Manual Karpenter resources"
     else
         echo "  ⚠ Kubernetes resources (skipped - cluster not accessible)"
     fi

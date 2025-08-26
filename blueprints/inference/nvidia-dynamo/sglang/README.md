@@ -147,7 +147,7 @@ nodeSelector:
 
 ### Using the Deployment Script (Recommended)
 ```bash
-cd /home/ubuntu/ai-on-eks/blueprints/inference/nvidia-dynamo
+cd blueprints/inference/nvidia-dynamo
 ./deploy.sh sglang
 ```
 
