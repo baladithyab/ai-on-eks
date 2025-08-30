@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dynamo-platform-etcd
+  namespace: dynamo-cloud
+spec:
+  template:
+    spec:
+      initContainers:
+      - name: fix-permissions
+        image: busybox:1.35
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Fixing permissions for etcd data directory..."
+          mkdir -p /bitnami/etcd/data
+          chown -R 1001:1001 /bitnami/etcd/data
+          chmod -R 755 /bitnami/etcd/data
+          echo "Permissions fixed successfully"
+          ls -la /bitnami/etcd/
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        volumeMounts:
+        - name: data
+          mountPath: /bitnami/etcd/data

@@ -1,0 +1,105 @@
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: hyperpod-vllm-simple
+  namespace: dynamo-cloud
+spec:
+  services:
+    Frontend:
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      dynamoNamespace: hyperpod-vllm-simple
+      componentType: main
+      replicas: 1
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      extraPodSpec:
+        nodeSelector:
+          # Target CPU node for frontend
+          kubernetes.io/arch: amd64
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.4.0
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      dynamoNamespace: hyperpod-vllm-simple
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "8"
+          memory: "32Gi"
+          gpu: "1"
+        limits:
+          cpu: "8"
+          memory: "32Gi"
+          gpu: "1"
+      envs:
+        - name: DYN_SYSTEM_ENABLED
+          value: "true"
+        - name: DYN_SYSTEM_USE_ENDPOINT_HEALTH_STATUS
+          value: "[\"generate\"]"
+        - name: DYN_SYSTEM_PORT
+          value: "9090"
+      extraPodSpec:
+        nodeSelector:
+          # Target GPU node for worker
+          kubernetes.io/arch: amd64
+        tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 10
+            failureThreshold: 60
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.4.0
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm.log
