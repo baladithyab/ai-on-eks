@@ -207,6 +207,13 @@ variable "huggingface_token" {
   default     = "DUMMY_TOKEN_REPLACE_ME"
   sensitive   = true
 }
+
+variable "ngc_api_key" {
+  description = "NVIDIA NGC API Key (required for NVIDIA Dynamo - get from https://ngc.nvidia.com/setup/api-key)"
+  type        = string
+  default     = "DUMMY_NGC_KEY_REPLACE_ME"
+  sensitive   = true
+}
 variable "enable_rayserve_ha_elastic_cache_redis" {
   description = "Flag to enable Ray Head High Availability with Elastic Cache for Redis"
   type        = bool

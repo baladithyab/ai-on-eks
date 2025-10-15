@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #---------------------------------------------------------------
-# NVIDIA Dynamo v0.4.1 Example Testing Script
+# NVIDIA Dynamo v0.5.1 Example Testing Script
 #
 # Simple testing script for deployed Dynamo examples.
 # Tests health, metrics, and API endpoints based on example type.

@@ -1,31 +1,41 @@
-# NVIDIA Dynamo v0.5.0 Inference Examples
+# NVIDIA Dynamo v0.5.1 Inference Examples
 
-This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.5.0 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
+This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.5.1 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
 
 ## Quick Start
 
-### 1. Deploy Infrastructure
+### 1. Configure Secrets
 ```bash
-# Deploy Dynamo platform via ArgoCD
+# Edit Terraform configuration to add your API tokens
 cd infra/nvidia-dynamo
+nano terraform/blueprint.tfvars
+
+# Add your tokens:
+# ngc_api_key       = "YOUR_NGC_API_KEY"
+# huggingface_token = "YOUR_HUGGINGFACE_TOKEN"
+```
+
+### 2. Deploy Infrastructure
+```bash
+# Deploy Dynamo platform via Terraform and ArgoCD
 ./install.sh
 ```
 
-### 2. Deploy Examples
+### 3. Deploy Examples
 ```bash
-# Deploy any example (HF token handled automatically)
-cd blueprints/inference/nvidia-dynamo
+# Deploy any example (secrets already configured via Terraform)
+cd ../../blueprints/inference/nvidia-dynamo
 ./deploy.sh vllm           # or any other example
 ```
 
-### 3. Test Deployment
+### 4. Test Deployment
 ```bash
 # Port forward and test API
 kubectl port-forward svc/vllm-frontend 8000:8000 -n dynamo-cloud
 curl http://localhost:8000/v1/models
 ```
 
-### 4. Cleanup
+### 5. Cleanup
 ```bash
 # Remove all deployments and infrastructure
 cd infra/nvidia-dynamo
@@ -37,7 +47,12 @@ cd infra/nvidia-dynamo
 - **EKS Cluster**: Kubernetes 1.28+ with GPU nodes (G5 instances recommended)
 - **Karpenter**: For automatic GPU node provisioning
 - **ArgoCD**: Deployed via the installation script
-- **HuggingFace Token**: For model downloads (set `HF_TOKEN` environment variable or enter interactively)
+- **NGC API Key**: Required for accessing NVIDIA container images ([Get NGC API Key](https://ngc.nvidia.com/setup/api-key))
+- **HuggingFace Token**: Required for model downloads ([Get HF Token](https://huggingface.co/settings/tokens))
+
+:::warning Important
+Both NGC API key and HuggingFace token are **required** and must be configured in `infra/nvidia-dynamo/terraform/blueprint.tfvars` before deployment. Secrets are now managed by Terraform (not shell scripts).
+:::
 
 ## Available Examples
 
@@ -109,9 +124,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 ### NGC Container Images
 All examples use official NVIDIA NGC prebuilt containers with full source code:
-- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0`
-- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.5.0`
-- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.5.0`
+- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1`
+- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.5.1`
+- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.5.1`
 
 **Key Features:**
 - ✅ **Full Source Included**: All Python code available at `/workspace/`
@@ -204,7 +219,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -222,7 +237,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1
           args: ["python3", "-m", "dynamo.vllm", "--model", "Qwen/Qwen3-0.6B"]
 ```
 
@@ -461,7 +476,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter  # CPU-only frontend
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -483,7 +498,7 @@ spec:
           operator: Exists
           effect: NoSchedule
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.vllm", "--model", "your-model-here"]
 ```
