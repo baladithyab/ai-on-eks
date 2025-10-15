@@ -20,7 +20,7 @@
 # Version Management:
 #   - Automatically reads version from ../infra/nvidia-dynamo/terraform/blueprint.tfvars
 #   - Can override with DYNAMO_VERSION environment variable
-#   - Example: DYNAMO_VERSION=v0.4.1 ./deploy.sh vllm
+#   - Example: DYNAMO_VERSION=v0.5.1 ./deploy.sh vllm
 #---------------------------------------------------------------
 
 set -euo pipefail
@@ -40,7 +40,7 @@ NAMESPACE="dynamo-cloud"
 
 # Dynamo version management
 TFVARS_FILE="${SCRIPT_DIR}/../../../infra/nvidia-dynamo/terraform/blueprint.tfvars"
-DEFAULT_VERSION="v0.4.1"  # Fallback if tfvars file not found
+DEFAULT_VERSION="v0.5.1"  # Fallback if tfvars file not found
 VERSION_SOURCE=""  # Track where version came from
 
 # Utility functions
@@ -225,15 +225,15 @@ DEPLOYMENT_NAME="${EXAMPLE}"
 TEMP_MANIFEST=""
 if [ -f "${MANIFEST_FILE}" ]; then
     # Check if manifest contains version references that need updating
-    if grep -q 'nvcr.io/nvidia/ai-dynamo/.*:0\.4\.0' "${MANIFEST_FILE}" 2>/dev/null; then
+    if grep -q 'nvcr.io/nvidia/ai-dynamo/.*:0\.5\.0' "${MANIFEST_FILE}" 2>/dev/null; then
         # Extract just the version number without 'v' prefix if present
         VERSION_TAG="${DYNAMO_VERSION#v}"
 
-        # Only update if version is different from 0.4.1
-        if [ "${VERSION_TAG}" != "0.4.1" ]; then
+        # Only update if version is different from 0.5.1
+        if [ "${VERSION_TAG}" != "0.5.1" ]; then
             TEMP_MANIFEST="$(mktemp)"
             info "Updating manifest to use Dynamo version ${VERSION_TAG}..."
-            sed "s/:0\.4\.0/:${VERSION_TAG}/g" "${MANIFEST_FILE}" > "${TEMP_MANIFEST}"
+            sed "s/:0\.5\.0/:${VERSION_TAG}/g" "${MANIFEST_FILE}" > "${TEMP_MANIFEST}"
             MANIFEST_FILE="${TEMP_MANIFEST}"
         fi
     fi
@@ -330,8 +330,8 @@ if [[ "$EXAMPLE" != "hello-world" ]]; then
     fi
 fi
 
-# Note: NGC token secret is NOT required for Dynamo v0.5.0 TensorRT-LLM images
-# The official nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.0 images are publicly accessible
+# Note: NGC token secret is NOT required for Dynamo v0.5.1 TensorRT-LLM images
+# The official nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.1 images are publicly accessible
 # Commenting out NGC check as it's not needed for public Dynamo releases
 
 

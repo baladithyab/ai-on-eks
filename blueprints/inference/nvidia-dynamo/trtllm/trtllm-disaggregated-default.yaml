@@ -39,7 +39,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.1
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
@@ -89,7 +89,7 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 120
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.1
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
@@ -164,7 +164,7 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 120
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.1
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
