@@ -119,22 +119,108 @@ resource "kubectl_manifest" "mpi_operator" {
   ]
 }
 
-# NVIDIA Dynamo CRDs
-resource "kubectl_manifest" "nvidia_dynamo_crds_yaml" {
-  count     = var.enable_dynamo_stack ? 1 : 0
-  yaml_body = templatefile("${path.module}/argocd-addons/nvidia-dynamo-crds.yaml", { dynamo_version = var.dynamo_stack_version })
+#---------------------------------------------------------------
+# NVIDIA Dynamo - NGC ArgoCD Repository Secret
+# This must exist before ArgoCD tries to fetch the Dynamo Helm charts
+#---------------------------------------------------------------
+resource "kubernetes_secret_v1" "nvidia_dynamo_repo" {
+  count = var.enable_dynamo_stack ? 1 : 0
+
+  metadata {
+    name      = "nvidia-dynamo-repo"
+    namespace = "argocd"
+    labels = {
+      "argocd.argoproj.io/secret-type" = "repository"
+    }
+  }
+
+  type = "Opaque"
+
+  data = {
+    type     = "helm"
+    name     = "nvidia-dynamo"
+    url      = "https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts"
+    username = "$oauthtoken"
+    password = var.ngc_api_key
+  }
 
   depends_on = [
     module.eks_blueprints_addons
   ]
 }
 
+#---------------------------------------------------------------
+# NVIDIA Dynamo ArgoCD Applications
+#---------------------------------------------------------------
+
+# NVIDIA Dynamo CRDs
+resource "kubectl_manifest" "nvidia_dynamo_crds_yaml" {
+  count     = var.enable_dynamo_stack ? 1 : 0
+  yaml_body = templatefile("${path.module}/argocd-addons/nvidia-dynamo-crds.yaml", { dynamo_version = var.dynamo_stack_version })
+
+  depends_on = [
+    module.eks_blueprints_addons,
+    kubernetes_secret_v1.nvidia_dynamo_repo
+  ]
+}
+
 # NVIDIA Dynamo Platform
+# Note: This will create the dynamo-cloud namespace via CreateNamespace=true
 resource "kubectl_manifest" "nvidia_dynamo_platform_yaml" {
   count     = var.enable_dynamo_stack ? 1 : 0
   yaml_body = templatefile("${path.module}/argocd-addons/nvidia-dynamo-platform.yaml", { dynamo_version = var.dynamo_stack_version })
 
   depends_on = [
-    module.eks_blueprints_addons
+    module.eks_blueprints_addons,
+    kubectl_manifest.nvidia_dynamo_crds_yaml,
+    kubernetes_secret_v1.nvidia_dynamo_repo
+  ]
+}
+
+# NGC Docker Registry Secret (for container image pull)
+resource "kubernetes_secret_v1" "ngc_secret" {
+  count = var.enable_dynamo_stack ? 1 : 0
+
+  metadata {
+    name      = "ngc-secret"
+    namespace = "dynamo-cloud"
+  }
+
+  type = "kubernetes.io/dockerconfigjson"
+
+  data = {
+    ".dockerconfigjson" = jsonencode({
+      auths = {
+        "nvcr.io" = {
+          username = "$oauthtoken"
+          password = var.ngc_api_key
+          auth     = base64encode("$oauthtoken:${var.ngc_api_key}")
+        }
+      }
+    })
+  }
+
+  depends_on = [
+    kubectl_manifest.nvidia_dynamo_platform_yaml
+  ]
+}
+
+# HuggingFace Token Secret (for model downloads)
+resource "kubernetes_secret_v1" "hf_token_secret" {
+  count = var.enable_dynamo_stack ? 1 : 0
+
+  metadata {
+    name      = "hf-token-secret"
+    namespace = "dynamo-cloud"
+  }
+
+  type = "Opaque"
+
+  data = {
+    HF_TOKEN = var.huggingface_token
+  }
+
+  depends_on = [
+    kubectl_manifest.nvidia_dynamo_platform_yaml
   ]
 }

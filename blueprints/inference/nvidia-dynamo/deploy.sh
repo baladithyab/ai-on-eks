@@ -283,56 +283,51 @@ if [ ! -f "${MANIFEST_FILE}" ]; then
 fi
 success "Manifest file found: ${MANIFEST_FILE}"
 
-# Check for HF token secret (for models that need it)
+#---------------------------------------------------------------
+# Secret Validation
+#---------------------------------------------------------------
+
+# Check for HF token secret (required for most models)
+# This secret should be created by Terraform during infrastructure deployment
 if [[ "$EXAMPLE" != "hello-world" ]]; then
     if ! kubectl get secret hf-token-secret -n "${NAMESPACE}" >/dev/null 2>&1; then
-        warn "HuggingFace token secret not found"
-
-        # Check for HF_TOKEN environment variable first
-        if [ -n "${HF_TOKEN:-}" ]; then
-            info "Found HF_TOKEN environment variable, creating secret..."
-            if kubectl create secret generic hf-token-secret \
-                --from-literal=HF_TOKEN="${HF_TOKEN}" -n "${NAMESPACE}"; then
-                success "HuggingFace token secret created from environment variable"
-            else
-                error "Failed to create HuggingFace token secret"
-                exit 1
-            fi
-        else
-            warn "Some models require HuggingFace authentication for downloading."
-            warn ""
-            warn "Options:"
-            warn "  1. Set HF_TOKEN environment variable and re-run this script"
-            warn "  2. Enter token now to create the secret"
-            warn "  3. Continue without token (may fail for some models)"
-            warn ""
-            echo -n "Enter HuggingFace token (or press Enter to continue): "
-            read -r hf_token
-
-            if [ -n "$hf_token" ]; then
-                info "Creating HuggingFace token secret..."
-                if kubectl create secret generic hf-token-secret \
-                    --from-literal=HF_TOKEN="${hf_token}" -n "${NAMESPACE}"; then
-                    success "HuggingFace token secret created"
-                else
-                    error "Failed to create HuggingFace token secret"
-                    exit 1
-                fi
-            else
-                warn "Proceeding without HuggingFace token"
-                warn "If model download fails, create the secret manually:"
-                warn "  kubectl create secret generic hf-token-secret \\"
-                warn "    --from-literal=HF_TOKEN=your-token-here -n ${NAMESPACE}"
-            fi
-        fi
+        error "HuggingFace token secret not found in namespace ${NAMESPACE}"
+        error ""
+        error "The HuggingFace token secret is now managed by Terraform."
+        error "Please ensure you have:"
+        error "  1. Set 'huggingface_token' in infra/nvidia-dynamo/terraform/blueprint.tfvars"
+        error "  2. Run 'terraform apply' to create the secret"
+        error ""
+        error "If you need to update the token:"
+        error "  1. Update the value in blueprint.tfvars"
+        error "  2. Run: cd infra/nvidia-dynamo/terraform/_LOCAL && terraform apply"
+        error ""
+        error "For manual secret creation (not recommended):"
+        error "  kubectl create secret generic hf-token-secret \\"
+        error "    --from-literal=HF_TOKEN=your-token-here -n ${NAMESPACE}"
+        exit 1
     else
         success "HuggingFace token secret found"
     fi
 fi
 
-# Note: NGC token secret is NOT required for Dynamo v0.5.1 TensorRT-LLM images
-# The official nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.1 images are publicly accessible
-# Commenting out NGC check as it's not needed for public Dynamo releases
+# Check for NGC image pull secret (required for pulling Dynamo containers)
+# This secret should be created by Terraform during infrastructure deployment
+if ! kubectl get secret ngc-secret -n "${NAMESPACE}" >/dev/null 2>&1; then
+    error "NGC image pull secret not found in namespace ${NAMESPACE}"
+    error ""
+    error "The NGC image pull secret is now managed by Terraform."
+    error "Please ensure you have:"
+    error "  1. Set 'ngc_api_key' in infra/nvidia-dynamo/terraform/blueprint.tfvars"
+    error "  2. Run 'terraform apply' to create the secret"
+    error ""
+    error "If you need to update the NGC API key:"
+    error "  1. Update the value in blueprint.tfvars"
+    error "  2. Run: cd infra/nvidia-dynamo/terraform/_LOCAL && terraform apply"
+    exit 1
+else
+    success "NGC image pull secret found"
+fi
 
 
 

@@ -75,14 +75,21 @@ Install the following tools on your setup host (recommended: EC2 instance t3.xla
 
 ### Required API Tokens
 
-- **[NGC API Token](https://catalog.ngc.nvidia.com/)**: Required for accessing NVIDIA's prebuilt Dynamo container images
+You must configure the following tokens in the Terraform configuration **before** deployment:
+
+- **[NGC API Token](https://catalog.ngc.nvidia.com/)**: **Required** for accessing NVIDIA's prebuilt Dynamo container images
   - Sign up at [NVIDIA NGC](https://catalog.ngc.nvidia.com/)
-  - Generate an API key from your account settings
-  - Set as `NGC_API_KEY` environment variable or provide during installation
-- **[HuggingFace Token](https://huggingface.co/settings/tokens)**: Required for downloading models
+  - Generate an API key from your account settings: [NGC Setup](https://ngc.nvidia.com/setup/api-key)
+  - Add to `infra/nvidia-dynamo/terraform/blueprint.tfvars` as `ngc_api_key`
+
+- **[HuggingFace Token](https://huggingface.co/settings/tokens)**: **Required** for downloading models
   - Create account at [HuggingFace](https://huggingface.co/)
-  - Generate access token with model read permissions
-  - Set as `HF_TOKEN` environment variable or provide interactively during deployment
+  - Generate access token with model read permissions: [HF Tokens](https://huggingface.co/settings/tokens)
+  - Add to `infra/nvidia-dynamo/terraform/blueprint.tfvars` as `huggingface_token`
+
+:::warning Important
+Both tokens are **required** and must be configured in `blueprint.tfvars` before running `install.sh`. The deployment will fail if these tokens are not properly configured.
+:::
 
 <CollapsibleContent header={<h2><span>Deploying the Infrastructure</span></h2>}>
 
@@ -94,12 +101,32 @@ Complete the following steps to deploy NVIDIA Dynamo infrastructure on Amazon EK
 git clone https://github.com/awslabs/ai-on-eks.git && cd ai-on-eks
 ```
 
-### Step 2: Deploy Infrastructure and Platform
+### Step 2: Configure Required Secrets
 
-Navigate to the infrastructure directory and run the installation script:
+Edit the Terraform configuration file to add your API tokens:
 
 ```bash
 cd infra/nvidia-dynamo
+nano terraform/blueprint.tfvars
+```
+
+Update the following values with your actual tokens:
+
+```hcl
+# Required Secrets - Replace with your actual tokens
+ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
+huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
+```
+
+:::tip
+Keep your `blueprint.tfvars` file secure and never commit it to version control with real tokens. Consider using environment variables or a secrets management solution for production deployments.
+:::
+
+### Step 3: Deploy Infrastructure and Platform
+
+Run the installation script:
+
+```bash
 ./install.sh
 ```
 
@@ -109,6 +136,7 @@ This command provisions your complete environment:
 - **Monitoring Stack**: Prometheus, Grafana, and AI/ML observability
 - **ArgoCD**: GitOps deployment platform
 - **Dynamo Platform**: Deploys using [official NVIDIA Dynamo Helm charts](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/helm-charts/dynamo-platform) (Operator, API Store, NATS, PostgreSQL, MinIO)
+- **Kubernetes Secrets**: NGC authentication and HuggingFace token secrets (managed by Terraform)
 
 **Duration**: 15-30 minutes
 
@@ -116,11 +144,14 @@ This command provisions your complete environment:
 
 The installation script performs the following:
 
-1. **Prompts for NGC API Key**: If not already set as an environment variable
-2. **Copies Base Infrastructure**: Integrates with the ai-on-eks base infrastructure modules
-3. **Provisions AWS Resources**: Creates VPC, EKS cluster, and supporting infrastructure via Terraform
-4. **Configures NGC Authentication**: Sets up ArgoCD repository secrets and image pull secrets for accessing NGC resources
-5. **Deploys Dynamo Platform**: Installs Dynamo CRDs, operator, and platform components via ArgoCD
+1. **Copies Base Infrastructure**: Integrates with the ai-on-eks base infrastructure modules
+2. **Provisions AWS Resources**: Creates VPC, EKS cluster, and supporting infrastructure via Terraform
+3. **Creates NGC ArgoCD Repository Secret**: For Helm chart access from NGC
+4. **Deploys Dynamo CRDs**: Installs Custom Resource Definitions via ArgoCD
+5. **Deploys Dynamo Platform**: Installs operator and platform components via ArgoCD (creates dynamo-cloud namespace)
+6. **Creates Secrets in dynamo-cloud namespace**:
+   - `ngc-secret`: NGC container image pull authentication
+   - `hf-token-secret`: HuggingFace model downloads
 
 </CollapsibleContent>
 
@@ -178,6 +209,11 @@ enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true # Required for NVIDIA Dynamo high-performance networking
 enable_ai_ml_observability_stack = true
 dynamo_stack_version             = "v0.5.1"
+
+# Required Secrets - Replace with your actual tokens
+ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
+huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
+
 # region                           = "us-west-2"  # Uncomment to override default
 # eks_cluster_version              = "1.33"  # Uncomment to override default
 ```
@@ -188,6 +224,22 @@ dynamo_stack_version             = "v0.5.1"
 - `enable_aws_efs_csi_driver`: Required for shared model storage
 - `enable_aws_efa_k8s_device_plugin`: Enables Elastic Fabric Adapter for high-performance networking
 - `enable_ai_ml_observability_stack`: Deploys Prometheus, Grafana, and monitoring tools
+- `ngc_api_key`: **Required** - Your NGC API key for accessing NVIDIA container images
+- `huggingface_token`: **Required** - Your HuggingFace token for downloading models
+
+### Updating Secrets
+
+If you need to update your NGC API key or HuggingFace token after deployment:
+
+1. Update the values in `infra/nvidia-dynamo/terraform/blueprint.tfvars`
+2. Apply the changes:
+
+```bash
+cd infra/nvidia-dynamo/terraform/_LOCAL
+terraform apply
+```
+
+Terraform will update the Kubernetes secrets without recreating the entire infrastructure.
 - `dynamo_stack_version`: Specifies the Dynamo platform version to deploy
 
 ## Monitoring and Observability
@@ -217,10 +269,25 @@ The deployment automatically creates:
 
 ### Common Issues
 
-1. **NGC Authentication Failures**: Verify NGC_API_KEY is correct and has access to ai-dynamo resources
-2. **GPU Nodes Not Available**: Check Karpenter logs and instance availability in your region
-3. **Pod Failures**: Check resource limits and cluster capacity
-4. **ArgoCD Sync Issues**: Verify NGC repository secret is correctly configured
+1. **Missing Secrets Error**: If Terraform fails with "variable not set" errors
+   - Ensure `ngc_api_key` and `huggingface_token` are set in `blueprint.tfvars`
+   - Both tokens are required and cannot be empty
+
+2. **NGC Authentication Failures**:
+   - Verify your NGC API key is correct: [NGC Setup](https://ngc.nvidia.com/setup/api-key)
+   - Check that the key has access to ai-dynamo resources
+   - Verify the secret was created: `kubectl get secret -n argocd nvidia-dynamo-repo`
+
+3. **HuggingFace Model Download Failures**:
+   - Verify your HuggingFace token has read permissions
+   - Check the secret exists: `kubectl get secret -n dynamo-cloud hf-token-secret`
+   - Ensure the token is valid: [HF Tokens](https://huggingface.co/settings/tokens)
+
+4. **GPU Nodes Not Available**: Check Karpenter logs and instance availability in your region
+
+5. **Pod Failures**: Check resource limits and cluster capacity
+
+6. **ArgoCD Sync Issues**: Verify NGC repository secret is correctly configured
 
 ### Debug Commands
 
@@ -235,9 +302,14 @@ kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server
 # Check Dynamo operator logs
 kubectl logs -n dynamo-cloud -l app=dynamo-operator
 
-# Verify NGC authentication
+# Verify all secrets are created
 kubectl get secret -n argocd nvidia-dynamo-repo
-kubectl get secret -n dynamo-cloud docker-imagepullsecret
+kubectl get secret -n dynamo-cloud ngc-secret
+kubectl get secret -n dynamo-cloud hf-token-secret
+
+# Inspect secret contents (base64 encoded)
+kubectl get secret -n dynamo-cloud hf-token-secret -o yaml
+kubectl get secret -n dynamo-cloud ngc-secret -o yaml
 ```
 
 ## Next Steps

@@ -44,7 +44,9 @@ kubectl port-forward svc/vllm-frontend 8000:8000 -n dynamo-cloud
 curl http://localhost:8000/health
 ```
 
-**Prerequisites**: Infrastructure deployed ([see infrastructure guide](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo)), HuggingFace token for model downloads
+**Prerequisites**:
+- Infrastructure deployed with secrets configured ([see infrastructure guide](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo))
+- NGC API key and HuggingFace token configured in Terraform (required)
 
 ---
 
@@ -92,10 +94,19 @@ cd blueprints/inference/nvidia-dynamo
 **What the Script Does:**
 
 1. **Version Management**: Automatically reads Dynamo version from `terraform/blueprint.tfvars`
-2. **HuggingFace Token**: Prompts for HF_TOKEN if not set (required for model downloads)
-3. **Secret Creation**: Creates Kubernetes secret with HuggingFace token
-4. **Manifest Deployment**: Applies the DynamoGraphDeployment YAML to the cluster
-5. **Service Monitor**: Optionally creates Prometheus ServiceMonitor for metrics
+2. **Secret Validation**: Verifies that required secrets exist (created by Terraform)
+   - `hf-token-secret`: HuggingFace token for model downloads
+   - `ngc-secret`: NGC authentication for container images
+3. **Manifest Deployment**: Applies the DynamoGraphDeployment YAML to the cluster
+4. **Service Monitor**: Optionally creates Prometheus ServiceMonitor for metrics
+
+:::info Secret Management
+Secrets are now managed by Terraform (not shell scripts). If the deployment script reports missing secrets, ensure you have:
+1. Configured `ngc_api_key` and `huggingface_token` in `infra/nvidia-dynamo/terraform/blueprint.tfvars`
+2. Run `terraform apply` to create the secrets
+
+See the [Infrastructure Guide](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#step-2-configure-required-secrets) for details.
+:::
 
 **Version Override:**
 
