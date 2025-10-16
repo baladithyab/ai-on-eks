@@ -17,7 +17,7 @@ spec:
         # NGC authentication (required)
         dynamo-operator:
           imagePullSecrets:
-            - name: docker-imagepullsecret
+            - name: ngc-secret
 
         # NATS configuration - use EFS for JetStream persistence
         # Note: etcd inherits from global.storageClass, but NATS needs explicit setting
