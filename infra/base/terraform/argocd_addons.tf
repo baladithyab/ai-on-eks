@@ -164,8 +164,29 @@ resource "kubectl_manifest" "nvidia_dynamo_crds_yaml" {
   ]
 }
 
+#---------------------------------------------------------------
+# NVIDIA Dynamo Namespace
+# Create explicitly to avoid race conditions with ArgoCD
+# ArgoCD's CreateNamespace=true is idempotent and won't fail
+#---------------------------------------------------------------
+resource "kubernetes_namespace_v1" "dynamo_cloud" {
+  count = var.enable_dynamo_stack ? 1 : 0
+
+  metadata {
+    name = "dynamo-cloud"
+  }
+
+  depends_on = [
+    module.eks_blueprints_addons
+  ]
+}
+
+#---------------------------------------------------------------
+# NVIDIA Dynamo ArgoCD Applications
+#---------------------------------------------------------------
+
 # NVIDIA Dynamo Platform
-# Note: This will create the dynamo-cloud namespace via CreateNamespace=true
+# Note: CreateNamespace=true in the YAML is idempotent (won't fail if namespace exists)
 resource "kubectl_manifest" "nvidia_dynamo_platform_yaml" {
   count     = var.enable_dynamo_stack ? 1 : 0
   yaml_body = templatefile("${path.module}/argocd-addons/nvidia-dynamo-platform.yaml", { dynamo_version = var.dynamo_stack_version })
@@ -173,9 +194,14 @@ resource "kubectl_manifest" "nvidia_dynamo_platform_yaml" {
   depends_on = [
     module.eks_blueprints_addons,
     kubectl_manifest.nvidia_dynamo_crds_yaml,
-    kubernetes_secret_v1.nvidia_dynamo_repo
+    kubernetes_secret_v1.nvidia_dynamo_repo,
+    kubernetes_namespace_v1.dynamo_cloud
   ]
 }
+
+#---------------------------------------------------------------
+# NVIDIA Dynamo Secrets in dynamo-cloud namespace
+#---------------------------------------------------------------
 
 # NGC Docker Registry Secret (for container image pull)
 resource "kubernetes_secret_v1" "ngc_secret" {
@@ -183,7 +209,7 @@ resource "kubernetes_secret_v1" "ngc_secret" {
 
   metadata {
     name      = "ngc-secret"
-    namespace = "dynamo-cloud"
+    namespace = kubernetes_namespace_v1.dynamo_cloud[0].metadata[0].name
   }
 
   type = "kubernetes.io/dockerconfigjson"
@@ -201,6 +227,7 @@ resource "kubernetes_secret_v1" "ngc_secret" {
   }
 
   depends_on = [
+    kubernetes_namespace_v1.dynamo_cloud,
     kubectl_manifest.nvidia_dynamo_platform_yaml
   ]
 }
@@ -211,7 +238,7 @@ resource "kubernetes_secret_v1" "hf_token_secret" {
 
   metadata {
     name      = "hf-token-secret"
-    namespace = "dynamo-cloud"
+    namespace = kubernetes_namespace_v1.dynamo_cloud[0].metadata[0].name
   }
 
   type = "Opaque"
@@ -221,6 +248,7 @@ resource "kubernetes_secret_v1" "hf_token_secret" {
   }
 
   depends_on = [
+    kubernetes_namespace_v1.dynamo_cloud,
     kubectl_manifest.nvidia_dynamo_platform_yaml
   ]
 }
