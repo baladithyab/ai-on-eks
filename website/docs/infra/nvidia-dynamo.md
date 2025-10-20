@@ -146,10 +146,9 @@ The installation script performs the following:
 
 1. **Copies Base Infrastructure**: Integrates with the ai-on-eks base infrastructure modules
 2. **Provisions AWS Resources**: Creates VPC, EKS cluster, and supporting infrastructure via Terraform
-3. **Creates NGC ArgoCD Repository Secret**: For Helm chart access from NGC
-4. **Deploys Dynamo CRDs**: Installs Custom Resource Definitions via ArgoCD
-5. **Deploys Dynamo Platform**: Installs operator and platform components via ArgoCD (creates dynamo-cloud namespace)
-6. **Creates Secrets in dynamo-cloud namespace**:
+3. **Deploys Dynamo CRDs**: Installs Custom Resource Definitions via ArgoCD
+4. **Deploys Dynamo Platform**: Installs operator and platform components via ArgoCD (creates dynamo-cloud namespace)
+5. **Creates Secrets in dynamo-cloud namespace** (managed in `nvidia-dynamo-secrets.tf`):
    - `ngc-secret`: NGC container image pull authentication
    - `hf-token-secret`: HuggingFace model downloads
 
