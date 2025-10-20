@@ -120,78 +120,8 @@ resource "kubectl_manifest" "mpi_operator" {
 }
 
 #---------------------------------------------------------------
-# NVIDIA Dynamo Namespace
-# Create explicitly to avoid race conditions with ArgoCD
-# ArgoCD's CreateNamespace=true is idempotent and won't fail
-#---------------------------------------------------------------
-resource "kubernetes_namespace_v1" "dynamo_cloud" {
-  count = var.enable_dynamo_stack ? 1 : 0
-
-  metadata {
-    name = "dynamo-cloud"
-  }
-
-  depends_on = [
-    module.eks_blueprints_addons
-  ]
-}
-
-#---------------------------------------------------------------
-# NVIDIA Dynamo Secrets in dynamo-cloud namespace
-# IMPORTANT: These must be created BEFORE the ArgoCD Application
-# because the platform Helm chart references ngc-secret in imagePullSecrets
-#---------------------------------------------------------------
-
-# NGC Docker Registry Secret (for container image pull)
-resource "kubernetes_secret_v1" "ngc_secret" {
-  count = var.enable_dynamo_stack ? 1 : 0
-
-  metadata {
-    name      = "ngc-secret"
-    namespace = kubernetes_namespace_v1.dynamo_cloud[0].metadata[0].name
-  }
-
-  type = "kubernetes.io/dockerconfigjson"
-
-  data = {
-    ".dockerconfigjson" = jsonencode({
-      auths = {
-        "nvcr.io" = {
-          username = "$oauthtoken"
-          password = var.ngc_api_key
-          auth     = base64encode("$oauthtoken:${var.ngc_api_key}")
-        }
-      }
-    })
-  }
-
-  depends_on = [
-    kubernetes_namespace_v1.dynamo_cloud
-  ]
-}
-
-# HuggingFace Token Secret (for model downloads)
-resource "kubernetes_secret_v1" "hf_token_secret" {
-  count = var.enable_dynamo_stack ? 1 : 0
-
-  metadata {
-    name      = "hf-token-secret"
-    namespace = kubernetes_namespace_v1.dynamo_cloud[0].metadata[0].name
-  }
-
-  type = "Opaque"
-
-  data = {
-    HF_TOKEN = var.huggingface_token
-  }
-
-  depends_on = [
-    kubernetes_namespace_v1.dynamo_cloud
-  ]
-}
-
-#---------------------------------------------------------------
 # NVIDIA Dynamo ArgoCD Applications
+# Note: Secrets are managed in nvidia-dynamo-secrets.tf
 #---------------------------------------------------------------
 
 # NVIDIA Dynamo CRDs
@@ -205,17 +135,14 @@ resource "kubectl_manifest" "nvidia_dynamo_crds_yaml" {
 }
 
 # NVIDIA Dynamo Platform
-# Note: This depends on secrets being created first because the Helm chart
-# references ngc-secret in imagePullSecrets configuration
+# Note: CreateNamespace=true in the YAML will create the dynamo-cloud namespace
+# Secrets are created afterward in nvidia-dynamo-secrets.tf
 resource "kubectl_manifest" "nvidia_dynamo_platform_yaml" {
   count     = var.enable_dynamo_stack ? 1 : 0
   yaml_body = templatefile("${path.module}/argocd-addons/nvidia-dynamo-platform.yaml", { dynamo_version = var.dynamo_stack_version })
 
   depends_on = [
     module.eks_blueprints_addons,
-    kubectl_manifest.nvidia_dynamo_crds_yaml,
-    kubernetes_namespace_v1.dynamo_cloud,
-    kubernetes_secret_v1.ngc_secret,
-    kubernetes_secret_v1.hf_token_secret
+    kubectl_manifest.nvidia_dynamo_crds_yaml
   ]
 }
