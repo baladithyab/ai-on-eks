@@ -2,8 +2,28 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Qwen2.5-VL 7B Multimodal Deployment
-# Supports image and video understanding with advanced visual reasoning
-# Requires 3 GPUs (1 per component: EncodeWorker, VLMWorker, Processor)
+#
+# This example demonstrates vision-language model deployment with disaggregated components.
+# Qwen2.5-VL supports image and video understanding with advanced visual reasoning capabilities.
+#
+# Architecture:
+# - EncodeWorker: Processes and encodes visual inputs (images/video frames)
+# - VLMWorker: Handles prefill phase for combined vision-text understanding
+# - Processor: Manages multimodal input preprocessing and prompt template formatting
+#
+# Key Features:
+# - Image and video understanding
+# - Multi-turn visual conversations
+# - Custom prompt template support
+#
+# Requirements:
+# - 3 GPUs (1 per component: EncodeWorker, VLMWorker, Processor)
+# - HuggingFace token secret (hf-token-secret) for model download
+#
+# Resource Notes:
+# - CPU/Memory requests are specified to ensure Karpenter provisions appropriately-sized GPU nodes
+# - Each component requests 4 CPU cores and 16Gi memory to match typical GPU node configurations
+# - This prevents Karpenter from provisioning undersized nodes that would cause pod failures
 
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
