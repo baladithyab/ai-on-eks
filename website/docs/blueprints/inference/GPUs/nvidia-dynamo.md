@@ -957,6 +957,584 @@ Use our disaggregated examples for better resource utilization:
 - Check [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) and [vLLM](https://github.com/vllm-project/vllm) roadmaps
 - Monitor [Kubernetes SIG-Scheduling](https://github.com/kubernetes/community/tree/master/sig-scheduling) for gang scheduling improvements
 
+## Advanced Features
+
+NVIDIA Dynamo v0.5.0+ and v0.6.0+ introduce advanced workload-level features that can be configured in DynamoGraphDeployment manifests. These features are configured per-workload and provide enhanced performance, scalability, and resource management capabilities.
+
+:::info
+**Platform-Level vs. Workload-Level Features:**
+- **Platform-Level**: Configured in Terraform and affect the entire platform (Grove, Kai Scheduler, namespace restriction, Model Express). See [Infrastructure Configuration](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#platform-level-feature-configuration).
+- **Workload-Level**: Configured in DynamoGraphDeployment CRs per-workload (KV Router, SLA Planner, KVBM, OTEL tracing, audit logging) - documented below.
+:::
+
+### KV Router
+
+**Available Since**: Dynamo v0.5.0+
+
+KV Router enables cache-aware request routing to minimize KV cache recomputation by directing requests to workers that already have relevant cached data.
+
+**Key Benefits:**
+- ✅ Reduces redundant KV cache computation
+- ✅ Improves throughput for similar/repeated requests
+- ✅ Lowers latency by leveraging cached prefill results
+- ✅ Better resource utilization across workers
+
+**Architecture:**
+
+```text
+Client → Frontend (KV Router) → Worker 1 (KV cache: conversation A, B)
+                               → Worker 2 (KV cache: conversation C, D)
+                               → Worker 3 (KV cache: conversation E, F)
+```
+
+The router tracks which workers have cached which conversation contexts and routes new requests to workers with relevant cache hits.
+
+**Configuration:**
+
+Enable KV Router in the Frontend component:
+
+```yaml
+Frontend:
+  envs:
+    - name: DYN_ROUTER_MODE
+      value: kv  # Enable KV-aware routing
+```
+
+**Example Deployments:**
+- `blueprints/inference/nvidia-dynamo/vllm/router/vllm-aggregated-router.yaml`
+- `blueprints/inference/nvidia-dynamo/vllm/router/vllm-disaggregated-router.yaml`
+- `blueprints/inference/nvidia-dynamo/sglang/router/sglang-router.yaml`
+- `blueprints/inference/nvidia-dynamo/trtllm/router/trtllm-router.yaml`
+
+**Testing:**
+
+```bash
+# Deploy KV Router example
+kubectl apply -f blueprints/inference/nvidia-dynamo/vllm/router/vllm-aggregated-router.yaml -n dynamo-cloud
+
+# Test with repeated prompts to see cache benefits
+kubectl port-forward service/vllm-aggregated-router-frontend 8000:8000 -n dynamo-cloud
+
+# First request (cold cache)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Tell me about Paris"}]}'
+
+# Second similar request (warm cache - should be faster)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Tell me more about Paris"}]}'
+```
+
+### KVBM (KV Block Manager)
+
+**Available Since**: Dynamo v0.6.0+
+
+KVBM provides advanced KV cache management with CPU cache overflow and disk offloading capabilities, enabling support for very large context windows beyond GPU memory limits.
+
+**Key Benefits:**
+- ✅ Extend KV cache beyond GPU memory using host memory
+- ✅ Support very large context windows (32K+ tokens)
+- ✅ Disk offloading for extremely large contexts
+- ✅ Cost-effective scaling without additional GPUs
+
+**Architecture:**
+
+```text
+Client → Frontend → vLLM Worker (KVBM connector)
+                    ├─ GPU Memory (primary KV cache)
+                    ├─ CPU Memory (overflow KV cache - 100GB+)
+                    └─ Disk Storage (cold KV blocks - optional)
+```
+
+**Configuration:**
+
+Enable KVBM in the Worker component:
+
+```yaml
+VllmWorker:
+  envs:
+    - name: DYN_KVBM_CPU_CACHE_GB
+      value: "100"  # 100GB of host memory for KV cache
+  resources:
+    requests:
+      memory: "200Gi"  # Ensure sufficient host memory
+  extraPodSpec:
+    mainContainer:
+      args:
+        - "--connector"
+        - "kvbm"
+        - "--gpu-memory-utilization"
+        - "0.45"  # Lower GPU memory for model, more for KV overflow
+        - "--max-model-len"
+        - "32000"  # Support large context windows
+```
+
+**Resource Requirements:**
+
+KVBM deployments require high-memory GPU instances:
+
+| Instance Type | GPUs | GPU Memory | Host Memory | Use Case |
+|--------------|------|------------|-------------|----------|
+| `g5.12xlarge` | 4x A10G | 96GB total | 192GB | Medium models (8B-13B) |
+| `g5.48xlarge` | 8x A10G | 192GB total | 768GB | Large models (70B+) |
+| `g6.12xlarge` | 4x L4 | 96GB total | 192GB | Medium models (8B-13B) |
+| `g6.48xlarge` | 8x L4 | 192GB total | 768GB | Large models (70B+) |
+
+**Example Deployment:**
+- `blueprints/inference/nvidia-dynamo/vllm/kvbm/vllm-aggregated-kvbm.yaml`
+
+**Testing:**
+
+```bash
+# Deploy KVBM example
+kubectl apply -f blueprints/inference/nvidia-dynamo/vllm/kvbm/vllm-aggregated-kvbm.yaml -n dynamo-cloud
+
+# Test with large context
+kubectl port-forward service/vllm-aggregated-kvbm-frontend 8000:8000 -n dynamo-cloud
+
+# Test with 32K token context
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen/Qwen3-8B",
+    "messages": [{"role": "user", "content": "'"$(cat large-document.txt)"'"}],
+    "max_tokens": 1000
+  }'
+```
+
+### SLA Planner
+
+**Available Since**: Dynamo v0.5.0+
+
+SLA Planner automatically scales prefill and decode workers to meet specified TTFT (Time to First Token) and ITL (Inter-Token Latency) targets based on real-time metrics and load prediction.
+
+**Key Benefits:**
+- ✅ SLA-driven automatic scaling
+- ✅ Predictive load forecasting (ARIMA, Prophet, Constant)
+- ✅ Performance interpolation using profiling data
+- ✅ Cost optimization through right-sizing
+
+**Architecture:**
+
+```text
+Client → Frontend → Prefill Workers (scaled by Planner)
+                  → Decode Workers (scaled by Planner)
+                  ↑
+                Planner (monitors metrics, adjusts replicas)
+                  ↑
+              Prometheus (scrapes metrics)
+```
+
+**Prerequisites:**
+
+:::warning
+SLA Planner requires **pre-deployment profiling** to make scaling decisions. You must complete profiling before deploying. See the [Dynamo profiling guide](https://github.com/ai-dynamo/dynamo/blob/main/docs/benchmarks/pre_deployment_profiling.md).
+:::
+
+**Configuration:**
+
+```yaml
+Planner:
+  componentType: planner
+  volumeMounts:
+    - name: dynamo-pvc
+      mountPoint: /data
+  extraPodSpec:
+    mainContainer:
+      args:
+        - "--environment=kubernetes"
+        - "--backend=vllm"
+        - "--adjustment-interval=60"  # Adjust every 60 seconds
+        - "--profile-results-dir=/data/profiling_results"
+        - "--load-predictor=constant"  # or "arima" or "prophet"
+```
+
+**Load Predictors:**
+- **Constant**: Assumes next load = current load (default, most stable)
+- **ARIMA**: Time-series with trends and seasonality
+- **Prophet**: Complex seasonal patterns
+
+**Example Deployment:**
+- `blueprints/inference/nvidia-dynamo/vllm/planner/vllm-disaggregated-planner.yaml`
+
+**Monitoring:**
+
+```bash
+# Watch planner scaling decisions
+kubectl logs -n dynamo-cloud -l app=vllm-disaggregated-planner-planner -f
+
+# Expected output:
+# [INFO] Current TTFT: 120ms, Target: 100ms
+# [INFO] Scaling prefill workers: 1 -> 2
+# [INFO] Current ITL: 15ms, Target: 10ms
+# [INFO] Scaling decode workers: 2 -> 3
+```
+
+### Multimodal Support
+
+**Available Since**: Dynamo v0.5.0+
+
+Dynamo supports multimodal (vision) models for image and video understanding using vLLM backend with specialized architecture.
+
+**Key Benefits:**
+- ✅ Image understanding and visual question answering
+- ✅ Video understanding (Qwen2.5-VL)
+- ✅ Document and scene understanding
+- ✅ Separate encoding and inference for optimal resource utilization
+
+**Architecture:**
+
+```text
+Client → Frontend → EncodeWorker (image/video encoding)
+                  → VLMWorker (vision-language model inference)
+                  → Processor (multimodal processing)
+```
+
+**Supported Models:**
+- **LLaVA 1.5 7B** (`llava-hf/llava-1.5-7b-hf`) - Image understanding
+- **Qwen2.5-VL 7B** (`Qwen/Qwen2.5-VL-7B-Instruct`) - Image and video understanding
+
+**Configuration:**
+
+Multimodal deployments require three specialized components:
+
+```yaml
+services:
+  EncodeWorker:
+    componentType: worker
+    resources:
+      limits:
+        gpu: "1"
+    extraPodSpec:
+      mainContainer:
+        workingDir: /workspace/examples/multimodal
+        args:
+          - python3 components/encode_worker.py --model llava-hf/llava-1.5-7b-hf
+
+  VLMWorker:
+    componentType: worker
+    resources:
+      limits:
+        gpu: "1"
+    extraPodSpec:
+      mainContainer:
+        workingDir: /workspace/examples/multimodal
+        args:
+          - python3 components/worker.py --model llava-hf/llava-1.5-7b-hf --worker-type prefill
+
+  Processor:
+    componentType: worker
+    resources:
+      limits:
+        gpu: "1"
+    extraPodSpec:
+      mainContainer:
+        workingDir: /workspace/examples/multimodal
+        args:
+          - python3 components/processor.py --model llava-hf/llava-1.5-7b-hf
+```
+
+**Resource Requirements:**
+
+| Component | GPUs | Memory | Total |
+|-----------|------|--------|-------|
+| EncodeWorker | 1 | 16Gi | 3 GPUs |
+| VLMWorker | 1 | 16Gi | 48Gi |
+| Processor | 1 | 16Gi | |
+
+**Example Deployments:**
+- `blueprints/inference/nvidia-dynamo/multimodal/llava-1.5-7b.yaml`
+- `blueprints/inference/nvidia-dynamo/multimodal/qwen2.5-vl-7b.yaml`
+
+**Testing:**
+
+```bash
+# Deploy multimodal example
+kubectl apply -f blueprints/inference/nvidia-dynamo/multimodal/llava-1.5-7b.yaml -n dynamo-cloud
+
+# Test with image understanding
+kubectl port-forward service/llava-frontend 8000:8000 -n dynamo-cloud
+
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "llava-hf/llava-1.5-7b-hf",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What is in this image?"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
+      ]
+    }]
+  }'
+```
+
+### Multi-Node Deployments
+
+**Available Since**: Dynamo v0.5.0+ (requires Grove and Kai Scheduler)
+
+Multi-node deployments enable tensor parallelism (TP) across multiple nodes for large models that don't fit on a single node.
+
+**Prerequisites:**
+
+:::warning
+Multi-node deployments require Grove and Kai Scheduler to be enabled at the platform level:
+
+```hcl
+# In infra/nvidia-dynamo/terraform/blueprint.tfvars
+dynamo_enable_grove         = true
+dynamo_enable_kai_scheduler = true
+```
+
+See [Platform-Level Feature Configuration](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#platform-level-feature-configuration) for details.
+:::
+
+**Key Benefits:**
+- ✅ Deploy models larger than single-node GPU memory (70B+ models)
+- ✅ Automatic pod coordination across nodes via Grove
+- ✅ Gang scheduling via Kai Scheduler
+- ✅ Optimal resource allocation and startup ordering
+
+**Architecture:**
+
+```text
+Client → Frontend → Prefill Workers (2 nodes × 4 GPUs = TP=8)
+                  → Decode Workers (2 nodes × 4 GPUs = TP=8)
+```
+
+**Configuration:**
+
+The `multinode` field tells Grove how many nodes to use:
+
+```yaml
+prefill:
+  multinode:
+    nodeCount: 2  # Deploy across 2 nodes
+  resources:
+    limits:
+      gpu: "4"  # 4 GPUs per node = 8 total (TP=8)
+  extraPodSpec:
+    mainContainer:
+      args:
+        - --tensor-parallel-size
+        - "8"  # Must match nodeCount × GPUs per node
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+```
+
+**How Grove and Kai Scheduler Work:**
+
+When you add `multinode.nodeCount` to a service in your DGD:
+
+1. **Grove detects the multi-node requirement** and takes over pod management
+2. **Kai scheduler annotations are auto-injected** (you don't need to add them manually)
+3. **Pods are coordinated across nodes** with proper startup ordering
+4. **GPU taints are respected** via tolerations in the DGD spec
+
+**You do NOT need to:**
+- ❌ Manually add Kai scheduler annotations
+- ❌ Configure gang scheduling
+- ❌ Set up pod affinity/anti-affinity for multi-node
+- ❌ Manage startup ordering
+
+**You DO need to:**
+- ✅ Enable Grove and Kai Scheduler in Terraform
+- ✅ Add `multinode.nodeCount` to your DGD spec
+- ✅ Add GPU tolerations to your DGD spec
+- ✅ Set correct `tensor-parallel-size` matching total GPUs
+
+**Example Deployments:**
+- `blueprints/inference/nvidia-dynamo/multi-node/vllm-disaggregated-multinode.yaml`
+- `blueprints/inference/nvidia-dynamo/multi-node/trtllm-disaggregated-multinode.yaml`
+- `blueprints/inference/nvidia-dynamo/multi-node/sglang-disaggregated-multinode.yaml`
+
+**Resource Requirements:**
+
+| Example | Nodes | GPUs/Node | Total GPUs | Instance Type |
+|---------|-------|-----------|------------|---------------|
+| vLLM TP=8 | 2 | 4 | 8 | g6.12xlarge |
+| TRT-LLM TP=8 | 2 | 4 | 8 | g6.12xlarge |
+| SGLang TP=8 | 2 | 4 | 8 | g6.12xlarge |
+
+**Testing:**
+
+```bash
+# Deploy multi-node example
+kubectl apply -f blueprints/inference/nvidia-dynamo/multi-node/vllm-disaggregated-multinode.yaml -n dynamo-cloud
+
+# Monitor Grove coordination
+kubectl logs -n dynamo-cloud -l app.kubernetes.io/name=grove-operator -f
+
+# Wait for all pods to be ready
+kubectl wait --for=condition=ready pod -l app=vllm-disagg-multinode-prefill -n dynamo-cloud --timeout=900s
+
+# Test the deployment
+kubectl port-forward service/vllm-disagg-multinode-frontend 8000:8000 -n dynamo-cloud
+curl http://localhost:8000/health
+```
+
+### Observability Features
+
+**Available Since**: Dynamo v0.6.0+
+
+Dynamo provides comprehensive observability features for production deployments including distributed tracing, audit logging, and Prometheus metrics.
+
+**Key Benefits:**
+- ✅ End-to-end request tracking with OpenTelemetry
+- ✅ Compliance and security auditing
+- ✅ Performance monitoring and troubleshooting
+- ✅ Integration with Grafana, Tempo, and Prometheus
+
+#### OpenTelemetry Distributed Tracing
+
+Track requests end-to-end across Frontend and Worker components with distributed tracing exported to Grafana Tempo.
+
+**Configuration:**
+
+```yaml
+spec:
+  envs:
+    # Enable JSONL logging (required for tracing)
+    - name: DYN_LOGGING_JSONL
+      value: "true"
+    # Enable OTEL trace export
+    - name: OTEL_EXPORT_ENABLED
+      value: "1"
+    # Tempo endpoint
+    - name: OTEL_EXPORT_ENDPOINT
+      value: "http://tempo.observability.svc.cluster.local:4317"
+
+  services:
+    Frontend:
+      extraPodSpec:
+        mainContainer:
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: "dynamo-frontend"
+
+    VllmDecodeWorker:
+      extraPodSpec:
+        mainContainer:
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: "dynamo-worker-decode"
+```
+
+**Prerequisites:**
+
+Deploy Tempo in your cluster:
+
+```bash
+# Add Grafana Helm repo
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+
+# Create observability namespace
+kubectl create namespace observability
+
+# Deploy Tempo
+helm install tempo grafana/tempo \
+  --namespace observability \
+  --set tempo.receivers.otlp.protocols.grpc.endpoint="0.0.0.0:4317"
+```
+
+**Viewing Traces:**
+
+1. Access Grafana (if using kube-prometheus-stack):
+   ```bash
+   kubectl port-forward -n prometheus svc/kube-prometheus-stack-grafana 3000:80
+   ```
+
+2. Add Tempo data source:
+   - URL: `http://tempo.observability.svc.cluster.local:3200`
+
+3. Explore traces:
+   - Navigate to Explore → Select Tempo
+   - Search by Service Name, Trace ID, or Tags
+   - View flame graphs and span details
+
+#### Audit Logging
+
+Log all chat completion requests in JSONL format for compliance and security auditing.
+
+**Configuration:**
+
+```yaml
+spec:
+  envs:
+    # Enable JSONL logging (enables audit logging)
+    - name: DYN_LOGGING_JSONL
+      value: "true"
+```
+
+Audit logs are automatically generated for all `/v1/chat/completions` requests when JSONL logging is enabled.
+
+**Viewing Audit Logs:**
+
+```bash
+# View frontend logs in JSONL format
+kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-component=Frontend | jq .
+
+# Filter for specific request IDs
+kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-component=Frontend | jq 'select(.x_request_id=="test-001")'
+```
+
+#### Prometheus Metrics
+
+All Dynamo deployments automatically expose Prometheus metrics on the `/metrics` endpoint.
+
+**Metrics Collection:**
+
+The `deploy.sh` script automatically creates ServiceMonitor resources for Prometheus to scrape metrics from frontend pods.
+
+**Key Metrics:**
+- Request latency (TTFT, ITL, E2E)
+- Throughput (requests/sec, tokens/sec)
+- KV cache utilization
+- GPU memory usage
+- Queue depths
+
+**Accessing Metrics:**
+
+```bash
+# Port-forward to frontend service
+kubectl port-forward service/vllm-disagg-frontend 8000:8000 -n dynamo-cloud
+
+# View metrics
+curl http://localhost:8000/metrics
+```
+
+**Grafana Dashboards:**
+
+Metrics are automatically scraped by Prometheus (if kube-prometheus-stack is installed) and can be visualized in Grafana.
+
+#### KVBM Metrics
+
+When using KVBM with disk offloading, enable additional KVBM-specific metrics:
+
+```yaml
+VllmPrefillWorker:
+  envs:
+    - name: DYN_KVBM_METRICS
+      value: "true"
+    - name: DYN_KVBM_METRICS_PORT
+      value: "6880"  # Optional, default: 6880
+```
+
+**KVBM Metrics Include:**
+- Cache hit rates (GPU, CPU, disk)
+- Offload/reload operations
+- Disk I/O statistics
+- Cache capacity utilization
+
+**Example Deployments:**
+- `blueprints/inference/nvidia-dynamo/observability/vllm-otel-tracing.yaml`
+- `blueprints/inference/nvidia-dynamo/observability/vllm-audit-logging.yaml`
+- `blueprints/inference/nvidia-dynamo/observability/vllm-full-observability.yaml`
+
 ## Alternative Deployment Options
 
 ### For Existing EKS Clusters

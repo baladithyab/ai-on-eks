@@ -239,7 +239,215 @@ terraform apply
 ```
 
 Terraform will update the Kubernetes secrets without recreating the entire infrastructure.
-- `dynamo_stack_version`: Specifies the Dynamo platform version to deploy
+
+### Platform-Level Feature Configuration
+
+NVIDIA Dynamo v0.5.0+ and v0.6.0+ introduce platform-level features that can be enabled via Terraform variables. These features are configured at the platform level (dynamo-platform Helm chart) and affect the entire Dynamo installation.
+
+:::info
+**Platform-Level vs. Workload-Level Features:**
+- **Platform-Level**: Configured in Terraform (`blueprint.tfvars`) and affect the entire platform (Grove, Kai Scheduler, namespace restriction, Model Express)
+- **Workload-Level**: Configured in DynamoGraphDeployment CRs per-workload (KV Router, SLA Planner, KVBM, OTEL tracing, audit logging)
+
+For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](https://awslabs.github.io/ai-on-eks/docs/blueprints/inference/GPUs/nvidia-dynamo#advanced-features).
+:::
+
+#### Available Platform-Level Variables
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `dynamo_stack_version` | string | `"v0.5.1"` | Dynamo platform version to deploy |
+| `dynamo_enable_grove` | bool | `false` | Enable Grove for multi-node inference coordination |
+| `dynamo_enable_kai_scheduler` | bool | `false` | Enable Kai Scheduler for intelligent resource allocation |
+| `dynamo_operator_namespace_restriction_enabled` | bool | `false` | Restrict operator to dynamo-cloud namespace only |
+| `dynamo_model_express_url` | string | `""` | URL for existing Model Express server (optional) |
+
+#### dynamo_stack_version
+
+**Type**: `string`
+**Default**: `"v0.5.1"`
+**Example**: `"v0.6.0"`
+
+Specifies the NVIDIA Dynamo platform version to deploy. This determines which Helm chart version is used for the dynamo-platform deployment.
+
+**When to Change:**
+- Upgrading to a new Dynamo release
+- Testing new features in a specific version
+- Rolling back to a previous version
+
+**Example:**
+```hcl
+dynamo_stack_version = "v0.6.0"
+```
+
+#### dynamo_enable_grove
+
+**Type**: `bool`
+**Default**: `false`
+**Example**: `true`
+
+Enables Grove, the multi-node inference coordination operator. Grove orchestrates distributed inference workloads across multiple nodes and GPUs.
+
+**When to Enable:**
+- Deploying multi-node inference workloads (models too large for a single GPU)
+- Using tensor parallelism (TP) or pipeline parallelism (PP)
+- Deploying models that require multiple GPUs across multiple nodes
+
+**Requirements:**
+- Must also enable `dynamo_enable_kai_scheduler = true`
+- Requires GPU instances that support multi-node deployments (e.g., `p5.48xlarge`, `p4d.24xlarge`, `g6.48xlarge`)
+- EFA networking is recommended (already enabled in ai-on-eks)
+
+**Infrastructure Impact:**
+- Deploys Grove operator (minimal resource footprint: ~100m CPU, ~256Mi memory)
+- No changes required to Karpenter, EKS cluster, EFS, or observability stack
+
+**Example:**
+```hcl
+dynamo_enable_grove         = true
+dynamo_enable_kai_scheduler = true  # Required for Grove
+```
+
+**Related Documentation:**
+- [Upgrade Guide - Grove Infrastructure Impact](../../infra/nvidia-dynamo/UPGRADE_TO_V0.6.0.md#grove-and-kai-scheduler-infrastructure-impact)
+
+#### dynamo_enable_kai_scheduler
+
+**Type**: `bool`
+**Default**: `false`
+**Example**: `true`
+
+Enables Kai Scheduler, the intelligent resource allocation operator for multi-node workloads. Kai Scheduler optimizes GPU allocation and scheduling for distributed inference.
+
+**When to Enable:**
+- Deploying multi-node inference workloads with Grove
+- Required for Grove-based multi-node deployments
+- Optimizing resource allocation for complex inference graphs
+
+**Requirements:**
+- Typically enabled together with `dynamo_enable_grove = true`
+- Requires GPU instances that support multi-node deployments
+
+**Infrastructure Impact:**
+- Deploys Kai Scheduler operator (minimal resource footprint: ~100m CPU, ~256Mi memory)
+- No changes required to Karpenter, EKS cluster, EFS, or observability stack
+
+**Example:**
+```hcl
+dynamo_enable_grove         = true
+dynamo_enable_kai_scheduler = true
+```
+
+#### dynamo_operator_namespace_restriction_enabled
+
+**Type**: `bool`
+**Default**: `false`
+**Example**: `true`
+
+Restricts the Dynamo operator to only monitor and manage resources in the `dynamo-cloud` namespace. By default, the operator runs with cluster-wide permissions and can manage DynamoGraphDeployments in any namespace.
+
+**When to Enable:**
+- Multi-tenant clusters where Dynamo should only manage resources in a specific namespace
+- Security requirements that mandate namespace-scoped operators
+- Compliance requirements for operator permissions
+
+**Default Behavior (false):**
+- Operator has cluster-wide permissions
+- Can manage DynamoGraphDeployments in any namespace
+- Automatically discovers and injects image pull secrets across namespaces
+
+**Restricted Behavior (true):**
+- Operator only monitors the `dynamo-cloud` namespace
+- DynamoGraphDeployments must be deployed in `dynamo-cloud` namespace
+- Image pull secrets must be manually replicated to other namespaces if needed
+
+**Example:**
+```hcl
+dynamo_operator_namespace_restriction_enabled = true
+```
+
+**Related Documentation:**
+- [Upgrade Guide - Namespace Strategy](../../infra/nvidia-dynamo/UPGRADE_TO_V0.6.0.md#namespace-strategy-for-dynamographdeployment-resources)
+
+#### dynamo_model_express_url
+
+**Type**: `string`
+**Default**: `""`
+**Example**: `"http://model-express-server.model-express.svc.cluster.local:8080"`
+
+URL for an existing Model Express server. Model Express is a model management service that can be used to centralize model storage and distribution.
+
+**When to Configure:**
+- Integrating with an existing Model Express deployment
+- Centralizing model management across multiple Dynamo deployments
+- Using a shared model repository
+
+**Format:**
+- Must be a valid HTTP/HTTPS URL
+- Format: `http://hostname:port` or `https://hostname:port`
+- Leave empty (default) to not use Model Express
+
+**Example:**
+```hcl
+dynamo_model_express_url = "http://model-express-server.model-express.svc.cluster.local:8080"
+```
+
+#### Example Configuration
+
+**Basic Deployment (Single-Node Workloads):**
+```hcl
+name                             = "dynamo-on-eks"
+enable_dynamo_stack              = true
+enable_aws_efs_csi_driver        = true
+enable_aws_efa_k8s_device_plugin = true
+enable_ai_ml_observability_stack = true
+dynamo_stack_version             = "v0.6.0"
+
+# Required Secrets
+ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
+huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
+
+# Platform features (all defaults)
+# dynamo_enable_grove = false
+# dynamo_enable_kai_scheduler = false
+# dynamo_operator_namespace_restriction_enabled = false
+# dynamo_model_express_url = ""
+```
+
+**Multi-Node Deployment:**
+```hcl
+name                             = "dynamo-on-eks"
+enable_dynamo_stack              = true
+enable_aws_efs_csi_driver        = true
+enable_aws_efa_k8s_device_plugin = true
+enable_ai_ml_observability_stack = true
+dynamo_stack_version             = "v0.6.0"
+
+# Required Secrets
+ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
+huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
+
+# Enable multi-node features
+dynamo_enable_grove         = true
+dynamo_enable_kai_scheduler = true
+```
+
+**Multi-Tenant Deployment:**
+```hcl
+name                             = "dynamo-on-eks"
+enable_dynamo_stack              = true
+enable_aws_efs_csi_driver        = true
+enable_aws_efa_k8s_device_plugin = true
+enable_ai_ml_observability_stack = true
+dynamo_stack_version             = "v0.6.0"
+
+# Required Secrets
+ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
+huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
+
+# Restrict operator to dynamo-cloud namespace
+dynamo_operator_namespace_restriction_enabled = true
+```
 
 ## Monitoring and Observability
 
