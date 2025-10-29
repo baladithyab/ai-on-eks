@@ -138,8 +138,14 @@ resource "kubectl_manifest" "nvidia_dynamo_crds_yaml" {
 # Note: CreateNamespace=true in the YAML will create the dynamo-cloud namespace
 # Secrets are created afterward in nvidia-dynamo-secrets.tf
 resource "kubectl_manifest" "nvidia_dynamo_platform_yaml" {
-  count     = var.enable_dynamo_stack ? 1 : 0
-  yaml_body = templatefile("${path.module}/argocd-addons/nvidia-dynamo-platform.yaml", { dynamo_version = var.dynamo_stack_version })
+  count = var.enable_dynamo_stack ? 1 : 0
+  yaml_body = templatefile("${path.module}/argocd-addons/nvidia-dynamo-platform.yaml", {
+    dynamo_version                                = var.dynamo_stack_version
+    dynamo_enable_grove                           = var.dynamo_enable_grove
+    dynamo_enable_kai_scheduler                   = var.dynamo_enable_kai_scheduler
+    dynamo_operator_namespace_restriction_enabled = var.dynamo_operator_namespace_restriction_enabled
+    dynamo_model_express_url                      = var.dynamo_model_express_url
+  })
 
   depends_on = [
     module.eks_blueprints_addons,
