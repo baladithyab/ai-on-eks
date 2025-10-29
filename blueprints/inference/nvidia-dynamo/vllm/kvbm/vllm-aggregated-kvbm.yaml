@@ -1,15 +1,29 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# Example: vLLM Aggregated Deployment with KVBM (KV Block Manager)
+#
+# This example demonstrates how to enable KVBM features (v0.6.0+) for advanced
+# KV cache management. KVBM is a WORKLOAD-LEVEL feature configured in the
+# DynamoGraphDeployment spec, not a platform-level toggle.
+#
+# KVBM Features:
+# - Disk offloading: Extend SSD lifespan with access pattern filtering
+# - CPU cache: Use host memory for KV cache overflow
+# - Better memory management for large context windows
+#
+# For more information, see:
+# - Upgrade guide: infra/nvidia-dynamo/UPGRADE_TO_V0.6.0.md
 
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: vllm-router
+  name: vllm-aggregated-kvbm
   namespace: dynamo-cloud
 spec:
   services:
     Frontend:
-      dynamoNamespace: vllm-router
+      dynamoNamespace: vllm-aggregated-kvbm
       componentType: frontend
       replicas: 1
       livenessProbe:
@@ -32,11 +46,11 @@ spec:
         failureThreshold: 10
       resources:
         requests:
-          cpu: "2"
-          memory: "4Gi"
+          cpu: "1"
+          memory: "2Gi"
         limits:
-          cpu: "2"
-          memory: "4Gi"
+          cpu: "1"
+          memory: "2Gi"
       extraPodSpec:
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
@@ -45,12 +59,12 @@ spec:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.frontend --http-port 8000 --router-mode kv --kv-overlap-score-weight 1.0 --router-temperature 0.1"
+            - "python3 -m dynamo.frontend --http-port 8000"
     VllmWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: vllm-router
+      dynamoNamespace: vllm-aggregated-kvbm
       componentType: worker
-      replicas: 2
+      replicas: 1
       livenessProbe:
         httpGet:
           path: /live
@@ -67,13 +81,17 @@ spec:
         failureThreshold: 60
       resources:
         requests:
-          cpu: "6"
-          memory: "16Gi"
+          cpu: "10"
+          memory: "200Gi"  # Large memory for CPU cache
           gpu: "1"
         limits:
-          cpu: "6"
-          memory: "16Gi"
+          cpu: "10"
+          memory: "250Gi"
           gpu: "1"
+      envs:
+        # Enable KVBM CPU cache (100GB of host memory for KV cache)
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "100"
       extraPodSpec:
         nodeSelector:
           karpenter.sh/nodepool: g5-gpu-karpenter
@@ -82,12 +100,22 @@ spec:
             httpGet:
               path: /health
               port: 9090
-            periodSeconds: 10
-            failureThreshold: 60
+            periodSeconds: 60
+            failureThreshold: 300
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm-worker.log"
+            # Enable KVBM connector and configure for large context
+            - |
+              python3 -m dynamo.vllm \
+                --model Qwen/Qwen3-8B \
+                --connector kvbm \
+                --gpu-memory-utilization 0.45 \
+                --max-model-len 32000 \
+                --enforce-eager \
+                --disable-log-requests \
+                2>&1 | tee /tmp/vllm.log
+
