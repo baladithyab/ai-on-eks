@@ -109,9 +109,10 @@ spec:
             - -c
           args:
             # Enable KVBM connector and configure for large context
+            # Using smaller model (Qwen3-0.6B) to fit with low GPU memory utilization
             - |
               python3 -m dynamo.vllm \
-                --model Qwen/Qwen3-8B \
+                --model Qwen/Qwen3-0.6B \
                 --connector kvbm \
                 --gpu-memory-utilization 0.45 \
                 --max-model-len 32000 \

@@ -111,5 +111,6 @@ spec:
             - -c
           args:
             # Enable prefix caching for better KV Router performance
-            - "python3 -m dynamo.vllm --model Qwen/Qwen3-8B --enable-prefix-caching 2>&1 | tee /tmp/vllm.log"
+            # Reduced max-model-len to 29000 to fit within A10G GPU memory (24GB)
+            - "python3 -m dynamo.vllm --model Qwen/Qwen3-8B --enable-prefix-caching --max-model-len 29000 2>&1 | tee /tmp/vllm.log"
 
