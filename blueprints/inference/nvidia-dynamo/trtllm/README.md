@@ -6,10 +6,11 @@ This directory contains TensorRT-LLM deployment configurations for the NVIDIA Dy
 
 | Deployment | Description | Model | Resources |
 |------------|-------------|-------|-----------|
-| `trtllm-aggregated-default` | Single worker with default settings | Qwen/Qwen3-0.6B | 1 GPU, 10 CPU, 20Gi RAM |
+| `trtllm-aggregated-default` | Single worker with ConfigMap | Qwen/Qwen3-0.6B | 1 GPU, 10 CPU, 20Gi RAM |
 | `trtllm-aggregated-high-performance` | Optimized for maximum throughput | Qwen/Qwen3-0.6B | 1 GPU, 16 CPU, 32Gi RAM |
-| `trtllm-disaggregated-default` | Separate prefill/decode workers | Qwen/Qwen3-0.6B | 1+1 GPUs, 8 CPU each |
-| `trtllm-router` | KV-aware routing for cache optimization | Configurable | Configurable |
+| `trtllm-disaggregated-default` | Separate prefill/decode workers with ConfigMap | Qwen/Qwen3-0.6B | 1+1 GPUs, 8 CPU each |
+| `router/trtllm-router` | KV-aware routing for cache optimization | Configurable | Configurable |
+| `planner/trtllm-planner` | SLA-based automatic scaling | Qwen/Qwen3-0.6B | 1+1 GPUs, auto-scaled |
 
 ## Architecture
 
@@ -31,8 +32,9 @@ This directory contains TensorRT-LLM deployment configurations for the NVIDIA Dy
 - **Memory Optimization**: Advanced KV cache management and memory pooling
 - **Chunked Prefill**: Efficient handling of long sequences
 - **CUDA Graphs**: Reduced kernel launch overhead for consistent performance
-- **Inline Configuration**: Embedded engine configurations (no external ConfigMaps)
+- **ConfigMap Configuration**: Engine configurations stored in Kubernetes ConfigMaps for easy customization
 - **Cache Transceiver**: Optimized communication for disaggregated setups
+- **SLA Planner**: Automatic scaling based on performance targets (requires profiling)
 
 ### NGC Authentication Required
 ⚠️ **All TensorRT-LLM deployments require NGC (NVIDIA GPU Cloud) authentication** to pull container images.

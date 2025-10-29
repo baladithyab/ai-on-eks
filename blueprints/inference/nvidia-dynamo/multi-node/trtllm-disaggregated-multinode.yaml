@@ -1,0 +1,196 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# TensorRT-LLM Disaggregated Multi-Node Deployment
+# Tensor Parallelism: TP=8 (2 nodes × 4 GPUs per node)
+# Requires Grove and Kai Scheduler enabled in Terraform
+# Model: Qwen/Qwen3-0.6B (example - use larger models like 70B for production)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trtllm-multinode-config
+  namespace: dynamo-cloud
+data:
+  prefill.yaml: |
+    # TensorRT-LLM Prefill Worker Configuration
+    tensor_parallel_size: 8
+    moe_expert_parallel_size: 1
+    enable_attention_dp: false
+    max_num_tokens: 8192
+    trust_remote_code: true
+    backend: pytorch
+    enable_chunked_prefill: true
+    # Overlap scheduler not currently supported in prefill only workers.
+    disable_overlap_scheduler: true
+    kv_cache_config:
+      free_gpu_memory_fraction: 0.80
+    cache_transceiver_config:
+      backend: DEFAULT
+
+  decode.yaml: |
+    # TensorRT-LLM Decode Worker Configuration
+    tensor_parallel_size: 8
+    moe_expert_parallel_size: 1
+    enable_attention_dp: false
+    max_num_tokens: 8192
+    trust_remote_code: true
+    backend: pytorch
+    enable_chunked_prefill: true
+    disable_overlap_scheduler: false
+    kv_cache_config:
+      free_gpu_memory_fraction: 0.80
+    cache_transceiver_config:
+      backend: DEFAULT
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trtllm-multinode-models
+  namespace: dynamo-cloud
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: trtllm-disagg-multinode
+  namespace: dynamo-cloud
+spec:
+  backendFramework: trtllm
+  pvcs:
+    - name: trtllm-multinode-models
+  envs:
+    - name: OMPI_ALLOW_RUN_AS_ROOT
+      value: "1"
+    - name: OMPI_ALLOW_RUN_AS_ROOT_CONFIRM
+      value: "1"
+    - name: HF_HOME
+      value: "/models"
+  services:
+    Frontend:
+      dynamoNamespace: trtllm-disagg-multinode
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.6.0
+          workingDir: /workspace/components/backends/trtllm
+          command:
+          - python3
+          - -m
+          - dynamo.frontend
+          args:
+            - --http-port
+            - "8000"
+          resources:
+            requests:
+              cpu: "4"
+              memory: "8Gi"
+            limits:
+              cpu: "8"
+              memory: "16Gi"
+
+    prefill:
+      volumeMounts:
+        - name: trtllm-multinode-models
+          mountPoint: /models
+      dynamoNamespace: trtllm-disagg-multinode
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      multinode:
+        nodeCount: 2  # Deploy across 2 nodes
+      resources:
+        requests:
+          cpu: "16"
+          memory: "100Gi"
+        limits:
+          gpu: "4"  # 4 GPUs per node = 8 total (TP=8)
+          memory: "100Gi"
+      extraPodSpec:
+        volumes:
+          - name: trtllm-multinode-config
+            configMap:
+              name: trtllm-multinode-config
+        mainContainer:
+          volumeMounts:
+            - name: trtllm-multinode-config
+              mountPath: /workspace/components/backends/trtllm/engine_configs
+              readOnly: true
+          image: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.6.0
+          workingDir: /workspace/components/backends/trtllm
+          command:
+          - python3
+          - -m
+          - dynamo.trtllm
+          args:
+            - --model-path
+            - Qwen/Qwen3-0.6B
+            - --served-model-name
+            - Qwen/Qwen3-0.6B
+            - --extra-engine-args
+            - engine_configs/prefill.yaml
+            - --disaggregation-mode
+            - prefill
+            - --disaggregation-strategy
+            - decode_first
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    decode:
+      volumeMounts:
+        - name: trtllm-multinode-models
+          mountPoint: /models
+      dynamoNamespace: trtllm-disagg-multinode
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      multinode:
+        nodeCount: 2  # Deploy across 2 nodes
+      resources:
+        requests:
+          cpu: "16"
+          memory: "100Gi"
+        limits:
+          gpu: "4"  # 4 GPUs per node = 8 total (TP=8)
+          memory: "100Gi"
+      extraPodSpec:
+        volumes:
+          - name: trtllm-multinode-config
+            configMap:
+              name: trtllm-multinode-config
+        mainContainer:
+          volumeMounts:
+            - name: trtllm-multinode-config
+              mountPath: /workspace/components/backends/trtllm/engine_configs
+              readOnly: true
+          image: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.6.0
+          workingDir: /workspace/components/backends/trtllm
+          command:
+          - python3
+          - -m
+          - dynamo.trtllm
+          args:
+            - --model-path
+            - Qwen/Qwen3-0.6B
+            - --served-model-name
+            - Qwen/Qwen3-0.6B
+            - --extra-engine-args
+            - engine_configs/decode.yaml
+            - --disaggregation-mode
+            - decode
+            - --disaggregation-strategy
+            - decode_first
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+

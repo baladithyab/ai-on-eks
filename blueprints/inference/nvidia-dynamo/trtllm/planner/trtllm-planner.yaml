@@ -1,14 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# TensorRT-LLM Disaggregated Deployment with ConfigMap
-# Uses ConfigMap for engine configuration instead of inline YAML
+# TensorRT-LLM Disaggregated with SLA Planner
+# Automatic scaling based on SLA targets and performance metrics
+# Requires: Pre-deployment profiling to be completed first
 
 # ConfigMap containing TensorRT-LLM engine configurations
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: trtllm-disagg-config
+  name: trtllm-planner-config
   namespace: dynamo-cloud
 data:
   decode.yaml: |
@@ -21,16 +22,16 @@ data:
     backend: pytorch
     enable_chunked_prefill: true
     disable_overlap_scheduler: false
-
+    
     cuda_graph_config:
       max_batch_size: 16
-
+    
     kv_cache_config:
       free_gpu_memory_fraction: 0.85
-
+    
     cache_transceiver_config:
       backend: default
-
+  
   prefill.yaml: |
     # TensorRT-LLM Prefill Worker Configuration
     tensor_parallel_size: 1
@@ -40,45 +41,31 @@ data:
     trust_remote_code: true
     backend: pytorch
     enable_chunked_prefill: true
-    # Overlap scheduler not currently supported in prefill only workers
     disable_overlap_scheduler: true
-
+    
     cuda_graph_config:
       max_batch_size: 16
-
+    
     kv_cache_config:
       free_gpu_memory_fraction: 0.85
-
+    
     cache_transceiver_config:
       backend: default
 ---
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: trtllm-disaggregated-default
+  name: trtllm-planner
   namespace: dynamo-cloud
 spec:
+  # PVC for profiling results (must be pre-created)
+  pvcs:
+    - name: dynamo-pvc
+      create: false
+  
   services:
     Frontend:
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        exec:
-          command:
-            - /bin/sh
-            - -c
-            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      dynamoNamespace: trtllm-disaggregated-default
+      dynamoNamespace: trtllm-planner
       componentType: frontend
       replicas: 1
       resources:
@@ -93,29 +80,75 @@ spec:
           image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.0
           workingDir: /workspace/components/backends/trtllm
           command:
-            - /bin/sh
-            - -c
+            - python3
+            - -m
+            - dynamo.frontend
           args:
-            - "python3 -m dynamo.frontend --http-port 8000"
+            - --http-port
+            - "8000"
+            - --kv-cache-block-size
+            - "128"
+            - --router-mode
+            - kv
+            - --kv-overlap-score-weight
+            - "0.0"
+            - --router-temperature
+            - "0.0"
+            - --no-kv-events
+    
+    Planner:
+      dynamoNamespace: trtllm-planner
+      envFromSecret: hf-token-secret
+      componentType: planner
+      replicas: 1
+      volumeMounts:
+        - name: dynamo-pvc
+          mountPoint: /data
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.0
+          workingDir: /workspace/components/planner/src/dynamo/planner
+          ports:
+            - name: metrics
+              containerPort: 9085
+          command:
+            - python3
+            - -m
+            - planner_sla
+          args:
+            - --environment=kubernetes
+            - --backend=trtllm
+            - --adjustment-interval=60
+            - --profile-results-dir=/data/profiling_results
+            - --prometheus-port=9085
+    
     TRTLLMDecodeWorker:
-      dynamoNamespace: trtllm-disaggregated-default
+      dynamoNamespace: trtllm-planner
       envFromSecret: hf-token-secret
       componentType: worker
+      subComponentType: decode
       replicas: 1
       livenessProbe:
         httpGet:
           path: /live
           port: 9090
         periodSeconds: 5
-        timeoutSeconds: 3
-        failureThreshold: 3
+        timeoutSeconds: 30
+        failureThreshold: 1
       readinessProbe:
         httpGet:
           path: /health
           port: 9090
         periodSeconds: 10
-        timeoutSeconds: 3
-        failureThreshold: 120
+        timeoutSeconds: 30
+        failureThreshold: 60
       resources:
         requests:
           cpu: "8"
@@ -132,24 +165,18 @@ spec:
           - key: nvidia.com/gpu
             operator: Exists
             effect: NoSchedule
+        terminationGracePeriodSeconds: 600
         # Mount ConfigMap as volume
         volumes:
-          - name: trtllm-disagg-config
+          - name: trtllm-planner-config
             configMap:
-              name: trtllm-disagg-config
+              name: trtllm-planner-config
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 120
           image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.0
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
           volumeMounts:
-            - name: trtllm-disagg-config
+            - name: trtllm-planner-config
               mountPath: /workspace/components/backends/trtllm/engine_configs
               readOnly: true
           command:
@@ -167,25 +194,27 @@ spec:
             - decode
             - --disaggregation-strategy
             - decode_first
+    
     TRTLLMPrefillWorker:
-      dynamoNamespace: trtllm-disaggregated-default
+      dynamoNamespace: trtllm-planner
       envFromSecret: hf-token-secret
       componentType: worker
+      subComponentType: prefill
       replicas: 1
       livenessProbe:
         httpGet:
           path: /live
           port: 9090
         periodSeconds: 5
-        timeoutSeconds: 3
-        failureThreshold: 3
+        timeoutSeconds: 30
+        failureThreshold: 1
       readinessProbe:
         httpGet:
           path: /health
           port: 9090
         periodSeconds: 10
-        timeoutSeconds: 3
-        failureThreshold: 120
+        timeoutSeconds: 30
+        failureThreshold: 60
       resources:
         requests:
           cpu: "8"
@@ -202,24 +231,18 @@ spec:
           - key: nvidia.com/gpu
             operator: Exists
             effect: NoSchedule
+        terminationGracePeriodSeconds: 600
         # Mount ConfigMap as volume
         volumes:
-          - name: trtllm-disagg-config
+          - name: trtllm-planner-config
             configMap:
-              name: trtllm-disagg-config
+              name: trtllm-planner-config
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 120
           image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.0
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
           volumeMounts:
-            - name: trtllm-disagg-config
+            - name: trtllm-planner-config
               mountPath: /workspace/components/backends/trtllm/engine_configs
               readOnly: true
           command:
@@ -237,3 +260,4 @@ spec:
             - prefill
             - --disaggregation-strategy
             - decode_first
+
