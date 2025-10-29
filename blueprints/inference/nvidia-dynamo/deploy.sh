@@ -102,17 +102,32 @@ print_banner "DYNAMO ${DYNAMO_VERSION} EXAMPLE DEPLOYMENT"
 
 AVAILABLE_EXAMPLES=(
     "hello-world:Simple CPU-only example for testing Dynamo functionality"
-    "vllm-aggregated-default:vLLM aggregated serving with default settings (small models)"
-    "vllm-disaggregated-default:vLLM disaggregated serving with default settings (separate prefill/decode workers)"
-    "sglang-aggregated-default:SGLang aggregated serving with advanced caching (small models)"
-    "sglang-disaggregated-default:SGLang disaggregated serving with RadixAttention (small models)"
-    "trtllm-aggregated-default:TensorRT-LLM aggregated inference with default settings"
-    "trtllm-aggregated-high-performance:TensorRT-LLM aggregated optimized for maximum throughput"
-    "trtllm-disaggregated-default:TensorRT-LLM disaggregated serving with default settings"
-    "multi-replica-vllm:Multi-replica vLLM deployment with KV routing and high availability"
-    "vllm-router:vLLM with KV-aware routing for cache optimization"
-    "sglang-router:SGLang with KV-aware routing for cache optimization"
-    "trtllm-router:TensorRT-LLM with KV-aware routing for cache optimization"
+    "vllm-aggregated-default:vLLM aggregated serving with default settings"
+    "vllm-disaggregated-default:vLLM disaggregated serving (separate prefill/decode workers)"
+    "vllm-router:vLLM with KV-aware routing (3 variants)"
+    "vllm-aggregated-router:vLLM aggregated with KV router"
+    "vllm-disaggregated-router:vLLM disaggregated with KV router"
+    "vllm-aggregated-kvbm:vLLM with KV Block Manager (disk offloading)"
+    "vllm-disaggregated-kvbm-disk:vLLM disaggregated with KVBM disk offloading"
+    "vllm-disaggregated-planner:vLLM with SLA-based automatic scaling"
+    "sglang-aggregated-default:SGLang aggregated serving with RadixAttention"
+    "sglang-disaggregated-default:SGLang disaggregated serving"
+    "sglang-router:SGLang with KV-aware routing"
+    "sglang-planner:SGLang with SLA-based automatic scaling"
+    "trtllm-aggregated-default:TensorRT-LLM aggregated inference (default config)"
+    "trtllm-aggregated-high-performance:TensorRT-LLM aggregated (high performance config)"
+    "trtllm-disaggregated-default:TensorRT-LLM disaggregated serving"
+    "trtllm-router:TensorRT-LLM with KV-aware routing"
+    "trtllm-planner:TensorRT-LLM with SLA-based automatic scaling"
+    "multi-replica-vllm:Multi-replica vLLM with KV routing and HA"
+    "llava-1.5-7b:LLaVA 1.5 7B multimodal (image understanding)"
+    "qwen2.5-vl-7b:Qwen2.5-VL 7B multimodal (image + video)"
+    "vllm-disaggregated-multinode:vLLM multi-node TP=8 (requires Grove + Kai)"
+    "sglang-disaggregated-multinode:SGLang multi-node TP=8 (requires Grove + Kai)"
+    "trtllm-disaggregated-multinode:TensorRT-LLM multi-node TP=8 (requires Grove + Kai)"
+    "vllm-otel-tracing:vLLM with OpenTelemetry distributed tracing"
+    "vllm-audit-logging:vLLM with audit logging for compliance"
+    "vllm-full-observability:vLLM with complete observability stack"
 )
 
 #---------------------------------------------------------------
@@ -144,7 +159,7 @@ EXAMPLE=""
 if [ $# -gt 0 ]; then
     EXAMPLE="$1"
     # Validate provided example
-    VALID_EXAMPLES=("hello-world" "vllm-aggregated-default" "vllm-disaggregated-default" "sglang-aggregated-default" "sglang-disaggregated-default" "trtllm-aggregated-default" "trtllm-aggregated-high-performance" "trtllm-disaggregated-default" "multi-replica-vllm" "vllm-router" "sglang-router" "trtllm-router")
+    VALID_EXAMPLES=("hello-world" "vllm-aggregated-default" "vllm-disaggregated-default" "vllm-router" "vllm-aggregated-router" "vllm-disaggregated-router" "vllm-aggregated-kvbm" "vllm-disaggregated-kvbm-disk" "vllm-disaggregated-planner" "sglang-aggregated-default" "sglang-disaggregated-default" "sglang-router" "sglang-planner" "trtllm-aggregated-default" "trtllm-aggregated-high-performance" "trtllm-disaggregated-default" "trtllm-router" "trtllm-planner" "multi-replica-vllm" "llava-1.5-7b" "qwen2.5-vl-7b" "vllm-disaggregated-multinode" "sglang-disaggregated-multinode" "trtllm-disaggregated-multinode" "vllm-otel-tracing" "vllm-audit-logging" "vllm-full-observability")
     if [[ ! " ${VALID_EXAMPLES[@]} " =~ " ${EXAMPLE} " ]]; then
         error "Invalid example: ${EXAMPLE}"
         info "Available examples: ${VALID_EXAMPLES[*]}"
@@ -173,43 +188,62 @@ else
     info "Selected example: ${EXAMPLE}"
 fi
 
-# Determine example directory and manifest file based on new structure
+# Determine example directory and manifest file based on directory structure
 get_example_path() {
     local example="$1"
     case "$example" in
-        "vllm-aggregated-default")
+        # vLLM examples
+        "vllm-aggregated-default"|"vllm-disaggregated-default")
             echo "vllm"
             ;;
-        "vllm-disaggregated-default")
-            echo "vllm"
-            ;;
-        "sglang-aggregated-default")
-            echo "sglang"
-            ;;
-        "sglang-disaggregated-default")
-            echo "sglang"
-            ;;
-        "trtllm-aggregated-default")
-            echo "trtllm"
-            ;;
-        "trtllm-aggregated-high-performance")
-            echo "trtllm"
-            ;;
-        "trtllm-disaggregated-default")
-            echo "trtllm"
-            ;;
-        "vllm-router")
+        "vllm-router"|"vllm-aggregated-router"|"vllm-disaggregated-router")
             echo "vllm/router"
+            ;;
+        "vllm-aggregated-kvbm"|"vllm-disaggregated-kvbm-disk")
+            echo "vllm/kvbm"
+            ;;
+        "vllm-disaggregated-planner")
+            echo "vllm/planner"
+            ;;
+        # SGLang examples
+        "sglang-aggregated-default"|"sglang-disaggregated-default")
+            echo "sglang"
             ;;
         "sglang-router")
             echo "sglang/router"
             ;;
+        "sglang-planner")
+            echo "sglang/planner"
+            ;;
+        # TensorRT-LLM examples
+        "trtllm-aggregated-default"|"trtllm-aggregated-high-performance"|"trtllm-disaggregated-default")
+            echo "trtllm"
+            ;;
         "trtllm-router")
             echo "trtllm/router"
             ;;
-        *)
-            # For other examples (hello-world, multi-replica-vllm)
+        "trtllm-planner")
+            echo "trtllm/planner"
+            ;;
+        # Multimodal examples
+        "llava-1.5-7b"|"qwen2.5-vl-7b")
+            echo "multimodal"
+            ;;
+        # Multi-node examples
+        "vllm-disaggregated-multinode"|"sglang-disaggregated-multinode"|"trtllm-disaggregated-multinode")
+            echo "multi-node"
+            ;;
+        # Observability examples
+        "vllm-otel-tracing"|"vllm-audit-logging"|"vllm-full-observability")
+            echo "observability"
+            ;;
+        # Standalone examples
+        "hello-world"|"multi-replica-vllm")
             echo "$example"
+            ;;
+        *)
+            error "Unknown example: $example"
+            exit 1
             ;;
     esac
 }
@@ -224,16 +258,19 @@ DEPLOYMENT_NAME="${EXAMPLE}"
 # This allows using different Dynamo versions without modifying the example YAML files
 TEMP_MANIFEST=""
 if [ -f "${MANIFEST_FILE}" ]; then
-    # Check if manifest contains version references that need updating
-    if grep -q 'nvcr.io/nvidia/ai-dynamo/.*:0\.5\.0' "${MANIFEST_FILE}" 2>/dev/null; then
-        # Extract just the version number without 'v' prefix if present
-        VERSION_TAG="${DYNAMO_VERSION#v}"
+    # Extract just the version number without 'v' prefix if present
+    VERSION_TAG="${DYNAMO_VERSION#v}"
 
-        # Only update if version is different from 0.5.1
-        if [ "${VERSION_TAG}" != "0.5.1" ]; then
+    # Check if manifest contains version references that need updating
+    if grep -q 'nvcr.io/nvidia/ai-dynamo/.*:0\.[0-9]\.[0-9]' "${MANIFEST_FILE}" 2>/dev/null; then
+        # Get current version in manifest
+        CURRENT_VERSION=$(grep -o 'nvcr.io/nvidia/ai-dynamo/.*:0\.[0-9]\.[0-9]' "${MANIFEST_FILE}" | head -1 | sed 's/.*://')
+
+        # Only update if version is different
+        if [ "${VERSION_TAG}" != "${CURRENT_VERSION}" ]; then
             TEMP_MANIFEST="$(mktemp)"
-            info "Updating manifest to use Dynamo version ${VERSION_TAG}..."
-            sed "s/:0\.5\.0/:${VERSION_TAG}/g" "${MANIFEST_FILE}" > "${TEMP_MANIFEST}"
+            info "Updating manifest from ${CURRENT_VERSION} to ${VERSION_TAG}..."
+            sed "s/:${CURRENT_VERSION}/:${VERSION_TAG}/g" "${MANIFEST_FILE}" > "${TEMP_MANIFEST}"
             MANIFEST_FILE="${TEMP_MANIFEST}"
         fi
     fi
