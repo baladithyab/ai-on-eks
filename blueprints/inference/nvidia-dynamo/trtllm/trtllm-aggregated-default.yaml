@@ -1,6 +1,33 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# TensorRT-LLM Aggregated Deployment with ConfigMap
+# Uses ConfigMap for engine configuration instead of inline YAML
 
+# ConfigMap containing TensorRT-LLM engine configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trtllm-agg-config
+  namespace: dynamo-cloud
+data:
+  agg.yaml: |
+    # Default TensorRT-LLM Engine Configuration
+    tensor_parallel_size: 1
+    moe_expert_parallel_size: 1
+    enable_attention_dp: false
+    max_num_tokens: 8192
+    max_batch_size: 16
+    trust_remote_code: true
+    backend: pytorch
+    enable_chunked_prefill: true
+
+    kv_cache_config:
+      free_gpu_memory_fraction: 0.85
+
+    cuda_graph_config:
+      max_batch_size: 16
+---
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
@@ -39,7 +66,7 @@ spec:
           memory: "2Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.0
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
@@ -81,8 +108,13 @@ spec:
           - key: nvidia.com/gpu
             operator: Exists
             effect: NoSchedule
+        # Mount ConfigMap as volume
+        volumes:
+          - name: trtllm-agg-config
+            configMap:
+              name: trtllm-agg-config
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.5.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.0
           workingDir: /workspace/components/backends/trtllm
           startupProbe:
             httpGet:
@@ -91,30 +123,19 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 60
+          # Mount ConfigMap to engine_configs directory
+          volumeMounts:
+            - name: trtllm-agg-config
+              mountPath: /workspace/components/backends/trtllm/engine_configs
+              readOnly: true
           command:
-            - /bin/sh
-            - -c
+            - python3
+            - -m
+            - dynamo.trtllm
           args:
-            - |
-              # Create inline engine configuration
-              mkdir -p /tmp/engine_configs
-              cat > /tmp/engine_configs/agg.yaml << 'EOF'
-              # Default TensorRT-LLM Engine Configuration
-              tensor_parallel_size: 1
-              moe_expert_parallel_size: 1
-              enable_attention_dp: false
-              max_num_tokens: 8192
-              max_batch_size: 16
-              trust_remote_code: true
-              backend: pytorch
-              enable_chunked_prefill: true
-
-              kv_cache_config:
-                free_gpu_memory_fraction: 0.85
-
-              cuda_graph_config:
-                max_batch_size: 16
-              EOF
-
-              # Start TensorRT-LLM worker
-              python3 -m dynamo.trtllm --model-path Qwen/Qwen3-0.6B --served-model-name Qwen/Qwen3-0.6B --extra-engine-args /tmp/engine_configs/agg.yaml
+            - --model-path
+            - Qwen/Qwen3-0.6B
+            - --served-model-name
+            - Qwen/Qwen3-0.6B
+            - --extra-engine-args
+            - engine_configs/agg.yaml
