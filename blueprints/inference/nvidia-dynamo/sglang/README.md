@@ -8,7 +8,8 @@ This directory contains SGLang deployment configurations for the NVIDIA Dynamo p
 |------------|-------------|-------|-----------|
 | `sglang-aggregated-default` | Single worker with RadixAttention | DeepSeek-R1-Distill-Llama-8B | 1 GPU, 10 CPU, 20Gi RAM |
 | `sglang-disaggregated-default` | Separate prefill/decode workers | DeepSeek-R1-Distill-Llama-8B | 1+1 GPUs, 8 CPU each |
-| `sglang-router` | KV-aware routing for cache optimization | Configurable | Configurable |
+| `router/sglang-router` | KV-aware routing for cache optimization | Configurable | Configurable |
+| `planner/sglang-planner` | SLA-based automatic scaling | Qwen/Qwen3-0.6B | 2+2 GPUs, auto-scaled |
 
 ## Architecture
 
@@ -31,6 +32,7 @@ This directory contains SGLang deployment configurations for the NVIDIA Dynamo p
 - **Fast Sampling**: Optimized token generation algorithms
 - **Dynamic Batching**: Efficient request batching and scheduling
 - **NIXL Transfer Backend**: High-speed inter-worker communication for disaggregated mode
+- **SLA Planner**: Automatic scaling based on performance targets (requires profiling)
 
 ### Integration Benefits
 - **Automatic Model Discovery**: Workers register automatically with frontend
