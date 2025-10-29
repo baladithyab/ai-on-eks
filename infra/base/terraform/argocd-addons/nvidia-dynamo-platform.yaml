@@ -18,6 +18,22 @@ spec:
         dynamo-operator:
           imagePullSecrets:
             - name: ngc-secret
+          %{~ if dynamo_operator_namespace_restriction_enabled ~}
+          namespaceRestriction:
+            enabled: true
+            targetNamespace: dynamo-cloud
+          %{~ endif ~}
+          %{~ if dynamo_model_express_url != "" ~}
+          modelExpressURL: ${dynamo_model_express_url}
+          %{~ endif ~}
+
+        # Grove - multi-node inference coordination
+        grove:
+          enabled: ${dynamo_enable_grove}
+
+        # Kai Scheduler - intelligent resource allocation
+        kai-scheduler:
+          enabled: ${dynamo_enable_kai_scheduler}
 
         # NATS configuration - use EFS for JetStream persistence
         # Note: etcd inherits from global.storageClass, but NATS needs explicit setting

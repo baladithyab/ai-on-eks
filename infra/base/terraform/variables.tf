@@ -416,7 +416,36 @@ variable "enable_dynamo_stack" {
 variable "dynamo_stack_version" {
   description = "NVIDIA Dynamo Stack version"
   type        = string
-  default     = "v0.4.0"
+  default     = "v0.5.1"
+}
+
+# NVIDIA Dynamo Platform-Level Features
+# Note: These are platform-wide settings configured in the dynamo-platform Helm chart.
+# Per-workload features (KV Router, SLA Planner, KVBM, OTEL tracing, audit logging, gRPC)
+# are configured in individual DynamoGraphDeployment CRs when deploying inference workloads.
+
+variable "dynamo_enable_grove" {
+  description = "Enable Grove for multi-node inference coordination. If enabled, the Grove operator will be deployed cluster-wide. Required for multi-node deployments."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_enable_kai_scheduler" {
+  description = "Enable Kai Scheduler for intelligent resource allocation. If enabled, the Kai Scheduler operator will be deployed cluster-wide. Required for Grove-based multi-node deployments."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_operator_namespace_restriction_enabled" {
+  description = "Whether to restrict Dynamo operator to specific namespaces. By default, the operator runs with cluster-wide permissions. Set to true to restrict to the dynamo-cloud namespace only."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_model_express_url" {
+  description = "URL for an existing Model Express server (optional). Leave empty to not use Model Express. Format: http://hostname:port"
+  type        = string
+  default     = ""
 }
 
 # Enable SOCI snapshotter parallel pull/unpack mode
