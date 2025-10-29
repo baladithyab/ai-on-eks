@@ -409,10 +409,18 @@ case "$EXAMPLE" in
             warn "Could not retrieve models list, falling back to default model selection"
             # Fallback to example-based model names as backup
             case "$EXAMPLE" in
-                "vllm-aggregated-default") MODEL_NAME="Qwen/Qwen3-8B" ;;
-                "vllm-disaggregated-default"|"multi-replica-vllm"|"vllm-router") MODEL_NAME="Qwen/Qwen3-0.6B" ;;
-                "sglang-aggregated-default"|"sglang-disaggregated-default"|"sglang-router") MODEL_NAME="deepseek-ai/DeepSeek-R1-Distill-Llama-8B" ;;
-                "trtllm-aggregated-default"|"trtllm-aggregated-high-performance"|"trtllm-disaggregated-default"|"trtllm-router") MODEL_NAME="Qwen/Qwen3-0.6B" ;;
+                # vLLM examples - use Qwen models
+                vllm-aggregated-default) MODEL_NAME="Qwen/Qwen3-8B" ;;
+                vllm-*) MODEL_NAME="Qwen/Qwen3-0.6B" ;;
+                # SGLang examples - use DeepSeek
+                sglang-*) MODEL_NAME="deepseek-ai/DeepSeek-R1-Distill-Llama-8B" ;;
+                # TensorRT-LLM examples - use Qwen
+                trtllm-*) MODEL_NAME="Qwen/Qwen3-0.6B" ;;
+                # Multimodal examples - use vision models
+                llava-1.5-7b) MODEL_NAME="llava-hf/llava-1.5-7b-hf" ;;
+                qwen2.5-vl-7b) MODEL_NAME="Qwen/Qwen2.5-VL-7B-Instruct" ;;
+                # Other examples
+                multi-replica-vllm) MODEL_NAME="Qwen/Qwen3-0.6B" ;;
                 *) MODEL_NAME="default-model" ;;
             esac
             info "Using fallback model: ${MODEL_NAME}"
@@ -462,7 +470,7 @@ EOF
 
         # Advanced testing for specific examples
         case "$EXAMPLE" in
-            "vllm-disaggregated-default"|"sglang-disaggregated-default"|"trtllm-disaggregated-default")
+            *-disaggregated-*|*-disagg-*)
                 echo ""
                 info "Testing disaggregation with long context..."
                 LONG_CONTEXT=$(python3 -c "print('Long context test: ' + 'word ' * 100)")
@@ -487,7 +495,7 @@ EOF
                 fi
                 ;;
 
-            "vllm-router"|"sglang-router"|"trtllm-router")
+            *-router)
                 echo ""
                 info "Testing KV routing with shared prefixes..."
                 SHARED_SYSTEM="You are a helpful AI assistant."
@@ -578,10 +586,65 @@ EOF
                 # Clean up test files
                 rm -f /tmp/kv_test_*.json 2>/dev/null
                 ;;
+
+            *-planner)
+                echo ""
+                info "Testing SLA planner metrics..."
+                # Check if planner pod exists and has metrics
+                PLANNER_POD=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE},nvidia.com/dynamo-component=Planner" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+                if [ -n "$PLANNER_POD" ]; then
+                    success "✓ Planner pod found: ${PLANNER_POD}"
+                    # Note: Planner metrics are on port 9085, not part of frontend
+                    info "Planner metrics available at pod port 9085 (not tested here)"
+                else
+                    warn "✗ Planner pod not found"
+                fi
+                ;;
+
+            *-multinode)
+                echo ""
+                info "Testing multi-node deployment coordination..."
+                # Check if all multinode pods are ready
+                MULTINODE_PODS=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE}" --no-headers 2>/dev/null | wc -l)
+                READY_PODS=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE}" --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+                if [ "$MULTINODE_PODS" -eq "$READY_PODS" ] && [ "$MULTINODE_PODS" -gt 0 ]; then
+                    success "✓ Multi-node: ${READY_PODS}/${MULTINODE_PODS} pods running"
+                else
+                    warn "⚠ Multi-node: ${READY_PODS}/${MULTINODE_PODS} pods running"
+                fi
+                ;;
+
+            llava-*|qwen*-vl-*)
+                echo ""
+                info "Testing multimodal deployment..."
+                # Multimodal has 3 components: EncodeWorker, VLMWorker, Processor
+                ENCODE_POD=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE},nvidia.com/dynamo-component=EncodeWorker" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+                VLM_POD=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE},nvidia.com/dynamo-component=VLMWorker" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+                PROCESSOR_POD=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE},nvidia.com/dynamo-component=Processor" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+                if [ -n "$ENCODE_POD" ] && [ -n "$VLM_POD" ] && [ -n "$PROCESSOR_POD" ]; then
+                    success "✓ All multimodal components found (EncodeWorker, VLMWorker, Processor)"
+                else
+                    warn "⚠ Some multimodal components not found"
+                    [ -z "$ENCODE_POD" ] && warn "  - EncodeWorker: not found"
+                    [ -z "$VLM_POD" ] && warn "  - VLMWorker: not found"
+                    [ -z "$PROCESSOR_POD" ] && warn "  - Processor: not found"
+                fi
+                ;;
+
+            *-otel-*|*-audit-*|*-observability)
+                echo ""
+                info "Testing observability features..."
+                # Check for OTEL environment variables or audit logging indicators
+                info "Observability examples should export traces/logs to configured backends"
+                info "Check OTEL collector or audit log destinations for actual data"
+                ;;
         esac
         ;;
 
     "sla-planner")
+        # This case is kept for backward compatibility but shouldn't be reached
+        # due to wildcard *-planner above
         info "Testing SLA planner specific endpoints..."
 
         # Check if Prometheus is available
@@ -647,9 +710,12 @@ echo "  1. Port forwarding: kubectl port-forward service/${SERVICE_NAME} ${LOCAL
 echo "  2. Health check: curl http://localhost:${LOCAL_PORT}/health"
 
 case "$EXAMPLE" in
-    "vllm-aggregated-default"|"vllm-disaggregated-default"|"sglang-aggregated-default"|"sglang-disaggregated-default"|"trtllm-aggregated-default"|"trtllm-aggregated-high-performance"|"trtllm-disaggregated-default"|"multi-replica-vllm"|"vllm-router"|"sglang-router"|"trtllm-router")
+    vllm-*|sglang-*|trtllm-*|multi-replica-*)
         echo "  3. List models: curl http://localhost:${LOCAL_PORT}/v1/models"
         echo "  4. Chat completion: curl -X POST http://localhost:${LOCAL_PORT}/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\": \"${MODEL_NAME}\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}], \"max_tokens\": 50}'"
+        ;;
+    llava-*|qwen*-vl-*)
+        echo "  3. Multimodal chat: curl -X POST http://localhost:${LOCAL_PORT}/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\": \"${MODEL_NAME}\", \"messages\": [{\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"What is in this image?\"}, {\"type\": \"image_url\", \"image_url\": {\"url\": \"https://example.com/image.jpg\"}}]}]}'"
         ;;
 esac
 

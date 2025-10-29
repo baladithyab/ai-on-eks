@@ -207,7 +207,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true # Required for NVIDIA Dynamo high-performance networking
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.5.1"
+dynamo_stack_version             = "v0.6.0"
 
 # Required Secrets - Replace with your actual tokens
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -256,7 +256,7 @@ For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `dynamo_stack_version` | string | `"v0.5.1"` | Dynamo platform version to deploy |
+| `dynamo_stack_version` | string | `"v0.6.0"` | Dynamo platform version to deploy |
 | `dynamo_enable_grove` | bool | `false` | Enable Grove for multi-node inference coordination |
 | `dynamo_enable_kai_scheduler` | bool | `false` | Enable Kai Scheduler for intelligent resource allocation |
 | `dynamo_operator_namespace_restriction_enabled` | bool | `false` | Restrict operator to dynamo-cloud namespace only |
@@ -265,8 +265,16 @@ For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](
 #### dynamo_stack_version
 
 **Type**: `string`
-**Default**: `"v0.5.1"`
-**Example**: `"v0.6.0"`
+**Default**: `"v0.6.0"`
+**Example**: `"v0.5.1"` (for rollback)
+
+:::info What's New in v0.6.0
+- ✅ **Multimodal Support**: Vision-language models (LLaVA, Qwen2.5-VL)
+- ✅ **Multi-Node Deployments**: TP=8 examples with Grove + Kai Scheduler
+- ✅ **Observability Stack**: OpenTelemetry tracing, audit logging, metrics
+
+For detailed upgrade information, see the [v0.6.0 Upgrade Guide](https://github.com/awslabs/ai-on-eks/blob/main/infra/nvidia-dynamo/UPGRADE_TO_V0.6.0.md).
+:::
 
 Specifies the NVIDIA Dynamo platform version to deploy. This determines which Helm chart version is used for the dynamo-platform deployment.
 
@@ -275,10 +283,20 @@ Specifies the NVIDIA Dynamo platform version to deploy. This determines which He
 - Testing new features in a specific version
 - Rolling back to a previous version
 
+**Current Features:**
+- Multimodal support (vision-language models)
+- Multi-node deployments with Grove + Kai Scheduler
+- Comprehensive observability (OTEL, audit logging, metrics)
+- Advanced routing and KV cache management
+
 **Example:**
 ```hcl
 dynamo_stack_version = "v0.6.0"
 ```
+
+:::tip Version Updates
+Check the [NVIDIA Dynamo releases](https://github.com/ai-dynamo/dynamo/releases) for the latest version and release notes. For upgrade guidance between versions, see upgrade guides in the [infra/nvidia-dynamo](https://github.com/awslabs/ai-on-eks/tree/main/infra/nvidia-dynamo) directory.
+:::
 
 #### dynamo_enable_grove
 
@@ -308,8 +326,14 @@ dynamo_enable_grove         = true
 dynamo_enable_kai_scheduler = true  # Required for Grove
 ```
 
+**Infrastructure Impact:**
+- Grove requires Kai Scheduler to function properly
+- No changes to existing ai-on-eks infrastructure required
+- Minimal resource footprint (~100m CPU, ~256Mi memory per operator)
+- Works seamlessly with Karpenter, EFS, and observability stack
+
 **Related Documentation:**
-- [Upgrade Guide - Grove Infrastructure Impact](../../infra/nvidia-dynamo/UPGRADE_TO_V0.6.0.md#grove-and-kai-scheduler-infrastructure-impact)
+- Check upgrade guides in [infra/nvidia-dynamo](https://github.com/awslabs/ai-on-eks/tree/main/infra/nvidia-dynamo) for detailed Grove setup and migration information
 
 #### dynamo_enable_kai_scheduler
 
@@ -366,8 +390,19 @@ Restricts the Dynamo operator to only monitor and manage resources in the `dynam
 dynamo_operator_namespace_restriction_enabled = true
 ```
 
-**Related Documentation:**
-- [Upgrade Guide - Namespace Strategy](../../infra/nvidia-dynamo/UPGRADE_TO_V0.6.0.md#namespace-strategy-for-dynamographdeployment-resources)
+**Namespace Strategy Options:**
+
+*Single Namespace (Recommended for most users):*
+- Deploy all DGDs to `dynamo-cloud` namespace
+- Use `dynamoNamespace` field for logical grouping
+- Secrets managed by Terraform (NGC + HuggingFace)
+- Works with both cluster-wide and restricted operators
+
+*Multi-Namespace (Advanced):*
+- Requires `dynamo_operator_namespace_restriction_enabled = false`
+- Must replicate secrets to each namespace
+- Provides stronger isolation between teams/applications
+- Use for multi-tenant clusters or strict RBAC requirements
 
 #### dynamo_model_express_url
 
