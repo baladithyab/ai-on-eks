@@ -63,25 +63,34 @@ cd infra/nvidia-dynamo
 Both NGC API key and HuggingFace token are **required** and must be configured in `infra/nvidia-dynamo/terraform/blueprint.tfvars` before deployment. Secrets are now managed by Terraform (not shell scripts).
 :::
 
+## 📋 Comprehensive Testing Results
+
+**See [TESTING_RESULTS.md](TESTING_RESULTS.md) for detailed testing results of all deployment examples.**
+
+All examples have been comprehensively tested on EKS with Karpenter auto-provisioning. The testing document includes:
+- ✅ Fully working deployments with test results
+- ⚠️ Known issues and workarounds
+- 🔬 NIXL backend comprehensive testing across all engines
+- 🐛 Bug reports and fixes
+- 🎯 Production recommendations
+
 ## Available Examples
 
 ### Basic Examples (Production Ready)
-| Example | Description | Models | Features |
-|---------|-------------|--------|---------|
-| **[hello-world](hello-world/)** | CPU-only testing example | N/A | Basic connectivity test |
-| **[vllm](vllm/)** | vLLM aggregated serving | Qwen3-0.6B | OpenAI API, G5 GPU |
-| **[sglang](sglang/)** | SGLang with advanced caching | DeepSeek-R1-Distill-Llama-8B | RadixAttention, Multi-model |
-| **[trtllm](trtllm/)** | TensorRT-LLM optimized | DeepSeek-R1-Distill-Llama-8B | Maximum performance |
-| **[multi-replica-vllm](multi-replica-vllm/)** | Multi-replica HA deployment | Multiple models | KV routing, load balancing |
+| Example | Description | Models | Test Status |
+|---------|-------------|--------|-------------|
+| **[vllm](vllm/)** | vLLM aggregated serving | Qwen3-0.6B | ✅ Fully Working |
+| **[sglang](sglang/)** | SGLang with advanced caching | DeepSeek-R1-Distill-Llama-8B | ✅ Fully Working |
+| **[trtllm](trtllm/)** | TensorRT-LLM optimized | Qwen3-0.6B | ✅ Fully Working |
+| **[multi-replica-vllm](multi-replica-vllm/)** | Multi-replica HA deployment | Qwen3-0.6B | ✅ Fully Working |
+| **[multimodal](multimodal/)** | Vision-language models | LLaVA 1.5 7B | ✅ Fully Working |
 
-### Advanced Examples (Beta)
-| Example | Description | Use Case |
-|---------|-------------|----------|
-| **[vllm-disagg](vllm-disagg/)** | Separate prefill/decode workers | High throughput scenarios |
-| **[sglang-disagg](sglang-disagg/)** | Disaggregated with RadixAttention | Memory optimization |
-| **[trtllm-disagg](trtllm-disagg/)** | TRT-LLM disaggregated | Ultra-high performance |
-| **[kv-routing](kv-routing/)** | KV-aware intelligent routing | Cache optimization |
-| **[sla-planner](sla-planner/)** | SLA-based autoscaling | Predictive scaling |
+### Advanced Examples (Disaggregated Serving)
+| Example | Description | Test Status | Notes |
+|---------|-------------|-------------|-------|
+| **[vllm](vllm/)** disaggregated | Separate prefill/decode workers | ✅ Fully Working | NIXL backend tested |
+| **[trtllm](trtllm/)** disaggregated | TRT-LLM disaggregated | ✅ Fully Working | Fixed case sensitivity bug |
+| **[sglang](sglang/)** disaggregated | Disaggregated with RadixAttention | ⚠️ Known Issue | Use aggregated instead |
 
 ## Deployment Guide
 
@@ -908,6 +917,72 @@ curl http://<load-balancer-url>/metrics
 ```
 
 ## Known Issues and Workarounds
+
+### SGLang Disaggregated NIXL Issue (v0.6.0)
+
+**Issue**: SGLang disaggregated serving with NIXL backend fails inference requests despite successful deployment.
+
+**Symptoms**:
+- All pods deploy successfully and become Ready (frontend, prefill worker, decode worker)
+- Health checks pass and show both prefill and backend endpoints available
+- Model listing works correctly via `/v1/models`
+- Chat completion requests fail with "Stream ended before generation completed" error or timeout
+
+**Root Cause**:
+SGLang-specific bug in disaggregated implementation with NIXL backend. This is **NOT a NIXL issue** - comprehensive testing proves NIXL works correctly:
+- ✅ vLLM disaggregated with NIXL: Fully functional
+- ✅ TensorRT-LLM disaggregated with DEFAULT (UCX): Fully functional
+- ❌ SGLang disaggregated with NIXL: Fails inference
+
+**Evidence from Testing**:
+All three engines successfully initialize NIXL with UCX backend, but only SGLang fails during inference. This isolates the issue to SGLang's NIXL implementation, not the NIXL communication layer itself.
+
+**Workaround**:
+Use **SGLang Aggregated** deployment instead, which is fully functional and production-ready:
+```bash
+./deploy.sh sglang-aggregated-default
+```
+
+**Alternative Backends**:
+SGLang disaggregated supports these transfer backends:
+- `nixl` - ❌ Fails in v0.6.0
+- `mooncake` - Default when flag omitted (not tested)
+- `ascend` - For Ascend NPUs
+- `fake` - For testing only
+
+**Status**:
+- ⚠️ **Not documented** as a known issue in v0.6.0 release notes
+- 🐛 **Recommended**: Report to NVIDIA with comprehensive test results
+- ✅ **Production Alternative**: Use SGLang Aggregated (fully working)
+
+**See Also**: [TESTING_RESULTS.md](TESTING_RESULTS.md) for comprehensive NIXL backend testing across all three inference engines.
+
+---
+
+### TensorRT-LLM Disaggregated Case Sensitivity Bug (Fixed)
+
+**Issue**: TensorRT-LLM disaggregated workers crash with validation error in v0.6.0 manifest.
+
+**Error Message**:
+```
+pydantic_core._pydantic_core.ValidationError: cache_transceiver_config.backend
+Input should be 'DEFAULT', 'UCX', 'NIXL' or 'MPI' [type=literal_error, input_value='default']
+```
+
+**Root Cause**:
+Configuration bug in v0.6.0 manifest - `backend: default` (lowercase) should be `backend: DEFAULT` (uppercase).
+
+**Fix Applied**:
+Modified `blueprints/inference/nvidia-dynamo/trtllm/trtllm-disaggregated-default.yaml`:
+- Line 32 (decode worker): Changed `backend: default` to `backend: DEFAULT`
+- Line 53 (prefill worker): Changed `backend: default` to `backend: DEFAULT`
+
+**Status**:
+- ✅ **Fixed** in this repository
+- ✅ **Fully functional** after fix
+- 📝 **Recommended**: NVIDIA should update official manifests
+
+---
 
 ### Dynamo Namespace Collision Issue
 
