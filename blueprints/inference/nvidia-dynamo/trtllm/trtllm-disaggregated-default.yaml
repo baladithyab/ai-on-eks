@@ -29,7 +29,7 @@ data:
       free_gpu_memory_fraction: 0.85
 
     cache_transceiver_config:
-      backend: default
+      backend: DEFAULT
 
   prefill.yaml: |
     # TensorRT-LLM Prefill Worker Configuration
@@ -50,7 +50,7 @@ data:
       free_gpu_memory_fraction: 0.85
 
     cache_transceiver_config:
-      backend: default
+      backend: DEFAULT
 ---
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
