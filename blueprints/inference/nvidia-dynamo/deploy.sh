@@ -369,6 +369,67 @@ fi
 
 
 #---------------------------------------------------------------
+# Auto-detect and Configure Model Caching
+#---------------------------------------------------------------
+
+section "Model Caching Configuration"
+
+# Check for shared model cache PVC
+SHARED_CACHE_PVC="dynamo-shared-models"
+USE_SHARED_CACHE=false
+
+if kubectl get pvc "${SHARED_CACHE_PVC}" -n "${NAMESPACE}" &>/dev/null; then
+    info "Shared model cache PVC detected: ${SHARED_CACHE_PVC}"
+    PVC_SIZE=$(kubectl get pvc "${SHARED_CACHE_PVC}" -n "${NAMESPACE}" -o jsonpath='{.spec.resources.requests.storage}')
+    PVC_CLASS=$(kubectl get pvc "${SHARED_CACHE_PVC}" -n "${NAMESPACE}" -o jsonpath='{.spec.storageClassName}')
+    info "  Size: ${PVC_SIZE}, StorageClass: ${PVC_CLASS}"
+    USE_SHARED_CACHE=true
+else
+    info "No shared model cache PVC found (models will use ephemeral pod storage)"
+fi
+
+# Check for Model Express (future support)
+MODEL_EXPRESS_URL=""
+if kubectl get deployment -n model-express model-express &>/dev/null 2>&1; then
+    MODEL_EXPRESS_URL="http://model-express.model-express.svc.cluster.local:8080"
+    info "Model Express detected: ${MODEL_EXPRESS_URL}"
+    warn "Model Express integration not yet implemented in this script"
+fi
+
+# Apply caching configuration if shared cache is available
+CACHE_MANIFEST=""  # Initialize separate from version TEMP_MANIFEST
+if [ "${USE_SHARED_CACHE}" = true ]; then
+    info "Configuring deployment to use shared model cache..."
+
+    # Create cache-configured manifest using Python patcher
+    CACHE_MANIFEST="/tmp/${EXAMPLE}-cache-$(date +%s).yaml"
+    PATCHER="${SCRIPT_DIR}/patch-cache.py"
+
+    if [ -f "${PATCHER}" ] && command -v python3 &>/dev/null; then
+        info "Using Python patcher for cache configuration..."
+
+        # Run the patcher
+        if python3 "${PATCHER}" "${MANIFEST_FILE}" "${CACHE_MANIFEST}" "${SHARED_CACHE_PVC}"; then
+            MANIFEST_FILE="${CACHE_MANIFEST}"
+            success "Manifest patched with shared cache configuration"
+            info "  PVC: ${SHARED_CACHE_PVC}"
+            info "  HF_HOME: /models"
+            info "  Volume mounts: Added to all Worker services"
+        else
+            warn "Python patcher failed, deploying without cache"
+            CACHE_MANIFEST=""
+        fi
+    else
+        warn "Python3 or patch-cache.py not found"
+        warn "Deploying without cache optimization"
+        info "Install Python3 for automatic cache configuration"
+        CACHE_MANIFEST=""
+    fi
+else
+    info "No shared cache PVC found - deploying with ephemeral storage"
+fi
+
+#---------------------------------------------------------------
 # Deployment
 #---------------------------------------------------------------
 
@@ -380,16 +441,14 @@ info "Namespace: ${NAMESPACE}"
 # Deploy the example
 if kubectl apply -f "${MANIFEST_FILE}" -n "${NAMESPACE}"; then
     success "Manifest applied successfully"
-    # Clean up temporary manifest if created
-    if [ -n "${TEMP_MANIFEST}" ] && [ -f "${TEMP_MANIFEST}" ]; then
-        rm -f "${TEMP_MANIFEST}"
-    fi
+    # Clean up temporary manifests if created
+    [ -n "${TEMP_MANIFEST}" ] && [ -f "${TEMP_MANIFEST}" ] && rm -f "${TEMP_MANIFEST}"
+    [ -n "${CACHE_MANIFEST}" ] && [ -f "${CACHE_MANIFEST}" ] && rm -f "${CACHE_MANIFEST}"
 else
     error "Failed to apply manifest"
-    # Clean up temporary manifest if created
-    if [ -n "${TEMP_MANIFEST}" ] && [ -f "${TEMP_MANIFEST}" ]; then
-        rm -f "${TEMP_MANIFEST}"
-    fi
+    # Clean up temporary manifests if created
+    [ -n "${TEMP_MANIFEST}" ] && [ -f "${TEMP_MANIFEST}" ] && rm -f "${TEMP_MANIFEST}"
+    [ -n "${CACHE_MANIFEST}" ] && [ -f "${CACHE_MANIFEST}" ] && rm -f "${CACHE_MANIFEST}"
     exit 1
 fi
 
