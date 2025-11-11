@@ -58,7 +58,7 @@ spec:
           - dynamo.vllm
           args:
             - --model
-            - Qwen/Qwen3-8B
+            - Qwen/Qwen3-0.6B
             - --gpu-memory-utilization
             - "0.3"
             - --disable-log-requests
@@ -109,7 +109,7 @@ spec:
           - dynamo.vllm
           args:
             - --model
-            - Qwen/Qwen3-8B
+            - Qwen/Qwen3-0.6B
             - --is-prefill-worker
             - --gpu-memory-utilization
             - "0.3"
