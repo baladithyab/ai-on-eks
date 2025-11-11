@@ -19,15 +19,17 @@
 # - Multi-turn video conversations
 #
 # Requirements:
-# - 3 GPUs (1 per component: EncodeWorker, VLMWorker, Processor)
+# - 4 GPUs total (1 for EncodeWorker, 2 for VLMWorker with KVBM, 1 for Processor)
 # - HuggingFace token secret (hf-token-secret) for model download
 # - Higher memory allocation for video frame processing
 #
 # Resource Notes:
-# - VLMWorker: 48Gi memory for extended context window (64K tokens)
+# - VLMWorker: 2 GPUs + KVBM CPU/Disk offloading (100GB CPU cache + 300GB disk)
+# - VLMWorker: 200Gi memory for CPU cache and extended context (64K tokens)
 # - EncodeWorker: 32Gi memory for video frame encoding
 # - Processor: 32Gi memory for video preprocessing
 # - Extended startup probe timeout (30 min) for larger model initialization
+# - KVBM three-tier caching: GPU (48GB) → CPU (100GB) → Disk (300GB)
 #
 # Performance Considerations:
 # - max-model-len set to 65536 (64K) for long video sequences
@@ -97,11 +99,21 @@ spec:
       replicas: 1
       resources:
         requests:
-          cpu: "4"
-          memory: "48Gi"
+          cpu: "16"
+          memory: "200Gi"
         limits:
-          gpu: "1"
-          memory: "48Gi"
+          gpu: "2"
+          memory: "250Gi"
+      envs:
+        # Enable KVBM CPU cache (100GB of host memory for KV cache overflow)
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "100"
+        # Enable KVBM disk cache (300GB for long video sequences)
+        - name: DYN_KVBM_DISK_CACHE_GB
+          value: "300"
+        # Enable KVBM metrics for monitoring cache performance
+        - name: DYN_KVBM_METRICS
+          value: "true"
       extraPodSpec:
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
@@ -117,7 +129,19 @@ spec:
             - /bin/sh
             - -c
           args:
-            - python3 components/worker.py --model Qwen/Qwen2.5-VL-7B-Instruct --worker-type prefill --max-model-len 65536 --gpu-memory-utilization 0.90
+            - python3 components/worker.py --model Qwen/Qwen2.5-VL-7B-Instruct --worker-type prefill --max-model-len 65536 --gpu-memory-utilization 0.80 --tensor-parallel-size 2 --connector kvbm
+          # Volume mount for disk cache
+          volumeMounts:
+            - name: kvbm-disk-cache
+              mountPath: /tmp/kvbm-cache
+        # Volume for disk cache storage (larger for video processing)
+        volumes:
+          - name: kvbm-disk-cache
+            emptyDir:
+              sizeLimit: 350Gi
+              # For production, use a PersistentVolumeClaim instead:
+              # persistentVolumeClaim:
+              #   claimName: qwen-vl-video-kvbm-cache-pvc
         tolerations:
           - key: "nvidia.com/gpu"
             operator: "Exists"
