@@ -151,6 +151,25 @@ variable "enable_ai_ml_observability_stack" {
   type        = bool
   default     = false
 }
+
+variable "enable_tempo_stack" {
+  description = "Enable Grafana Tempo for OpenTelemetry distributed tracing"
+  type        = bool
+  default     = false
+}
+
+variable "enable_dynamo_model_express" {
+  description = "Enable Model Express for managed model caching and distribution. When disabled, shared EFS HuggingFace cache PVC is created instead (recommended for most use cases)."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_shared_cache_size" {
+  description = "Size of shared EFS PVC for HuggingFace model cache (used when enable_dynamo_model_express = false). Ignored if Model Express is enabled."
+  type        = string
+  default     = "200Gi"
+}
+
 variable "enable_argo_workflows" {
   description = "Enable Argo Workflows addon"
   type        = bool
