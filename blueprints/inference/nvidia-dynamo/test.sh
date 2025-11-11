@@ -309,7 +309,7 @@ case "$EXAMPLE" in
         # Test any hello-world specific endpoints
         ;;
 
-    "vllm-aggregated-default"|"vllm-disaggregated-default"|"sglang-aggregated-default"|"sglang-disaggregated-default"|"trtllm-aggregated-default"|"trtllm-aggregated-high-performance"|"trtllm-disaggregated-default"|"multi-replica-vllm"|"vllm-router"|"sglang-router"|"trtllm-router")
+    "vllm-aggregated-default"|"vllm-disaggregated-default"|"vllm-aggregated-kvbm"|"vllm-disaggregated-kvbm"|"sglang-aggregated-default"|"sglang-disaggregated-default"|"trtllm-aggregated-default"|"trtllm-aggregated-high-performance"|"trtllm-disaggregated-default"|"multi-replica-vllm"|"vllm-router"|"sglang-router"|"trtllm-router"|"vllm-full-observability")
         info "Testing LLM service endpoints..."
 
         # Test models endpoint
