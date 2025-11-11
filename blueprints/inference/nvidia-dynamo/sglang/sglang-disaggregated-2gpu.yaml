@@ -71,12 +71,12 @@ spec:
       resources:
         requests:
           cpu: "8"
-          memory: "20Gi"
-          gpu: "1"
+          memory: "40Gi"
+          gpu: "2"
         limits:
           cpu: "8"
-          memory: "20Gi"
-          gpu: "1"
+          memory: "40Gi"
+          gpu: "2"
       extraPodSpec:
         nodeSelector:
           karpenter.sh/nodepool: g5-gpu-karpenter
@@ -87,7 +87,7 @@ spec:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.sglang --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-8B --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-8B --page-size 16 --tp 1 --trust-remote-code --skip-tokenizer-init --disaggregation-mode decode --disaggregation-transfer-backend nixl"
+            - "python3 -m dynamo.sglang --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-8B --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-8B --page-size 16 --tp 2 --trust-remote-code --skip-tokenizer-init --disaggregation-mode decode --disaggregation-transfer-backend nixl"
     SGLangPrefillWorker:
       dynamoNamespace: sglang-disaggregated-default
       envFromSecret: hf-token-secret
@@ -115,12 +115,12 @@ spec:
       resources:
         requests:
           cpu: "8"
-          memory: "20Gi"
-          gpu: "1"
+          memory: "40Gi"
+          gpu: "2"
         limits:
           cpu: "8"
-          memory: "20Gi"
-          gpu: "1"
+          memory: "40Gi"
+          gpu: "2"
       extraPodSpec:
         nodeSelector:
           karpenter.sh/nodepool: g5-gpu-karpenter
@@ -131,4 +131,4 @@ spec:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.sglang --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-8B --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-8B --page-size 16 --tp 1 --trust-remote-code --skip-tokenizer-init --disaggregation-mode prefill --disaggregation-transfer-backend nixl"
+            - "python3 -m dynamo.sglang --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-8B --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-8B --page-size 16 --tp 2 --trust-remote-code --skip-tokenizer-init --disaggregation-mode prefill --disaggregation-transfer-backend nixl"

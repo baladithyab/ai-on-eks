@@ -1,15 +1,39 @@
-# NVIDIA Dynamo v0.6.0 Inference Examples
+# NVIDIA Dynamo v0.6.1 Inference Examples
 
-This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.6.0 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
+This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.6.1 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
 
-## 🆕 What's New in v0.6.0
+## 🆕 What's New in v0.6.1
 
-- ✅ **ConfigMap Pattern**: TensorRT-LLM examples now use ConfigMaps for engine configuration
-- ✅ **Multimodal Support**: Vision-language models (LLaVA, Qwen2.5-VL) with image/video understanding
-- ✅ **Multi-Node Deployments**: TP=8 examples with Grove + Kai Scheduler support
-- ✅ **Observability Stack**: OpenTelemetry tracing, audit logging, and metrics
-- ✅ **Enhanced Documentation**: Comprehensive inline comments and prerequisites
-- ✅ **Production-Ready**: All examples include health probes, resource specs, and EKS optimizations
+**Production Readiness:**
+- ✅ Stable vLLM disaggregated multi-node (TP=8+)
+- ✅ Automated DGDR profiling for SLA Planner
+- ✅ Grove v0.1.0 improvements (certificate rotation, stability)
+
+**KVBM Enhancements:**
+- ✅ **GPU-to-disk offloading**: Multi-tier caching (GPU→CPU→Disk→Remote)
+- ✅ `DYN_KVBM_DISK_CACHE_GB` for 500GB+ disk caching
+- ✅ Access pattern filtering to extend SSD lifespan
+- ✅ Example: [`vllm-disaggregated-kvbm-disk.yaml`](vllm/kvbm/vllm-disaggregated-kvbm-disk.yaml)
+
+**Benchmarking:**
+- ✅ **AIPerf** replaces genai-perf for standardized testing
+- ✅ Built into NGC containers
+- ✅ Supports all backends (vLLM, SGLang, TensorRT-LLM)
+
+**Platform Support:**
+- ✅ GKE (Google Kubernetes Engine) production templates
+- ✅ GB200 platform with FP4 quantization (experimental)
+- ✅ WideEP for MoE models (DeepSeek-R1)
+
+**Configuration Improvements:**
+- ✅ ConfigMap pattern for TensorRT-LLM engine configuration
+- ✅ Multimodal support (LLaVA, Qwen2.5-VL) with image/video understanding
+- ✅ Enhanced documentation with comprehensive inline comments
+
+**Bug Fixes:**
+- Fixed NATS streaming timeout issues
+- Fixed OOM handling improvements
+- Fixed memory leak in disaggregated deployments
 
 ## Quick Start
 
@@ -51,6 +75,23 @@ cd infra/nvidia-dynamo
 ./cleanup.sh
 ```
 
+## Quick Reference
+
+**Single Command Deployment:**
+```bash
+cd blueprints/inference/nvidia-dynamo
+./deploy.sh vllm/vllm-aggregated-default.yaml  # Deploy
+./test.sh vllm-aggregated-default              # Test
+./cleanup.sh vllm-aggregated-default           # Clean up
+```
+
+**Common Patterns:**
+- **Basic**: `vllm-aggregated-default` (TP=4, Qwen3-8B)
+- **Disaggregated**: `vllm-disaggregated-default` (separate prefill/decode)
+- **Advanced KVBM**: `vllm-disaggregated-kvbm-disk` (multi-tier caching)
+- **Routing**: `vllm-router` (cache-aware request routing)
+- **Multimodal**: `qwen2.5-vl-7b` (vision-language)
+
 ## Prerequisites
 
 - **EKS Cluster**: Kubernetes 1.28+ with GPU nodes (G5 instances recommended)
@@ -77,20 +118,21 @@ All examples have been comprehensively tested on EKS with Karpenter auto-provisi
 ## Available Examples
 
 ### Basic Examples (Production Ready)
-| Example | Description | Models | Test Status |
-|---------|-------------|--------|-------------|
-| **[vllm](vllm/)** | vLLM aggregated serving | Qwen3-0.6B | ✅ Fully Working |
-| **[sglang](sglang/)** | SGLang with advanced caching | DeepSeek-R1-Distill-Llama-8B | ✅ Fully Working |
-| **[trtllm](trtllm/)** | TensorRT-LLM optimized | Qwen3-0.6B | ✅ Fully Working |
-| **[multi-replica-vllm](multi-replica-vllm/)** | Multi-replica HA deployment | Qwen3-0.6B | ✅ Fully Working |
-| **[multimodal](multimodal/)** | Vision-language models | LLaVA 1.5 7B | ✅ Fully Working |
+| Example | Description | Models | KVBM | Test Status |
+|---------|-------------|--------|------|-------------|
+| **[vllm](vllm/)** | vLLM aggregated serving | Qwen3-0.6B | ❌ | ✅ Fully Working |
+| **[sglang](sglang/)** | SGLang with advanced caching | DeepSeek-R1-Distill-Llama-8B | ❌ | ✅ Fully Working |
+| **[trtllm](trtllm/)** | TensorRT-LLM optimized | Qwen3-0.6B | ❌ | ✅ Fully Working |
+| **[multi-replica-vllm](multi-replica-vllm/)** | Multi-replica HA deployment | Qwen3-0.6B | ❌ | ✅ Fully Working |
+| **[multimodal](multimodal/)** | Vision-language models | LLaVA 1.5 7B | ❌ | ✅ Fully Working |
 
 ### Advanced Examples (Disaggregated Serving)
-| Example | Description | Test Status | Notes |
-|---------|-------------|-------------|-------|
-| **[vllm](vllm/)** disaggregated | Separate prefill/decode workers | ✅ Fully Working | NIXL backend tested |
-| **[trtllm](trtllm/)** disaggregated | TRT-LLM disaggregated | ✅ Fully Working | Fixed case sensitivity bug |
-| **[sglang](sglang/)** disaggregated | Disaggregated with RadixAttention | ⚠️ Known Issue | Use aggregated instead |
+| Example | Description | KVBM | Test Status | Notes |
+|---------|-------------|------|-------------|-------|
+| **[vllm](vllm/)** disaggregated | Separate prefill/decode workers | ✅ CPU+GPU | ✅ Fully Working | NIXL backend tested |
+| **[vllm](vllm/kvbm/)** KVBM disk | Multi-tier GPU→CPU→Disk caching | ✅ CPU+GPU+Disk | ✅ Fully Working | **New in v0.6.1** |
+| **[trtllm](trtllm/)** disaggregated | TRT-LLM disaggregated | ❌ | ✅ Fully Working | Fixed case sensitivity bug |
+| **[sglang](sglang/)** disaggregated | Disaggregated with RadixAttention | ❌ | ⚠️ Known Issue | Use aggregated instead |
 
 ## Deployment Guide
 

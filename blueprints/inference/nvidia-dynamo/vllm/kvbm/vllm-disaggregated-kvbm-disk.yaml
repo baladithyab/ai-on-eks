@@ -19,7 +19,7 @@ spec:
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/components/backends/vllm
           command:
           - python3
@@ -43,14 +43,24 @@ spec:
       replicas: 1
       resources:
         requests:
-          cpu: "8"
-          memory: "32Gi"
+          cpu: "16"
+          memory: "200Gi"
         limits:
           gpu: "1"
-          memory: "32Gi"
+          memory: "250Gi"
+      envs:
+        # CPU cache size in GB (required for disaggregated decode)
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "100"
+        # Disk cache size in GB (optional, enables disk offloading)
+        - name: DYN_KVBM_DISK_CACHE_GB
+          value: "500"
+        # Enable KVBM metrics (optional)
+        - name: DYN_KVBM_METRICS
+          value: "true"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/components/backends/vllm
           command:
           - python3
@@ -65,6 +75,21 @@ spec:
             - --max-model-len
             - "32000"
             - --enforce-eager
+            - --connector
+            - kvbm
+            - nixl
+          # Volume mount for disk cache (optional, for persistent disk offloading)
+          volumeMounts:
+            - name: kvbm-disk-cache
+              mountPath: /tmp/kvbm-cache
+        # Volume for disk cache storage
+        volumes:
+          - name: kvbm-disk-cache
+            emptyDir:
+              sizeLimit: 550Gi
+              # For production, use a PersistentVolumeClaim instead:
+              # persistentVolumeClaim:
+              #   claimName: kvbm-disk-cache-pvc
         tolerations:
           - key: "nvidia.com/gpu"
             operator: "Exists"
@@ -101,7 +126,7 @@ spec:
         #   value: "6880"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/components/backends/vllm
           command:
           - python3

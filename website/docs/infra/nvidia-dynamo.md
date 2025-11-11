@@ -207,7 +207,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true # Required for NVIDIA Dynamo high-performance networking
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.6.0"
+dynamo_stack_version             = "v0.6.1"
 
 # Required Secrets - Replace with your actual tokens
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -256,7 +256,7 @@ For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `dynamo_stack_version` | string | `"v0.6.0"` | Dynamo platform version to deploy |
+| `dynamo_stack_version` | string | `"v0.6.1"` | Dynamo platform version to deploy |
 | `dynamo_enable_grove` | bool | `false` | Enable Grove for multi-node inference coordination |
 | `dynamo_enable_kai_scheduler` | bool | `false` | Enable Kai Scheduler for intelligent resource allocation |
 | `dynamo_operator_namespace_restriction_enabled` | bool | `false` | Restrict operator to dynamo-cloud namespace only |
@@ -265,15 +265,17 @@ For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](
 #### dynamo_stack_version
 
 **Type**: `string`
-**Default**: `"v0.6.0"`
+**Default**: `"v0.6.1"`
 **Example**: `"v0.5.1"` (for rollback)
 
-:::info What's New in v0.6.0
-- ✅ **Multimodal Support**: Vision-language models (LLaVA, Qwen2.5-VL)
-- ✅ **Multi-Node Deployments**: TP=8 examples with Grove + Kai Scheduler
-- ✅ **Observability Stack**: OpenTelemetry tracing, audit logging, metrics
+:::info What's New in v0.6.1
+- ✅ **Production Readiness**: vLLM DP multi-node, automated DGDR profiling, Grove improvements
+- ✅ **KVBM Enhancements**: GPU-to-disk offloading with multi-tier caching (GPU→CPU→Disk→Remote)
+- ✅ **Enhanced Benchmarking**: AIPerf replaces genai-perf for standardized testing
+- ✅ **GKE Support**: Production-ready templates for Google Kubernetes Engine
+- ✅ **GB200 Platform**: FP4 quantization, WideEP for MoE models (experimental)
 
-For detailed upgrade information, see the [v0.6.0 Upgrade Guide](https://github.com/awslabs/ai-on-eks/blob/main/infra/nvidia-dynamo/UPGRADE_TO_V0.6.0.md).
+For detailed upgrade information, see the [v0.6.1 Upgrade Guide](https://github.com/awslabs/ai-on-eks/blob/main/infra/nvidia-dynamo/UPGRADE_TO_V0.6.1.md).
 :::
 
 Specifies the NVIDIA Dynamo platform version to deploy. This determines which Helm chart version is used for the dynamo-platform deployment.
@@ -291,7 +293,7 @@ Specifies the NVIDIA Dynamo platform version to deploy. This determines which He
 
 **Example:**
 ```hcl
-dynamo_stack_version = "v0.6.0"
+dynamo_stack_version = "v0.6.1"
 ```
 
 :::tip Version Updates
@@ -436,7 +438,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.6.0"
+dynamo_stack_version             = "v0.6.1"
 
 # Required Secrets
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -456,7 +458,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.6.0"
+dynamo_stack_version             = "v0.6.1"
 
 # Required Secrets
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -474,7 +476,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.6.0"
+dynamo_stack_version             = "v0.6.1"
 
 # Required Secrets
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -578,6 +580,20 @@ cd infra/nvidia-dynamo
 - **ArgoCD Applications**: GitOps-managed resources
 - **Kubernetes Resources**: Namespaces, secrets, and configurations
 - **Infrastructure**: EKS cluster, VPC, security groups, and all AWS resources
+
+## Google Kubernetes Engine (GKE) Support
+
+**Available Since**: v0.6.1
+
+NVIDIA Dynamo v0.6.1 adds production-ready support for Google Kubernetes Engine with GKE-specific configurations.
+
+**Key Features:**
+- ✅ GKE-specific configuration templates
+- ✅ GPU driver setup via LD_LIBRARY_PATH
+- ✅ Production-ready disaggregated deployments
+- ✅ vLLM and SGLang backend examples
+
+**Note:** This ai-on-eks blueprint is optimized for Amazon EKS. For GKE deployments, refer to the [official Dynamo GKE examples](https://github.com/ai-dynamo/dynamo/tree/v0.6.1/examples/deployments/GKE).
 
 **Duration**: ~10-15 minutes for complete infrastructure teardown
 

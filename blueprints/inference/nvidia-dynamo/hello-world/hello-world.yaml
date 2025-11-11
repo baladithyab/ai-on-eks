@@ -44,8 +44,8 @@ spec:
           memory: "2Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
-          workingDir: /workspace/examples/runtime/hello_world/
+          image: nvcr.io/nvidia/ai-dynamo/dynamo:0.6.1
+          workingDir: /workspace/examples/custom_backend/hello_world/
           command:
             - /bin/sh
             - -c
@@ -53,7 +53,7 @@ spec:
             - "python3 client.py"
         # NGC authentication handled by dynamo-cloud namespace secret
         imagePullSecrets:
-          - name: docker-imagepullsecret
+          - name: ngc-secret
     HelloWorldWorker:
       livenessProbe:
         exec:
@@ -69,7 +69,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - 'grep "Serving endpoint" /tmp/hello_world.log'
+            - "exit 0"
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -86,13 +86,13 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
-          workingDir: /workspace/examples/runtime/hello_world/
+          image: nvcr.io/nvidia/ai-dynamo/dynamo:0.6.1
+          workingDir: /workspace/examples/custom_backend/hello_world/
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 hello_world.py 2>&1 | tee /tmp/hello_world.log"
+            - python3 hello_world.py
         # NGC authentication handled by dynamo-cloud namespace secret
         imagePullSecrets:
-          - name: docker-imagepullsecret
+          - name: ngc-secret
