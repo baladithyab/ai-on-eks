@@ -26,14 +26,26 @@ spec:
           %{~ if dynamo_model_express_url != "" ~}
           modelExpressURL: ${dynamo_model_express_url}
           %{~ endif ~}
+          %{~ if enable_prometheus_endpoint ~}
 
-        # Grove - multi-node inference coordination
-        grove:
-          enabled: ${dynamo_enable_grove}
+          # Metrics configuration - auto-inject PROMETHEUS_ENDPOINT env var
+          # into all Dynamo services managed by the operator
+          # Enabled when enable_ai_ml_observability_stack = true
+          dynamo:
+            metrics:
+              prometheusEndpoint: "http://kube-prometheus-stack-prometheus.kube-prometheus-stack.svc.cluster.local:9090"
+          %{~ endif ~}
 
-        # Kai Scheduler - intelligent resource allocation
-        kai-scheduler:
-          enabled: ${dynamo_enable_kai_scheduler}
+        # Multi-node features disabled until Grove reaches stable release
+        # Grove v0.1.0-alpha.3: Certificate rotation bugs cause crash loops
+        # KAI Scheduler: Requires Grove or LWS+Volcano for multinode orchestration
+        # Decision: Keep deployment simple, focus on single-node workloads
+        # Revisit when Grove reaches stable v0.1.0 or later
+        # grove:
+          # enabled: ${dynamo_enable_grove}
+
+        # kai-scheduler:
+          # enabled: ${dynamo_enable_kai_scheduler}
 
         # NATS configuration - use EFS for JetStream persistence
         # Note: etcd inherits from global.storageClass, but NATS needs explicit setting
