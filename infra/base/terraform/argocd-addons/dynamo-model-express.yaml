@@ -1,0 +1,62 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: model-express
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"  # Deploy after base infrastructure
+spec:
+  project: default
+  source:
+    # Model Express deployment using kustomize
+    # Note: Model Express doesn't have an official Helm chart yet
+    # Using direct Kubernetes manifests
+    repoURL: https://github.com/ai-dynamo/modelexpress.git
+    targetRevision: main
+    path: k8s  # Kubernetes deployment manifests
+    kustomize:
+      patches:
+        # Patch to use EFS storage class
+        - target:
+            kind: PersistentVolumeClaim
+            name: modelexpress-cache
+          patch: |-
+            - op: replace
+              path: /spec/storageClassName
+              value: efs-sc-dynamic
+        # Patch to use HuggingFace token secret
+        - target:
+            kind: Deployment
+            name: modelexpress-server
+          patch: |-
+            - op: add
+              path: /spec/template/spec/containers/0/envFrom
+              value:
+                - secretRef:
+                    name: hf-token-secret
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: model-express
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+  # Health check for Model Express service
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs
