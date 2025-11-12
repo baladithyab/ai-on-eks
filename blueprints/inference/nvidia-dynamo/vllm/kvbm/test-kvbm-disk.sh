@@ -106,7 +106,7 @@ echo ""
 
 # Function to get KVBM metrics
 get_kvbm_metrics() {
-    kubectl exec -n ${NAMESPACE} ${DECODE_POD} -- curl -s http://localhost:6880/metrics 2>/dev/null || echo ""
+    timeout 10 kubectl exec -n ${NAMESPACE} ${DECODE_POD} -- curl -s http://localhost:6880/metrics 2>/dev/null || echo ""
 }
 
 # Function to parse metric value
@@ -247,7 +247,10 @@ done
 wait
 
 echo ""
-display_kvbm_metrics "After Phase 2"
+echo -e "${YELLOW}➤ Fetching metrics after Phase 2...${NC}"
+if ! display_kvbm_metrics "After Phase 2" 2>/dev/null; then
+    echo -e "${YELLOW}⚠ Unable to fetch metrics (continuing)${NC}"
+fi
 echo ""
 
 # Test Phase 3: Heavy concurrent load to trigger disk offload
@@ -264,7 +267,10 @@ done
 wait
 
 echo ""
-display_kvbm_metrics "After Phase 3"
+echo -e "${YELLOW}➤ Fetching metrics after Phase 3...${NC}"
+if ! display_kvbm_metrics "After Phase 3" 2>/dev/null; then
+    echo -e "${YELLOW}⚠ Unable to fetch metrics (continuing)${NC}"
+fi
 echo ""
 
 # Verify disk offload occurred
