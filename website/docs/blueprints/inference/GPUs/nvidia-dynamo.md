@@ -240,7 +240,7 @@ spec:
           memory: "2Gi"
       extraPodSpec:                 # Additional pod configuration
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.frontend"]
           args: ["--http-port", "8000"]
@@ -275,7 +275,7 @@ spec:
         nodeSelector:               # Node selection
           karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args:
@@ -449,7 +449,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.frontend"]
           args: ["--http-port", "8000"]
@@ -485,7 +485,7 @@ spec:
           karpenter.sh/nodepool: g5-gpu-karpenter
           node.kubernetes.io/instance-type: g5.48xlarge  # 8x A10G GPUs
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args:
@@ -761,6 +761,34 @@ VllmWorker:
 
 ## Troubleshooting
 
+### Known Issues (v0.6.1)
+
+#### SGLang DeepSeek-R1 with WideEP
+
+**Issue:** SGLang DeepSeek-R1 deployments using WideEP may experience instability during warm-up on multi-GPU setups.
+
+**Workarounds:**
+1. Precompile DeepGEMM kernels before deployment
+2. Manually clean up shared memory files:
+   ```bash
+   kubectl exec -it <sglang-worker-pod> -- rm -f /dev/shm/moe_*
+   ```
+3. Use aggregated deployment for production workloads
+
+#### SLA Profiling Path Change
+
+**Issue:** SLA Planner profiling results are now stored in `/data` directory (changed from previous location).
+
+**Fix:** Update profiler configuration:
+```yaml
+Planner:
+  extraPodSpec:
+    mainContainer:
+      args:
+        - "--profile-results-dir=/data/profiling_results"
+```
+
+
 ### Common Issues
 
 1. **GPU Nodes Not Available**: Check Karpenter logs and instance availability
@@ -1035,51 +1063,54 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Tell me more about Paris"}]}'
 ```
 
-### KVBM (KV Block Manager)
+### KVBM Multi-Tier Caching (v0.6.1+)
 
-:::info
-Disk offloading for KV cache enables much larger context windows beyond GPU memory limits.
-:::
+**Available Since**: v0.6.1
 
-KVBM provides advanced KV cache management with CPU cache overflow and disk offloading capabilities, enabling support for very large context windows beyond GPU memory limits.
-
-**Key Benefits:**
-- ✅ Extend KV cache beyond GPU memory using host memory
-- ✅ Support very large context windows (32K+ tokens)
-- ✅ Disk offloading for extremely large contexts
-- ✅ Cost-effective scaling without additional GPUs
+v0.6.1 introduces direct GPU-to-disk offloading with intelligent multi-tier caching.
 
 **Architecture:**
-
 ```text
-Client → Frontend → vLLM Worker (KVBM connector)
-                    ├─ GPU Memory (primary KV cache)
-                    ├─ CPU Memory (overflow KV cache - 100GB+)
-                    └─ Disk Storage (cold KV blocks - optional)
+GPU Memory (hot blocks - microseconds)
+    ↓
+CPU Memory (warm blocks - milliseconds, 50-200GB)
+    ↓
+Local Disk (cold blocks - 10ms, 200-500GB)
+    ↓
+Remote Storage (archive - network-based)
 ```
 
 **Configuration:**
-
-Enable KVBM in the Worker component:
-
 ```yaml
-VllmWorker:
+VllmDecodeWorker:
   envs:
     - name: DYN_KVBM_CPU_CACHE_GB
-      value: "100"  # 100GB of host memory for KV cache
-  resources:
-    requests:
-      memory: "200Gi"  # Ensure sufficient host memory
+      value: "100"  # 100GB CPU cache
+    - name: DYN_KVBM_DISK_CACHE_GB
+      value: "500"  # NEW v0.6.1 - 500GB disk cache
+    - name: DYN_KVBM_METRICS
+      value: "true"  # Enable monitoring
   extraPodSpec:
     mainContainer:
-      args:
-        - "--connector"
-        - "kvbm"
-        - "--gpu-memory-utilization"
-        - "0.45"  # Lower GPU memory for model, more for KV overflow
-        - "--max-model-len"
-        - "32000"  # Support large context windows
+      volumeMounts:
+        - name: kvbm-cache
+          mountPath: /tmp/kvbm-cache
+      resources:
+        requests:
+          memory: 200Gi  # Support CPU cache
+    volumes:
+      - name: kvbm-cache
+        emptyDir:
+          sizeLimit: 550Gi
 ```
+
+**Benefits:**
+- ✅ Extends KV cache capacity beyond GPU memory
+- ✅ 3-5x faster than recomputation for cached blocks
+- ✅ Critical for 215K+ token contexts
+- ✅ Automatic tier management
+
+**Example:** See [`vllm-disaggregated-kvbm-disk.yaml`](https://github.com/awslabs/ai-on-eks/blob/main/blueprints/inference/nvidia-dynamo/vllm/kvbm/vllm-disaggregated-kvbm-disk.yaml)
 
 **Resource Requirements:**
 
@@ -1177,6 +1208,37 @@ kubectl logs -n dynamo-cloud -l app=vllm-disaggregated-planner-planner -f
 
 # Expected output:
 # [INFO] Current TTFT: 120ms, Target: 100ms
+
+### AIPerf Benchmarking
+
+**Available Since**: Dynamo v0.6.1+
+
+AIPerf is the standardized benchmarking tool built into Dynamo containers, replacing genai-perf.
+
+**Key Benefits:**
+- ✅ Standardized metrics across all backends (vLLM, SGLang, TensorRT-LLM)
+- ✅ Built-in support in NGC containers
+- ✅ Comprehensive metrics: throughput, latency, TTFT, ITL
+- ✅ Flexible testing: custom models, concurrency sweeps, sequence lengths
+
+**Running AIPerf:**
+```bash
+# From within a Dynamo worker pod
+kubectl exec -it <worker-pod> -n dynamo-cloud -- \
+  python3 -m dynamo.benchmarks.aiperf \
+  --model Qwen/Qwen3-8B \
+  --backend vllm \
+  --concurrency 1,2,4,8 \
+  --input-length 512 \
+  --output-length 128
+
+# Output metrics:
+# - Throughput (tokens/sec)
+# - Latency (P50, P95, P99)
+# - Time-to-First-Token (TTFT)
+# - Inter-Token Latency (ITL)
+```
+
 # [INFO] Scaling prefill workers: 1 -> 2
 # [INFO] Current ITL: 15ms, Target: 10ms
 # [INFO] Scaling decode workers: 2 -> 3

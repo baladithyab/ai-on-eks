@@ -87,6 +87,92 @@ Client → Frontend → EncodeWorker (image encoding)
   - Dynamic FPS sampling for efficient processing
   - ⚠️ **API Limitation**: Direct video URL input not supported - requires manual frame extraction (see below)
 
+## KVBM for Video Understanding
+
+### Why KVBM Benefits Video Models
+
+Video understanding models process long sequences of visual tokens, making them ideal candidates for KVBM (KV Block Manager) multi-tier caching:
+
+**Memory Challenges:**
+- Video frames generate large numbers of visual tokens (thousands per video)
+- 64K context windows require extensive KV cache storage
+- GPU HBM alone is insufficient for long video sequences
+
+**KVBM Solution (v0.6.1+):**
+- **GPU Tier**: Hot KV blocks in GPU HBM for fast access (~48GB)
+- **CPU Tier**: Warm KV blocks in host memory (~100GB)
+- **Disk Tier**: Cold KV blocks on NVMe storage (~300GB)
+- **Total Effective Memory**: 448GB+ for KV cache
+
+**Performance Benefits:**
+- Supports 1+ hour videos without recomputation
+- 3-5x faster than recomputing evicted KV blocks
+- Enables multi-turn video conversations with cached context
+
+### Configuration Example
+
+The [`qwen2.5-vl-7b-video.yaml`](qwen2.5-vl-7b-video.yaml) example includes full KVBM configuration:
+
+```yaml
+VLMWorker:
+  envs:
+    # CPU cache: 100GB for KV overflow from GPU
+    - name: DYN_KVBM_CPU_CACHE_GB
+      value: "100"
+    # Disk cache: 300GB for long video sequences (NEW in v0.6.1)
+    - name: DYN_KVBM_DISK_CACHE_GB
+      value: "300"
+    # Enable metrics for monitoring cache performance
+    - name: DYN_KVBM_METRICS
+      value: "true"
+  resources:
+    requests:
+      memory: "200Gi"  # Host memory for CPU cache
+  extraPodSpec:
+    mainContainer:
+      args:
+        - "--connector"
+        - "kvbm"  # Enable KVBM connector
+        - "--max-model-len"
+        - "65536"  # 64K context for long videos
+      volumeMounts:
+        - name: kvbm-disk-cache
+          mountPath: /tmp/kvbm-cache
+    volumes:
+      - name: kvbm-disk-cache
+        emptyDir:
+          sizeLimit: 350Gi
+```
+
+### Multi-Tier Access Pattern
+
+**Request Flow:**
+1. **First pass**: Encode video frames → Store KV blocks in GPU
+2. **GPU full**: Evict to CPU cache (100GB available)
+3. **CPU full**: Evict to Disk cache (300GB available)
+4. **Later queries**: Retrieve cached KV blocks from appropriate tier
+
+**Access Pattern Filtering (Default):**
+- Only KV blocks accessed ≥2 times are offloaded to disk
+- Protects SSD lifespan from excessive writes
+- Can be disabled with `DYN_KVBM_DISABLE_DISK_OFFLOAD_FILTER=true`
+
+### When to Use KVBM for Video
+
+**Recommended:**
+- ✅ Videos longer than 30 seconds
+- ✅ Multi-turn video conversations
+- ✅ Event pinpointing across long timelines
+- ✅ Context windows exceeding 32K tokens
+
+**Optional:**
+- ⚠️ Short video clips (<30 seconds)
+- ⚠️ Single-pass inference without conversation
+
+For more details on KVBM architecture and configuration, see:
+- [KVBM Examples](../vllm/kvbm/README.md)
+- [KVBM Documentation](https://awslabs.github.io/ai-on-eks/docs/blueprints/inference/GPUs/nvidia-dynamo#kvbm-kv-block-manager)
+
 ## Resource Requirements
 
 | Component | GPUs | Memory | Instance Type |
