@@ -103,6 +103,152 @@ ffmpeg -i video.mp4 -vf "select='not(mod(n\,30))'" -vsync vfr frame_%04d.jpg
 
 ---
 
+### 4. `test-video-kvbm.sh` - Video Understanding with KVBM Long-Context Testing
+Comprehensive test script for Qwen2.5-VL video deployment with KVBM (KV Block Manager) long-context capabilities.
+
+**Compatible Models:**
+- ✅ Qwen2.5-VL 7B Video (`Qwen/Qwen2.5-VL-7B-Instruct`) with KVBM configuration
+
+**Features:**
+- ✅ Progressive video complexity testing (short → medium → long videos)
+- ✅ KVBM multi-tier cache monitoring (GPU → CPU → Disk transitions)
+- ✅ Multi-turn conversation testing (cache reuse validation)
+- ✅ Event pinpointing and temporal reasoning
+- ✅ Color-coded status output with detailed metrics
+- ✅ Automatic KVBM metrics collection and display
+
+**Usage:**
+```bash
+# Make script executable
+chmod +x test-video-kvbm.sh
+
+# Test with default deployment name
+./test-video-kvbm.sh
+
+# Test with custom deployment and namespace
+./test-video-kvbm.sh qwen-vl-video dynamo-cloud
+```
+
+**Parameters:**
+1. Deployment name (default: `qwen-vl-video`)
+2. Namespace (default: `dynamo-cloud`)
+
+**Test Phases:**
+
+1. **Phase 1: Short Video (Baseline)**
+   - Tests basic video comprehension with a few-second clip
+   - Validates model functionality
+   - Establishes baseline KVBM metrics
+
+2. **Phase 2: Medium Video (CPU Cache)**
+   - Tests 10-30 second video with multiple scenes
+   - Triggers GPU→CPU cache offloading
+   - Validates CPU cache tier activation
+
+3. **Phase 3: Long Video (Disk Cache Stress)**
+   - Tests 1+ minute video for extended context
+   - Triggers CPU→Disk cache offloading
+   - Validates full three-tier caching: GPU → CPU → Disk
+
+4. **Phase 4: Multi-Turn Conversation (Cache Reuse)**
+   - Tests follow-up questions about the same video
+   - Validates cache hit and reuse efficiency
+   - Measures matched tokens from cache
+
+5. **Phase 5: Event Pinpointing (Temporal Understanding)**
+   - Tests ability to identify specific moments in videos
+   - Validates temporal reasoning capabilities
+   - Tests long-context understanding
+
+**KVBM Metrics Monitored:**
+- `kvbm_offload_blocks_d2h` - GPU→CPU offloads
+- `kvbm_offload_blocks_h2d` - CPU→Disk offloads
+- `kvbm_offload_blocks_d2d` - GPU→Disk direct offloads
+- `kvbm_onboard_blocks_h2d` - CPU→GPU retrievals
+- `kvbm_onboard_blocks_d2d` - Disk→GPU retrievals
+- `kvbm_matched_tokens` - Cache hit tokens
+
+**Prerequisites:**
+- Qwen2.5-VL video deployment with KVBM enabled (see `qwen2.5-vl-7b-video.yaml`)
+- kubectl access to the cluster
+- jq installed for JSON parsing
+- Port 8000 available for port-forwarding
+
+**Expected Outcomes:**
+
+✅ **Success Indicators:**
+- All video lengths processed successfully
+- KVBM cache transitions observed (at least GPU→CPU)
+- Multi-turn conversation maintains context
+- Event pinpointing provides temporal details
+- Cache hit metrics show reuse in Phase 4
+
+⚠️ **Partial Success:**
+- Videos processed but no disk offloading (cache capacity sufficient)
+- This is acceptable if GPU+CPU cache handles all requests
+
+❌ **Failure Indicators:**
+- Video processing errors
+- Deployment not found or unhealthy
+- Consistent timeout errors
+- No response from model
+
+**Troubleshooting:**
+
+```bash
+# Check deployment status
+kubectl get dgd -n dynamo-cloud
+
+# Check pod status
+kubectl get pods -n dynamo-cloud | grep qwen-vl-video
+
+# View logs
+kubectl logs -n dynamo-cloud <pod-name>
+
+# Check KVBM configuration
+kubectl get dgd qwen-vl-video -n dynamo-cloud -o yaml | grep -A 10 "DYN_KVBM"
+```
+
+**Sample Output:**
+```
+╔════════════════════════════════════════════════════════════════╗
+║   Qwen2.5-VL Video Understanding + KVBM Long-Context Test     ║
+║   Testing Multi-Tier Caching: GPU → CPU → Disk                ║
+╚════════════════════════════════════════════════════════════════╝
+
+✓ Deployment found - Status: Ready
+✓ Frontend service: qwen-vl-video-frontend
+✓ VLMWorker pod: qwen-vl-video-vlmworker-0
+✓ Service is healthy
+
+════════════════════════════════════════════════════════════════
+  Baseline KVBM Metrics
+════════════════════════════════════════════════════════════════
+  ┌─ Initial State (Before Video Processing) ─────────────────┐
+  │ No cache activity yet
+  └───────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════
+  Phase 1: Short Video Understanding (Baseline)
+════════════════════════════════════════════════════════════════
+✓ Video processed successfully
+  Response preview: This video shows a space scene...
+  Tokens: 245
+
+  ┌─ After Phase 1 (Short Video) ─────────────────────────────┐
+  │ GPU→CPU Offloads: 12 blocks
+  └───────────────────────────────────────────────────────────┘
+
+[... additional phases ...]
+
+╔════════════════════════════════════════════════════════════════╗
+║  ✓ KVBM VIDEO TEST: PASSED                                    ║
+║  Multi-tier caching validated for video processing            ║
+╚════════════════════════════════════════════════════════════════╝
+```
+
+---
+
 ## Model Capabilities Summary
 
 | Model | Image Support | Video Support | Context Window | Input Types |
