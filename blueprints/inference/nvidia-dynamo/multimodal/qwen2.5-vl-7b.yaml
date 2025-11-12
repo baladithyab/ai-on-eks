@@ -48,7 +48,7 @@ spec:
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           resources:
             requests:
               cpu: "2"
@@ -71,7 +71,7 @@ spec:
           memory: "24Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/examples/multimodal
           command:
             - /bin/sh
@@ -107,7 +107,7 @@ spec:
           value: "true"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/examples/multimodal
           startupProbe:
             httpGet:
@@ -152,7 +152,7 @@ spec:
           memory: "24Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
           workingDir: /workspace/examples/multimodal
           command:
             - /bin/sh

@@ -1,8 +1,8 @@
-# NVIDIA Dynamo v0.6.0 Inference Examples
+# NVIDIA Dynamo v0.6.1 Inference Examples
 
-This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.6.0 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
+This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.6.1 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
 
-## 🆕 What's New in v0.6.0
+## 🆕 What's New in v0.6.1
 
 - ✅ **ConfigMap Pattern**: TensorRT-LLM examples now use ConfigMaps for engine configuration
 - ✅ **Multimodal Support**: Vision-language models (LLaVA, Qwen2.5-VL) with image/video understanding
