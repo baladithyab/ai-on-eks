@@ -1,39 +1,48 @@
-# NVIDIA Dynamo v0.6.1 Inference Examples
+# NVIDIA Dynamo v0.7.0 Inference Examples
 
-This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.6.1 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
+This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.7.0 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
 
-## 🆕 What's New in v0.6.1
+## 🆕 What's New in v0.7.0
 
-**Production Readiness:**
-- ✅ Stable vLLM disaggregated multi-node (TP=8+)
-- ✅ Automated DGDR profiling for SLA Planner
-- ✅ Grove v0.1.0 improvements (certificate rotation, stability)
+**Infrastructure Modernization:**
+- ✅ **NATS Removal Path**: HTTP/TCP transport alternatives via `DYN_REQUEST_PLANE` env var
+- ✅ **ETCD Removal Path**: Kubernetes-native service discovery via EndpointSlices
+- ✅ Filesystem-backed KeyValueStore for non-distributed deployments
+- ✅ Operator `--discovery-backend` flag for etcd/kubernetes selection
 
-**KVBM Enhancements:**
-- ✅ **GPU-to-disk offloading**: Multi-tier caching (GPU→CPU→Disk→Remote)
-- ✅ `DYN_KVBM_DISK_CACHE_GB` for 500GB+ disk caching
-- ✅ Access pattern filtering to extend SSD lifespan
-- ✅ Example: [`vllm-disaggregated-kvbm-disk.yaml`](vllm/kvbm/vllm-disaggregated-kvbm-disk.yaml)
+**Modular KV Block Manager:**
+- ✅ **Standalone KVBM wheel**: Decoupled from serving stack, pip-installable
+- ✅ Supports TensorRT-LLM and vLLM (SGLang planned)
+- ✅ Can integrate with Triton and other frameworks
+- ✅ Multi-tier caching (GPU→CPU→Disk) enhanced
 
-**Benchmarking:**
-- ✅ **AIPerf** replaces genai-perf for standardized testing
-- ✅ Built into NGC containers
-- ✅ Supports all backends (vLLM, SGLang, TensorRT-LLM)
+**Production-Grade Serving:**
+- ✅ AIConfigurator → Planner → Grove pipeline hardened
+- ✅ Finer-grained fault tolerance and health checks
+- ✅ Operator/CRD lifecycle automation
+- ✅ New `DynamoModel` CRD for model lifecycle management
 
-**Platform Support:**
-- ✅ GKE (Google Kubernetes Engine) production templates
-- ✅ GB200 platform with FP4 quantization (experimental)
-- ✅ WideEP for MoE models (DeepSeek-R1)
+**Performance & Framework Updates:**
+- ✅ **CUDA 13.0 support**: Next-gen GPU architectures
+- ✅ **TensorRT-LLM 1.2.0rc2**: CUDA graphs, improved ARM64 support
+- ✅ **SGLang 0.5.3.post4**: Performance improvements and bug fixes
+- ✅ SGLang warmup optimization for reduced cold start latency
 
-**Configuration Improvements:**
-- ✅ ConfigMap pattern for TensorRT-LLM engine configuration
-- ✅ Multimodal support (LLaVA, Qwen2.5-VL) with image/video understanding
-- ✅ Enhanced documentation with comprehensive inline comments
+**Multimodal Enhancements:**
+- ✅ Base64 and HTTP image URL support in vLLM workers
+- ✅ Image decoder in frontend for preprocessing
+- ✅ Media URL passthrough in OpenAI preprocessor
+
+**OpenAI API Compatibility:**
+- ✅ `skip_special_tokens` parameter in completions endpoints
+- ✅ Batch completions: Arrays of prompts with multiple completions
+- ✅ Proper rejection of unsupported parameters (400 Bad Request)
 
 **Bug Fixes:**
-- Fixed NATS streaming timeout issues
-- Fixed OOM handling improvements
-- Fixed memory leak in disaggregated deployments
+- Fixed KVBM GPU memory leak in long-running deployments
+- Fixed streaming responses sending multiple finish reasons
+- Fixed multi-turn `should_add_generation_prompt` bug
+- Fixed vLLM data parallel port conflicts in multinode deployments
 
 ## Quick Start
 
@@ -184,9 +193,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 ### NGC Container Images
 All examples use official NVIDIA NGC prebuilt containers with full source code:
-- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1`
-- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.5.1`
-- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.5.1`
+- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0`
+- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0`
+- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.0`
 
 **Key Features:**
 - ✅ **Full Source Included**: All Python code available at `/workspace/`
@@ -279,7 +288,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -297,7 +306,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           args: ["python3", "-m", "dynamo.vllm", "--model", "Qwen/Qwen3-0.6B"]
 ```
 
@@ -536,7 +545,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter  # CPU-only frontend
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -558,7 +567,7 @@ spec:
           operator: Exists
           effect: NoSchedule
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.vllm", "--model", "your-model-here"]
 ```

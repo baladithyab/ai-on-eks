@@ -44,7 +44,9 @@ spec:
           memory: "2Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/dynamo:0.6.1
+          # NOTE: The 'dynamo' base container doesn't exist on NGC.
+          # Using vllm-runtime which includes the dynamo Python libraries.
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/examples/custom_backend/hello_world/
           command:
             - /bin/sh
@@ -86,7 +88,9 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/dynamo:0.6.1
+          # NOTE: The 'dynamo' base container doesn't exist on NGC.
+          # Using vllm-runtime which includes the dynamo Python libraries.
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/examples/custom_backend/hello_world/
           command:
             - /bin/sh

@@ -7,8 +7,12 @@ metadata:
   name: vllm-router
   namespace: dynamo-cloud
 spec:
+  backendFramework: vllm
   services:
     Frontend:
+      envs:
+        - name: DYN_ROUTER_MODE
+          value: kv
       dynamoNamespace: vllm-router
       componentType: frontend
       replicas: 1
@@ -39,7 +43,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
@@ -84,7 +88,7 @@ spec:
               port: 9090
             periodSeconds: 10
             failureThreshold: 60
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh

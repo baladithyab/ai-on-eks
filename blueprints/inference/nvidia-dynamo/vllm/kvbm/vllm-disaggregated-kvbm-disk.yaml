@@ -12,6 +12,7 @@ metadata:
   name: vllm-kvbm-disk
   namespace: dynamo-cloud
 spec:
+  backendFramework: vllm
   services:
     Frontend:
       dynamoNamespace: vllm-kvbm-disk
@@ -19,7 +20,7 @@ spec:
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           command:
           - python3
@@ -60,7 +61,7 @@ spec:
           value: "true"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           command:
           - python3
@@ -126,7 +127,7 @@ spec:
         #   value: "6880"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           command:
           - python3

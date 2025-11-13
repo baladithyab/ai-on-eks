@@ -443,7 +443,7 @@ variable "enable_dynamo_stack" {
 variable "dynamo_stack_version" {
   description = "NVIDIA Dynamo Stack version"
   type        = string
-  default     = "v0.5.1"
+  default     = "v0.7.0"
 }
 
 # NVIDIA Dynamo Platform-Level Features

@@ -7,6 +7,7 @@ metadata:
   name: trtllm-aggregated-high-performance
   namespace: dynamo-cloud
 spec:
+  backendFramework: trtllm
   services:
     Frontend:
       livenessProbe:
@@ -39,7 +40,7 @@ spec:
           memory: "2Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
@@ -82,7 +83,7 @@ spec:
             operator: Exists
             effect: NoSchedule
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0
           workingDir: /workspace/components/backends/trtllm
           startupProbe:
             httpGet:

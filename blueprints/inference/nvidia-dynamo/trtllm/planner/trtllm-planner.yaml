@@ -105,6 +105,7 @@ metadata:
   name: trtllm-planner
   namespace: dynamo-cloud
 spec:
+  backendFramework: trtllm
   # PVC for profiling results (must be pre-created)
   pvcs:
     - name: dynamo-pvc
@@ -124,7 +125,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0
           workingDir: /workspace/components/backends/trtllm
           command:
             - python3
@@ -160,7 +161,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0
           workingDir: /workspace/components/planner/src/dynamo/planner
           ports:
             - name: metrics
@@ -219,7 +220,7 @@ spec:
             configMap:
               name: trtllm-planner-config
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
           volumeMounts:
@@ -285,7 +286,7 @@ spec:
             configMap:
               name: trtllm-planner-config
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
           volumeMounts:

@@ -7,7 +7,7 @@ enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
 enable_nvidia_gpu_operator       = false  
-dynamo_stack_version             = "v0.6.1"
+dynamo_stack_version             = "v0.7.0"
 
 #---------------------------------------------------------------
 # Observability Features

@@ -98,7 +98,7 @@ Video understanding models process long sequences of visual tokens, making them 
 - 64K context windows require extensive KV cache storage
 - GPU HBM alone is insufficient for long video sequences
 
-**KVBM Solution (v0.6.1+):**
+**KVBM Solution (v0.7.0+):**
 - **GPU Tier**: Hot KV blocks in GPU HBM for fast access (~48GB)
 - **CPU Tier**: Warm KV blocks in host memory (~100GB)
 - **Disk Tier**: Cold KV blocks on NVMe storage (~300GB)

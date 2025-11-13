@@ -167,7 +167,7 @@ display_kvbm_metrics() {
         return 1
     fi
     
-    # Offload counters (actual v0.6.1 metric names)
+    # Offload counters (actual v0.7.0 metric names)
     local d2h_offloads=$(get_metric_value "$metrics" "kvbm_offload_blocks_d2h")  # Device to Host (GPU→CPU)
     local h2d_offloads=$(get_metric_value "$metrics" "kvbm_offload_blocks_h2d")  # Host to Disk (CPU→Disk)
     local d2d_offloads=$(get_metric_value "$metrics" "kvbm_offload_blocks_d2d")  # Device to Disk (GPU→Disk direct)

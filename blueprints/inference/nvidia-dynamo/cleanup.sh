@@ -38,6 +38,11 @@ NC='\033[0m' # No Color
 # Default namespace
 NAMESPACE="dynamo-cloud"
 
+# Options
+VERBOSE=false
+DRY_RUN=false
+FORCE=false
+
 # Utility functions
 info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -57,6 +62,18 @@ success() {
 
 section() {
     echo -e "\n${BLUE}=== $1 ===${NC}"
+}
+
+debug() {
+    if [ "${VERBOSE}" = true ]; then
+        echo -e "${BLUE}[DEBUG]${NC} $1"
+    fi
+}
+
+dry_run_msg() {
+    if [ "${DRY_RUN}" = true ]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would execute: $1"
+    fi
 }
 
 print_banner() {
@@ -86,6 +103,18 @@ while [[ $# -gt 0 ]]; do
             NAMESPACE="$2"
             shift 2
             ;;
+        --verbose|-v)
+            VERBOSE=true
+            shift
+            ;;
+        --dry-run|-n)
+            DRY_RUN=true
+            shift
+            ;;
+        --force|-f)
+            FORCE=true
+            shift
+            ;;
         -h|--help)
             cat << EOF
 NVIDIA Dynamo Cleanup Script
@@ -95,10 +124,20 @@ Usage:
   $0 --all              # Clean all deployments
   $0 --namespace <ns>   # Use custom namespace (default: dynamo-cloud)
 
+Options:
+  --all, -a             Clean all DynamoGraphDeployments
+  --namespace <ns>      Use custom namespace (default: dynamo-cloud)
+  --verbose, -v         Show detailed output including kubectl commands
+  --dry-run, -n         Show what would be deleted without actually deleting
+  --force, -f           Skip confirmation prompt
+  -h, --help            Show this help message
+
 Examples:
   $0 vllm-agg           # Remove vllm-agg deployment
   $0 --all              # Remove all DGDs
   $0 --namespace test   # Clean from 'test' namespace
+  $0 --dry-run --all    # Preview what would be deleted
+  $0 --force vllm-agg   # Delete without confirmation
 
 Safety:
   - Does NOT delete dynamo-cloud namespace
@@ -115,6 +154,14 @@ EOF
             ;;
     esac
 done
+
+# Show dry-run banner if enabled
+if [ "${DRY_RUN}" = true ]; then
+    echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║                              DRY-RUN MODE                                  ║${NC}"
+    echo -e "${YELLOW}║              No resources will be deleted - preview only                  ║${NC}"
+    echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════════════════╝${NC}"
+fi
 
 print_banner "DYNAMO CLEANUP"
 
@@ -243,18 +290,29 @@ for dep in "${DEPLOYMENTS_TO_CLEAN[@]}"; do
 done
 echo ""
 
-read -p "Continue with cleanup? (yes/no): " confirmation
+# Skip confirmation if --force or --dry-run is set
+if [ "${FORCE}" = true ]; then
+    debug "Skipping confirmation (--force flag set)"
+elif [ "${DRY_RUN}" = true ]; then
+    debug "Skipping confirmation (--dry-run mode)"
+else
+    read -p "Continue with cleanup? (yes/no): " confirmation
 
-if [ "${confirmation}" != "yes" ]; then
-    info "Cleanup cancelled"
-    exit 0
+    if [ "${confirmation}" != "yes" ]; then
+        info "Cleanup cancelled"
+        exit 0
+    fi
 fi
 
 #---------------------------------------------------------------
 # Cleanup Process
 #---------------------------------------------------------------
 
-section "Cleaning Up Deployments"
+if [ "${DRY_RUN}" = true ]; then
+    section "Dry-Run: Resources That Would Be Deleted"
+else
+    section "Cleaning Up Deployments"
+fi
 
 CLEANED_COUNT=0
 FAILED_COUNT=0
@@ -266,34 +324,68 @@ for deployment_entry in "${DEPLOYMENTS_TO_CLEAN[@]}"; do
     # Parse namespace and deployment name
     dep_ns="${deployment_entry%%:*}"
     deployment="${deployment_entry##*:}"
-    
-    info "Deleting resources for: ${deployment} (namespace: ${dep_ns})"
+
+    if [ "${DRY_RUN}" = true ]; then
+        info "Would delete resources for: ${deployment} (namespace: ${dep_ns})"
+    else
+        info "Deleting resources for: ${deployment} (namespace: ${dep_ns})"
+    fi
 
     # Delete ServiceMonitor (created by deploy.sh)
     # Redirect stdin from /dev/null to prevent stdin consumption
     if kubectl get servicemonitor "${deployment}-frontend-metrics" -n "${dep_ns}" < /dev/null &>/dev/null; then
-        info "  Deleting ServiceMonitor: ${deployment}-frontend-metrics"
-        kubectl delete servicemonitor "${deployment}-frontend-metrics" -n "${dep_ns}" --timeout=30s < /dev/null || warn "  Failed to delete ServiceMonitor"
+        if [ "${DRY_RUN}" = true ]; then
+            dry_run_msg "kubectl delete servicemonitor ${deployment}-frontend-metrics -n ${dep_ns}"
+        else
+            debug "kubectl delete servicemonitor ${deployment}-frontend-metrics -n ${dep_ns} --timeout=30s"
+            info "  Deleting ServiceMonitor: ${deployment}-frontend-metrics"
+            kubectl delete servicemonitor "${deployment}-frontend-metrics" -n "${dep_ns}" --timeout=30s < /dev/null || warn "  Failed to delete ServiceMonitor"
+        fi
+    else
+        debug "ServiceMonitor ${deployment}-frontend-metrics not found in ${dep_ns}"
     fi
 
     # Delete Service (created by deploy.sh)
     if kubectl get service "${deployment}-frontend" -n "${dep_ns}" < /dev/null &>/dev/null; then
-        info "  Deleting Service: ${deployment}-frontend"
-        kubectl delete service "${deployment}-frontend" -n "${dep_ns}" --timeout=30s < /dev/null || warn "  Failed to delete Service"
+        if [ "${DRY_RUN}" = true ]; then
+            dry_run_msg "kubectl delete service ${deployment}-frontend -n ${dep_ns}"
+        else
+            debug "kubectl delete service ${deployment}-frontend -n ${dep_ns} --timeout=30s"
+            info "  Deleting Service: ${deployment}-frontend"
+            kubectl delete service "${deployment}-frontend" -n "${dep_ns}" --timeout=30s < /dev/null || warn "  Failed to delete Service"
+        fi
+    else
+        debug "Service ${deployment}-frontend not found in ${dep_ns}"
     fi
 
     # Delete DynamoGraphDeployment (the main resource)
-    info "  Deleting DynamoGraphDeployment: ${deployment}"
-    # Redirect stdin to prevent kubectl from consuming it and breaking the loop
-    if kubectl delete dynamographdeployment "${deployment}" -n "${dep_ns}" --timeout=60s < /dev/null; then
-        success "Deleted: ${deployment} (namespace: ${dep_ns})"
-        # BUG FIX: Use CLEANED_COUNT=$((CLEANED_COUNT + 1)) instead of ((CLEANED_COUNT++))
-        # to avoid set -e exit when value is 0 (which evaluates to false in arithmetic context)
+    if [ "${DRY_RUN}" = true ]; then
+        dry_run_msg "kubectl delete dynamographdeployment ${deployment} -n ${dep_ns}"
+        success "Would delete: ${deployment} (namespace: ${dep_ns})"
         CLEANED_COUNT=$((CLEANED_COUNT + 1))
     else
-        error "Failed to delete: ${deployment}"
-        # BUG FIX: Use explicit assignment to avoid arithmetic expansion returning 0
-        FAILED_COUNT=$((FAILED_COUNT + 1))
+        debug "kubectl delete dynamographdeployment ${deployment} -n ${dep_ns} --timeout=60s"
+        info "  Deleting DynamoGraphDeployment: ${deployment}"
+        # Redirect stdin to prevent kubectl from consuming it and breaking the loop
+        # Try graceful delete first, then force if needed
+        if kubectl delete dynamographdeployment "${deployment}" -n "${dep_ns}" --timeout=60s < /dev/null; then
+            success "Deleted: ${deployment} (namespace: ${dep_ns})"
+            # BUG FIX: Use CLEANED_COUNT=$((CLEANED_COUNT + 1)) instead of ((CLEANED_COUNT++))
+            # to avoid set -e exit when value is 0 (which evaluates to false in arithmetic context)
+            CLEANED_COUNT=$((CLEANED_COUNT + 1))
+        else
+            warn "Graceful delete failed, attempting force deletion..."
+            debug "kubectl delete dynamographdeployment ${deployment} -n ${dep_ns} --force --grace-period=0"
+            # Try force deletion if graceful fails
+            if kubectl delete dynamographdeployment "${deployment}" -n "${dep_ns}" --force --grace-period=0 < /dev/null 2>/dev/null; then
+                success "Force deleted: ${deployment} (namespace: ${dep_ns})"
+                CLEANED_COUNT=$((CLEANED_COUNT + 1))
+            else
+                error "Failed to delete (even with force): ${deployment}"
+                # BUG FIX: Use explicit assignment to avoid arithmetic expansion returning 0
+                FAILED_COUNT=$((FAILED_COUNT + 1))
+            fi
+        fi
     fi
     # Always continue to next deployment (removed continue from else block)
 done
@@ -302,40 +394,47 @@ done
 # Wait for Pods to Terminate
 #---------------------------------------------------------------
 
-section "Waiting for Pods to Terminate"
+# Skip waiting in dry-run mode
+if [ "${DRY_RUN}" = true ]; then
+    section "Dry-Run Summary"
+    info "Would wait for pods to terminate after deletion"
+else
+    section "Waiting for Pods to Terminate"
 
-info "Waiting for Dynamo pods to terminate (timeout: 120s)..."
+    info "Waiting for Dynamo pods to terminate (timeout: 120s)..."
 
-# Get pods associated with deleted deployments across all relevant namespaces
-TOTAL_WAIT=0
-MAX_WAIT=120
+    # Get pods associated with deleted deployments across all relevant namespaces
+    TOTAL_WAIT=0
+    MAX_WAIT=120
 
-while [ $TOTAL_WAIT -lt $MAX_WAIT ]; do
-    # Count remaining pods across all namespaces or just the target namespace
-    if [ "${CLEANUP_ALL}" = true ]; then
-        REMAINING_PODS=$(kubectl get pods -A -l nvidia.com/dynamo-deployment --no-headers 2>/dev/null | wc -l)
-    else
-        REMAINING_PODS=$(kubectl get pods -n "${NAMESPACE}" -l nvidia.com/dynamo-deployment --no-headers 2>/dev/null | wc -l)
-    fi
+    while [ $TOTAL_WAIT -lt $MAX_WAIT ]; do
+        # Count remaining pods across all namespaces or just the target namespace
+        if [ "${CLEANUP_ALL}" = true ]; then
+            REMAINING_PODS=$(kubectl get pods -A -l nvidia.com/dynamo-deployment --no-headers 2>/dev/null | wc -l)
+        else
+            REMAINING_PODS=$(kubectl get pods -n "${NAMESPACE}" -l nvidia.com/dynamo-deployment --no-headers 2>/dev/null | wc -l)
+        fi
 
-    if [ "${REMAINING_PODS}" -eq 0 ]; then
-        success "All pods terminated"
-        break
-    fi
+        if [ "${REMAINING_PODS}" -eq 0 ]; then
+            success "All pods terminated"
+            break
+        fi
 
-    info "Waiting for ${REMAINING_PODS} pod(s) to terminate..."
-    sleep 5
-    # BUG FIX: Avoid arithmetic expansion that returns 0 with set -e
-    TOTAL_WAIT=$((TOTAL_WAIT + 5))
-done
+        debug "Remaining pods: ${REMAINING_PODS}"
+        info "Waiting for ${REMAINING_PODS} pod(s) to terminate..."
+        sleep 5
+        # BUG FIX: Avoid arithmetic expansion that returns 0 with set -e
+        TOTAL_WAIT=$((TOTAL_WAIT + 5))
+    done
 
-if [ $TOTAL_WAIT -ge $MAX_WAIT ]; then
-    warn "Timeout waiting for pods to terminate"
-    info "Remaining pods:"
-    if [ "${CLEANUP_ALL}" = true ]; then
-        kubectl get pods -A -l nvidia.com/dynamo-deployment
-    else
-        kubectl get pods -n "${NAMESPACE}" -l nvidia.com/dynamo-deployment
+    if [ $TOTAL_WAIT -ge $MAX_WAIT ]; then
+        warn "Timeout waiting for pods to terminate"
+        info "Remaining pods:"
+        if [ "${CLEANUP_ALL}" = true ]; then
+            kubectl get pods -A -l nvidia.com/dynamo-deployment
+        else
+            kubectl get pods -n "${NAMESPACE}" -l nvidia.com/dynamo-deployment
+        fi
     fi
 fi
 
@@ -346,7 +445,11 @@ fi
 section "Cleanup Summary"
 
 echo ""
-success "Cleaned up ${CLEANED_COUNT} deployment(s)"
+if [ "${DRY_RUN}" = true ]; then
+    success "Would clean up ${CLEANED_COUNT} deployment(s)"
+else
+    success "Cleaned up ${CLEANED_COUNT} deployment(s)"
+fi
 if [ ${FAILED_COUNT} -gt 0 ]; then
     warn "Failed to clean ${FAILED_COUNT} deployment(s)"
 fi

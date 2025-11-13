@@ -51,6 +51,8 @@ spec:
 
         # NATS configuration - use EFS for JetStream persistence
         # Note: etcd inherits from global.storageClass, but NATS needs explicit setting
+        # v0.7.0 NEW: NATS can be disabled in favor of HTTP/TCP request plane
+        # Set DYN_REQUEST_PLANE=http or DYN_REQUEST_PLANE=tcp in workload deployments
         nats:
           config:
             jetstream:
@@ -59,6 +61,9 @@ spec:
                   storageClassName: efs-sc-dynamic
 
         # etcd configuration - disable JWT auth and pre-upgrade hook
+        # v0.7.0 NEW: etcd can be replaced with Kubernetes-native service discovery
+        # Use operator flag: --discovery-backend=kubernetes
+        # Or use filesystem-backed KeyValueStore for non-distributed deployments
         etcd:
           auth:
             token:

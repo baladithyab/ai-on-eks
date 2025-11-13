@@ -20,7 +20,7 @@
 # Version Management:
 #   - Automatically reads version from ../infra/nvidia-dynamo/terraform/blueprint.tfvars
 #   - Can override with DYNAMO_VERSION environment variable
-#   - Example: DYNAMO_VERSION=v0.5.1 ./deploy.sh vllm
+#   - Example: DYNAMO_VERSION=v0.7.0 ./deploy.sh vllm
 #---------------------------------------------------------------
 
 set -euo pipefail
@@ -40,7 +40,7 @@ NAMESPACE="dynamo-cloud"
 
 # Dynamo version management
 TFVARS_FILE="${SCRIPT_DIR}/../../../infra/nvidia-dynamo/terraform/blueprint.tfvars"
-DEFAULT_VERSION="v0.5.1"  # Fallback if tfvars file not found
+DEFAULT_VERSION="v0.7.0"  # Fallback if tfvars file not found
 VERSION_SOURCE=""  # Track where version came from
 
 # Utility functions
@@ -401,29 +401,43 @@ CACHE_MANIFEST=""  # Initialize separate from version TEMP_MANIFEST
 if [ "${USE_SHARED_CACHE}" = true ]; then
     info "Configuring deployment to use shared model cache..."
 
-    # Create cache-configured manifest using Python patcher
-    CACHE_MANIFEST="/tmp/${EXAMPLE}-cache-$(date +%s).yaml"
-    PATCHER="${SCRIPT_DIR}/patch-cache.py"
+    # Use home directory for temp files (snap yq can't access /tmp or hidden dirs)
+    # snap's home interface doesn't allow access to directories starting with '.'
+    CACHE_MANIFEST_DIR="${HOME}/dynamo-cache"
+    mkdir -p "${CACHE_MANIFEST_DIR}"
+    CACHE_MANIFEST="${CACHE_MANIFEST_DIR}/${EXAMPLE}-cache-$(date +%s).yaml"
 
-    if [ -f "${PATCHER}" ] && command -v python3 &>/dev/null; then
-        info "Using Python patcher for cache configuration..."
+    # Try bash patcher first (preferred - no Python dependency)
+    BASH_PATCHER="${SCRIPT_DIR}/scripts/patch-cache.sh"
+    PYTHON_PATCHER="${SCRIPT_DIR}/patch-cache.py"
 
-        # Run the patcher
-        if python3 "${PATCHER}" "${MANIFEST_FILE}" "${CACHE_MANIFEST}" "${SHARED_CACHE_PVC}"; then
+    if [ -f "${BASH_PATCHER}" ] && command -v yq &>/dev/null; then
+        info "Using Bash/yq patcher for cache configuration..."
+        if bash "${BASH_PATCHER}" "${MANIFEST_FILE}" "${CACHE_MANIFEST}" "${SHARED_CACHE_PVC}"; then
             MANIFEST_FILE="${CACHE_MANIFEST}"
             success "Manifest patched with shared cache configuration"
-            info "  PVC: ${SHARED_CACHE_PVC}"
-            info "  HF_HOME: /models"
-            info "  Volume mounts: Added to all Worker services"
+        else
+            warn "Bash patcher failed, trying Python fallback..."
+            CACHE_MANIFEST=""
+        fi
+    fi
+
+    # Fallback to Python patcher if bash failed or not available
+    if [ -z "${CACHE_MANIFEST}" ] && [ -f "${PYTHON_PATCHER}" ] && command -v python3 &>/dev/null; then
+        CACHE_MANIFEST="${CACHE_MANIFEST_DIR}/${EXAMPLE}-cache-$(date +%s).yaml"
+        info "Using Python patcher for cache configuration..."
+        if python3 "${PYTHON_PATCHER}" "${MANIFEST_FILE}" "${CACHE_MANIFEST}" "${SHARED_CACHE_PVC}"; then
+            MANIFEST_FILE="${CACHE_MANIFEST}"
+            success "Manifest patched with shared cache configuration"
         else
             warn "Python patcher failed, deploying without cache"
             CACHE_MANIFEST=""
         fi
-    else
-        warn "Python3 or patch-cache.py not found"
+    fi
+
+    if [ -z "${CACHE_MANIFEST}" ]; then
+        warn "No patcher available (install yq or Python3)"
         warn "Deploying without cache optimization"
-        info "Install Python3 for automatic cache configuration"
-        CACHE_MANIFEST=""
     fi
 else
     info "No shared cache PVC found - deploying with ephemeral storage"

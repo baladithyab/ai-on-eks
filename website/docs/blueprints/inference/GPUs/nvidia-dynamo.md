@@ -118,11 +118,11 @@ See the [Infrastructure Guide](https://awslabs.github.io/ai-on-eks/docs/infra/nv
 
 ```bash
 # Override version via environment variable
-export DYNAMO_VERSION=v0.5.1
+export DYNAMO_VERSION=v0.7.0
 ./deploy.sh vllm-aggregated-default
 
 # Or inline
-DYNAMO_VERSION=v0.5.1 ./deploy.sh sglang-aggregated-default
+DYNAMO_VERSION=v0.7.0 ./deploy.sh sglang-aggregated-default
 ```
 
 **Key Benefits of Prebuilt Containers:**
@@ -130,7 +130,7 @@ DYNAMO_VERSION=v0.5.1 ./deploy.sh sglang-aggregated-default
 - **Faster Deployment**: Skip 20+ minute build process
 - **Consistent Experience**: NVIDIA-tested and validated images
 - **Version Management**: Automatic version detection from `blueprint.tfvars`
-- **Override Support**: Use `DYNAMO_VERSION=v0.6.0 ./deploy.sh` to override version
+- **Override Support**: Use `DYNAMO_VERSION=v0.7.0 ./deploy.sh` to override version
 
 </CollapsibleContent>
 
@@ -240,7 +240,7 @@ spec:
           memory: "2Gi"
       extraPodSpec:                 # Additional pod configuration
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.frontend"]
           args: ["--http-port", "8000"]
@@ -275,7 +275,7 @@ spec:
         nodeSelector:               # Node selection
           karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args:
@@ -449,7 +449,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.frontend"]
           args: ["--http-port", "8000"]
@@ -485,7 +485,7 @@ spec:
           karpenter.sh/nodepool: g5-gpu-karpenter
           node.kubernetes.io/instance-type: g5.48xlarge  # 8x A10G GPUs
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args:
@@ -535,7 +535,7 @@ The `deploy.sh` script automates the deployment process:
 ./deploy.sh vllm-aggregated-default
 
 # With version override
-DYNAMO_VERSION=v0.5.1 ./deploy.sh sglang-aggregated-default
+DYNAMO_VERSION=v0.7.0 ./deploy.sh sglang-aggregated-default
 
 # Skip ServiceMonitor creation
 SKIP_SERVICE_MONITOR=true ./deploy.sh trtllm-aggregated-default
@@ -686,21 +686,21 @@ The deployment automatically creates:
 The deployment automatically manages Dynamo versions with flexible override options:
 
 **Default Behavior:**
-- Reads version from `terraform/blueprint.tfvars` (`dynamo_stack_version = "v0.5.1"`)
+- Reads version from `terraform/blueprint.tfvars` (`dynamo_stack_version = "v0.7.0"`)
 - Automatically updates container image tags in YAML manifests
 - Creates temporary manifests without modifying source files
 
 **Override Options:**
 ```bash
 # Environment variable (highest priority)
-export DYNAMO_VERSION=v0.6.0
+export DYNAMO_VERSION=v0.7.0
 ./deploy.sh vllm
 
 # Inline override
-DYNAMO_VERSION=v0.6.0 ./deploy.sh sglang
+DYNAMO_VERSION=v0.7.0 ./deploy.sh sglang
 
 # Update terraform/blueprint.tfvars (persistent)
-dynamo_stack_version = "v0.6.0"
+dynamo_stack_version = "v0.7.0"
 ```
 
 **Version Management:**
@@ -761,7 +761,7 @@ VllmWorker:
 
 ## Troubleshooting
 
-### Known Issues (v0.6.1)
+### Known Issues (v0.7.0)
 
 #### SGLang DeepSeek-R1 with WideEP
 
@@ -1063,11 +1063,11 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Tell me more about Paris"}]}'
 ```
 
-### KVBM Multi-Tier Caching (v0.6.1+)
+### KVBM Multi-Tier Caching (v0.7.0+)
 
-**Available Since**: v0.6.1
+**Available Since**: v0.7.0
 
-v0.6.1 introduces direct GPU-to-disk offloading with intelligent multi-tier caching.
+v0.7.0 introduces direct GPU-to-disk offloading with intelligent multi-tier caching.
 
 **Architecture:**
 ```text
@@ -1087,7 +1087,7 @@ VllmDecodeWorker:
     - name: DYN_KVBM_CPU_CACHE_GB
       value: "100"  # 100GB CPU cache
     - name: DYN_KVBM_DISK_CACHE_GB
-      value: "500"  # NEW v0.6.1 - 500GB disk cache
+      value: "500"  # NEW v0.7.0 - 500GB disk cache
     - name: DYN_KVBM_METRICS
       value: "true"  # Enable monitoring
   extraPodSpec:
@@ -1211,7 +1211,7 @@ kubectl logs -n dynamo-cloud -l app=vllm-disaggregated-planner-planner -f
 
 ### AIPerf Benchmarking
 
-**Available Since**: Dynamo v0.6.1+
+**Available Since**: Dynamo v0.7.0+
 
 AIPerf is the standardized benchmarking tool built into Dynamo containers, replacing genai-perf.
 

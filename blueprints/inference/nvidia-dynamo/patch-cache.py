@@ -24,25 +24,15 @@ def patch_manifest(manifest_file, output_file, pvc_name="dynamo-shared-models"):
     if not pvc_exists:
         manifest['spec']['pvcs'].append({'name': pvc_name})
 
-    # Add HuggingFace cache environment variables
-    if 'envs' not in manifest['spec']:
-        manifest['spec']['envs'] = []
-
-    # Add all HuggingFace cache env vars to ensure cache is used
-    # HF libraries check these in order: HF_HUB_CACHE > HF_HOME > default
+    # HuggingFace cache environment variables - added per-service to Workers only
+    # (Global envs would affect Frontend which doesn't have the volume mounted)
     hf_env_vars = [
         {'name': 'HF_HOME', 'value': '/models'},
         {'name': 'HF_HUB_CACHE', 'value': '/models/hub'},
         {'name': 'TRANSFORMERS_CACHE', 'value': '/models/hub'},
     ]
 
-    for env_var in hf_env_vars:
-        # Check if env var already exists
-        env_exists = any(env.get('name') == env_var['name'] for env in manifest['spec']['envs'])
-        if not env_exists:
-            manifest['spec']['envs'].append(env_var)
-
-    # Add volumeMounts and runtimeClassName to all Worker services
+    # Add volumeMounts and env vars to all Worker services
     if 'services' in manifest['spec']:
         for service_name, service_config in manifest['spec']['services'].items():
             if 'worker' in service_name.lower():
@@ -62,15 +52,14 @@ def patch_manifest(manifest_file, output_file, pvc_name="dynamo-shared-models"):
                         'mountPoint': '/models'  # DGD CRD uses mountPoint not mountPath
                     })
 
-                # Add runtimeClassName for GPU access on Bottlerocket/EKS
-                # Only add if nvidia RuntimeClass exists (requires GPU operator)
-                # Check by running: kubectl get runtimeclass nvidia
-                # For now, skip adding runtimeClassName - let Kubernetes use default
-                # GPU access works on Bottlerocket without explicit runtimeClassName
-                # if 'extraPodSpec' not in service_config:
-                #     service_config['extraPodSpec'] = {}
-                # if 'runtimeClassName' not in service_config['extraPodSpec']:
-                #     service_config['extraPodSpec']['runtimeClassName'] = 'nvidia'
+                # Add HF cache env vars to this Worker service only
+                if 'envs' not in service_config:
+                    service_config['envs'] = []
+
+                for env_var in hf_env_vars:
+                    env_exists = any(env.get('name') == env_var['name'] for env in service_config['envs'])
+                    if not env_exists:
+                        service_config['envs'].append(env_var)
 
     # Write patched manifest
     with open(output_file, 'w') as f:

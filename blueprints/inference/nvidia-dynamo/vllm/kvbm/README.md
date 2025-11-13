@@ -2,6 +2,8 @@
 
 Deploy vLLM with KVBM for advanced KV cache management (Dynamo v0.6.0+).
 
+> **v0.7.0 Update**: KVBM is now available as a standalone pip-installable wheel, decoupled from the serving stack for more flexible integration options.
+
 ## 📚 Full Documentation
 
 For comprehensive documentation on KVBM including architecture, resource requirements, configuration, and troubleshooting, see:
@@ -24,9 +26,9 @@ kubectl port-forward service/vllm-aggregated-kvbm-frontend 8000:8000 -n dynamo-c
 curl http://localhost:8000/health
 ```
 
-## v0.6.1 Multi-Tier Caching Architecture
+## Multi-Tier Caching Architecture
 
-KVBM v0.6.1 introduces enhanced multi-tier caching that extends KV cache capacity beyond GPU memory through a hierarchical storage system.
+KVBM provides enhanced multi-tier caching that extends KV cache capacity beyond GPU memory through a hierarchical storage system.
 
 ### Caching Tiers
 

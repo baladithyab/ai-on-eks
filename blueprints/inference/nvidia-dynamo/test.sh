@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #---------------------------------------------------------------
-# NVIDIA Dynamo v0.5.1 Example Testing Script
+# NVIDIA Dynamo v0.7.0 Example Testing Script
 #
 # Simple testing script for deployed Dynamo examples.
 # Tests health, metrics, and API endpoints based on example type.
@@ -62,6 +62,24 @@ print_banner() {
     echo -e "\n${BLUE}${line}${NC}"
     echo -e "${BLUE}$(printf '%*s' $(( (width - ${#title}) / 2 )) '')${title}${NC}"
     echo -e "${BLUE}${line}${NC}\n"
+}
+
+# Get the correct label selector for Dynamo pods
+# Dynamo uses nvidia.com/dynamo-graph-deployment-name instead of app=
+get_dgd_label_selector() {
+    local example_name="$1"
+    echo "nvidia.com/dynamo-graph-deployment-name=${example_name}"
+}
+
+# Get pods for a DGD deployment
+get_dgd_pods() {
+    local example_name="$1"
+    local component="${2:-}"  # Optional: frontend, worker
+    local selector="nvidia.com/dynamo-graph-deployment-name=${example_name}"
+    if [ -n "$component" ]; then
+        selector="${selector},nvidia.com/dynamo-component-type=${component}"
+    fi
+    kubectl get pods -n "${NAMESPACE}" -l "${selector}" "$@"
 }
 
 print_banner "DYNAMO EXAMPLE TESTING"
@@ -150,12 +168,38 @@ info "Testing example: ${EXAMPLE}"
 section "Prerequisites Check"
 
 # Check if example is deployed
-if ! kubectl get dynamographdeployment "$EXAMPLE" -n "${NAMESPACE}" >/dev/null 2>&1; then
+# Try exact match first, then try alternative naming patterns
+DEPLOYMENT_NAME=""
+if kubectl get dynamographdeployment "$EXAMPLE" -n "${NAMESPACE}" >/dev/null 2>&1; then
+    DEPLOYMENT_NAME="$EXAMPLE"
+else
+    # Try common naming variations (some YAMLs have different deployment names than filenames)
+    for alt in \
+        "$(echo "$EXAMPLE" | sed 's/-disaggregated-kvbm-disk/-kvbm-disk/')" \
+        "$(echo "$EXAMPLE" | sed 's/-aggregated-router/-aggregated-kv-router/')" \
+        "$(echo "$EXAMPLE" | sed 's/llava-1.5-7b/llava/')" \
+        "$(echo "$EXAMPLE" | sed 's/qwen2.5-vl-7b/qwen-vl/')" \
+        "$(echo "$EXAMPLE" | sed 's/vllm-otel-tracing/vllm-otel/')" \
+        "$(echo "$EXAMPLE" | sed 's/vllm-audit-logging/vllm-audit/')" \
+        "$(echo "$EXAMPLE" | sed 's/vllm-full-observability/vllm-full-obs/')"; do
+        if kubectl get dynamographdeployment "$alt" -n "${NAMESPACE}" >/dev/null 2>&1; then
+            DEPLOYMENT_NAME="$alt"
+            info "Found deployment with alternative name: ${DEPLOYMENT_NAME}"
+            break
+        fi
+    done
+fi
+
+if [ -z "$DEPLOYMENT_NAME" ]; then
     error "Example '${EXAMPLE}' is not deployed in namespace '${NAMESPACE}'"
     info "Deploy it first: ./deploy.sh ${EXAMPLE}"
+    info "Tried variants: $EXAMPLE and common alternatives"
     exit 1
 fi
-success "Example '${EXAMPLE}' is deployed"
+success "Example '${DEPLOYMENT_NAME}' is deployed"
+
+# Use the actual deployment name for subsequent operations
+EXAMPLE="$DEPLOYMENT_NAME"
 
 # Check if service exists
 SERVICE_NAME="${EXAMPLE}-frontend"
@@ -213,11 +257,12 @@ info "Port: ${SERVICE_PORT}"
 info "Type: ${SERVICE_TYPE}"
 info "Local port for testing: ${LOCAL_PORT}"
 
-# Check pod status
+# Check pod status using correct Dynamo labels
 info ""
 info "Pod status:"
-kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE}" 2>/dev/null || {
-    warn "No pods found with label app=${EXAMPLE}"
+DGD_LABEL=$(get_dgd_label_selector "${EXAMPLE}")
+kubectl get pods -n "${NAMESPACE}" -l "${DGD_LABEL}" 2>/dev/null || {
+    warn "No pods found with label ${DGD_LABEL}"
 }
 
 #---------------------------------------------------------------
@@ -276,26 +321,64 @@ BASE_URL="http://localhost:${LOCAL_PORT}"
 info "Testing basic connectivity..."
 HEALTH_URL="${BASE_URL}/health"
 
+# Try port-forward first, fall back to kubectl exec if it fails
+USE_KUBECTL_EXEC=false
+
 if curl -s -f "$HEALTH_URL" >/dev/null 2>&1; then
-    success "Health endpoint is accessible"
+    success "Health endpoint is accessible via port-forward"
     HEALTH_RESPONSE=$(curl -s "$HEALTH_URL")
     echo "Health response:"
     echo "$HEALTH_RESPONSE" | jq . 2>/dev/null || echo "$HEALTH_RESPONSE"
 else
-    warn "Health endpoint not accessible, trying root endpoint..."
-    ROOT_URL="${BASE_URL}/"
+    warn "Port-forward not working, falling back to kubectl exec..."
+    USE_KUBECTL_EXEC=true
 
-    if curl -s -f "$ROOT_URL" >/dev/null 2>&1; then
-        success "Root endpoint is accessible"
-        curl -s "$ROOT_URL" | head -10
-    else
-        error "Service is not responding on port ${LOCAL_PORT}"
+    # Get frontend pod name
+    FRONTEND_POD=$(kubectl get pods -n "${NAMESPACE}" -l "${DGD_LABEL},nvidia.com/dynamo-component-type=frontend" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+    if [ -z "$FRONTEND_POD" ]; then
+        error "No frontend pod found for ${EXAMPLE}"
         info "Please check if the service is running:"
-        echo "  kubectl get pods -n ${NAMESPACE} -l app=${EXAMPLE}"
-        echo "  kubectl logs -n ${NAMESPACE} -l app=${EXAMPLE}"
+        echo "  kubectl get pods -n ${NAMESPACE} -l ${DGD_LABEL}"
+        exit 1
+    fi
+
+    info "Using kubectl exec to test via pod: ${FRONTEND_POD}"
+    HEALTH_RESPONSE=$(kubectl exec "$FRONTEND_POD" -n "${NAMESPACE}" -- curl -s http://localhost:8000/health 2>/dev/null || echo "")
+
+    if [ -n "$HEALTH_RESPONSE" ]; then
+        success "Health endpoint is accessible via kubectl exec"
+        echo "Health response:"
+        echo "$HEALTH_RESPONSE" | jq . 2>/dev/null || echo "$HEALTH_RESPONSE"
+    else
+        error "Service is not responding"
+        info "Please check if the service is running:"
+        echo "  kubectl get pods -n ${NAMESPACE} -l ${DGD_LABEL}"
+        echo "  kubectl logs -n ${NAMESPACE} -l ${DGD_LABEL}"
         exit 1
     fi
 fi
+
+# Helper function to make API calls (uses port-forward or kubectl exec)
+api_call() {
+    local method="${1:-GET}"
+    local endpoint="$2"
+    local data="${3:-}"
+
+    if [ "$USE_KUBECTL_EXEC" = true ]; then
+        if [ -n "$data" ]; then
+            kubectl exec "$FRONTEND_POD" -n "${NAMESPACE}" -- curl -s -X "$method" "http://localhost:8000${endpoint}" -H "Content-Type: application/json" -d "$data" 2>/dev/null
+        else
+            kubectl exec "$FRONTEND_POD" -n "${NAMESPACE}" -- curl -s "http://localhost:8000${endpoint}" 2>/dev/null
+        fi
+    else
+        if [ -n "$data" ]; then
+            curl -s -X "$method" "${BASE_URL}${endpoint}" -H "Content-Type: application/json" -d "$data" 2>/dev/null
+        else
+            curl -s "${BASE_URL}${endpoint}" 2>/dev/null
+        fi
+    fi
+}
 
 #---------------------------------------------------------------
 # Example-Specific Testing
@@ -312,25 +395,23 @@ case "$EXAMPLE" in
     "vllm-aggregated-default"|"vllm-disaggregated-default"|"vllm-aggregated-kvbm"|"vllm-disaggregated-kvbm"|"sglang-aggregated-default"|"sglang-disaggregated-default"|"trtllm-aggregated-default"|"trtllm-aggregated-high-performance"|"trtllm-disaggregated-default"|"multi-replica-vllm"|"vllm-router"|"sglang-router"|"trtllm-router"|"vllm-full-observability")
         info "Testing LLM service endpoints..."
 
-        # Test models endpoint
-        MODELS_URL="${BASE_URL}/v1/models"
-        if curl -s -f "$MODELS_URL" >/dev/null 2>&1; then
+        # Test models endpoint using api_call helper
+        MODELS_RESPONSE=$(api_call GET "/v1/models")
+        if [ -n "$MODELS_RESPONSE" ] && ! echo "$MODELS_RESPONSE" | grep -qi "error"; then
             success "✓ /v1/models - accessible"
             echo "Available models:"
-            curl -s "$MODELS_URL" | jq '.data[].id' 2>/dev/null || curl -s "$MODELS_URL"
+            echo "$MODELS_RESPONSE" | jq '.data[].id' 2>/dev/null || echo "$MODELS_RESPONSE"
         else
-            warn "✗ /v1/models - not accessible"
+            warn "✗ /v1/models - not accessible or returned error"
         fi
 
         echo ""
 
         # Test chat completions with a simple request
         info "Testing chat completions endpoint..."
-        COMPLETIONS_URL="${BASE_URL}/v1/chat/completions"
 
         # Dynamic model selection
         info "Discovering available models..."
-        MODELS_RESPONSE=$(curl -s "$MODELS_URL" 2>/dev/null || echo "")
 
         if [ -n "$MODELS_RESPONSE" ] && ! echo "$MODELS_RESPONSE" | grep -q -i "error"; then
             # Extract model names from the response
@@ -426,22 +507,10 @@ case "$EXAMPLE" in
             info "Using fallback model: ${MODEL_NAME}"
         fi
 
-        CHAT_PAYLOAD=$(cat <<EOF
-{
-    "model": "${MODEL_NAME}",
-    "messages": [
-        {"role": "user", "content": "What is quantum computing and what are its parallels to analogue and digital computing? Explain Like I am 5 years old."}
-    ],
-    "max_tokens": 500,
-    "temperature": 0.1
-}
-EOF
-)
+        CHAT_PAYLOAD="{\"model\": \"${MODEL_NAME}\", \"messages\": [{\"role\": \"user\", \"content\": \"What is 2+2? Answer briefly.\"}], \"max_tokens\": 100, \"temperature\": 0.1}"
 
         echo "Testing with model: ${MODEL_NAME}"
-        RESPONSE=$(curl -s -X POST "$COMPLETIONS_URL" \
-            -H "Content-Type: application/json" \
-            -d "$CHAT_PAYLOAD" 2>/dev/null || echo "")
+        RESPONSE=$(api_call POST "/v1/chat/completions" "$CHAT_PAYLOAD")
 
         if [ -n "$RESPONSE" ] && ! echo "$RESPONSE" | grep -q -i "error"; then
             success "✓ Chat completions endpoint responded successfully"
@@ -461,9 +530,9 @@ EOF
                     echo "  3. Network connectivity issues between frontend and workers"
                     echo ""
                     echo "To fix this issue:"
-                    echo "  1. Wait for all worker pods to be fully ready: kubectl get pods -n ${NAMESPACE} -l app=${EXAMPLE}"
-                    echo "  2. Check worker logs: kubectl logs -n ${NAMESPACE} -l app=${EXAMPLE},component=*Worker"
-                    echo "  3. Restart frontend pod to clear cache: kubectl delete pod -n ${NAMESPACE} -l app=${EXAMPLE},component=Frontend"
+                    echo "  1. Wait for all worker pods to be fully ready: kubectl get pods -n ${NAMESPACE} -l ${DGD_LABEL}"
+                    echo "  2. Check worker logs: kubectl logs -n ${NAMESPACE} -l ${DGD_LABEL},nvidia.com/dynamo-component-type=worker"
+                    echo "  3. Restart frontend pod to clear cache: kubectl delete pod -n ${NAMESPACE} -l ${DGD_LABEL},nvidia.com/dynamo-component-type=frontend"
                 fi
             fi
         fi
@@ -473,20 +542,10 @@ EOF
             *-disaggregated-*|*-disagg-*)
                 echo ""
                 info "Testing disaggregation with long context..."
-                LONG_CONTEXT=$(python3 -c "print('Long context test: ' + 'word ' * 100)")
-                LONG_PAYLOAD=$(cat <<EOF
-{
-    "model": "${MODEL_NAME}",
-    "messages": [
-        {"role": "user", "content": "${LONG_CONTEXT}. Summarize this."}
-    ],
-    "max_tokens": 50
-}
-EOF
-)
-                LONG_RESPONSE=$(curl -s -X POST "$COMPLETIONS_URL" \
-                    -H "Content-Type: application/json" \
-                    -d "$LONG_PAYLOAD" 2>/dev/null || echo "")
+                LONG_CONTEXT=$(python3 -c "print('Long context test: ' + 'word ' * 100)" 2>/dev/null || echo "Long context test: $(for i in $(seq 1 100); do echo -n 'word '; done)")
+                LONG_PAYLOAD="{\"model\": \"${MODEL_NAME}\", \"messages\": [{\"role\": \"user\", \"content\": \"${LONG_CONTEXT}. Summarize this.\"}], \"max_tokens\": 50}"
+
+                LONG_RESPONSE=$(api_call POST "/v1/chat/completions" "$LONG_PAYLOAD")
 
                 if [ -n "$LONG_RESPONSE" ] && ! echo "$LONG_RESPONSE" | grep -q -i "error"; then
                     success "✓ Long context request (disaggregation test) succeeded"
@@ -507,22 +566,10 @@ EOF
                 KV_PIDS=()
 
                 for i in {1..3}; do
-                    KV_PAYLOAD=$(cat <<EOF
-{
-    "model": "${MODEL_NAME}",
-    "messages": [
-        {"role": "system", "content": "${SHARED_SYSTEM}"},
-        {"role": "user", "content": "Question ${i}: What is AI?"}
-    ],
-    "max_tokens": 30
-}
-EOF
-)
-                    # Add timeout to curl command and run in background
+                    KV_PAYLOAD="{\"model\": \"${MODEL_NAME}\", \"messages\": [{\"role\": \"system\", \"content\": \"${SHARED_SYSTEM}\"}, {\"role\": \"user\", \"content\": \"Question ${i}: What is AI?\"}], \"max_tokens\": 30}"
+                    # Run api_call in background
                     (
-                        curl -s -m 30 -X POST "$COMPLETIONS_URL" \
-                            -H "Content-Type: application/json" \
-                            -d "$KV_PAYLOAD" > /tmp/kv_test_$i.json 2>/dev/null || \
+                        api_call POST "/v1/chat/completions" "$KV_PAYLOAD" > /tmp/kv_test_$i.json 2>/dev/null || \
                         echo "timeout_or_error" > /tmp/kv_test_$i.json
                     ) &
                     KV_PIDS+=($!)
@@ -591,7 +638,7 @@ EOF
                 echo ""
                 info "Testing SLA planner metrics..."
                 # Check if planner pod exists and has metrics
-                PLANNER_POD=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE},nvidia.com/dynamo-component=Planner" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+                PLANNER_POD=$(kubectl get pods -n "${NAMESPACE}" -l "${DGD_LABEL},nvidia.com/dynamo-component=Planner" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
                 if [ -n "$PLANNER_POD" ]; then
                     success "✓ Planner pod found: ${PLANNER_POD}"
                     # Note: Planner metrics are on port 9085, not part of frontend
@@ -605,8 +652,8 @@ EOF
                 echo ""
                 info "Testing multi-node deployment coordination..."
                 # Check if all multinode pods are ready
-                MULTINODE_PODS=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE}" --no-headers 2>/dev/null | wc -l)
-                READY_PODS=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE}" --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+                MULTINODE_PODS=$(kubectl get pods -n "${NAMESPACE}" -l "${DGD_LABEL}" --no-headers 2>/dev/null | wc -l)
+                READY_PODS=$(kubectl get pods -n "${NAMESPACE}" -l "${DGD_LABEL}" --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
                 if [ "$MULTINODE_PODS" -eq "$READY_PODS" ] && [ "$MULTINODE_PODS" -gt 0 ]; then
                     success "✓ Multi-node: ${READY_PODS}/${MULTINODE_PODS} pods running"
                 else
@@ -618,9 +665,9 @@ EOF
                 echo ""
                 info "Testing multimodal deployment..."
                 # Multimodal has 3 components: EncodeWorker, VLMWorker, Processor
-                ENCODE_POD=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE},nvidia.com/dynamo-component=EncodeWorker" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-                VLM_POD=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE},nvidia.com/dynamo-component=VLMWorker" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-                PROCESSOR_POD=$(kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE},nvidia.com/dynamo-component=Processor" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+                ENCODE_POD=$(kubectl get pods -n "${NAMESPACE}" -l "${DGD_LABEL},nvidia.com/dynamo-component=EncodeWorker" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+                VLM_POD=$(kubectl get pods -n "${NAMESPACE}" -l "${DGD_LABEL},nvidia.com/dynamo-component=VLMWorker" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+                PROCESSOR_POD=$(kubectl get pods -n "${NAMESPACE}" -l "${DGD_LABEL},nvidia.com/dynamo-component=Processor" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 
                 if [ -n "$ENCODE_POD" ] && [ -n "$VLM_POD" ] && [ -n "$PROCESSOR_POD" ]; then
                     success "✓ All multimodal components found (EncodeWorker, VLMWorker, Processor)"
@@ -709,6 +756,9 @@ echo "Manual Testing Commands:"
 echo "  1. Port forwarding: kubectl port-forward service/${SERVICE_NAME} ${LOCAL_PORT}:${SERVICE_PORT} -n ${NAMESPACE}"
 echo "  2. Health check: curl http://localhost:${LOCAL_PORT}/health"
 
+# Ensure MODEL_NAME is set with a default value (prevents unbound variable error)
+MODEL_NAME="${MODEL_NAME:-default-model}"
+
 case "$EXAMPLE" in
     vllm-*|sglang-*|trtllm-*|multi-replica-*)
         echo "  3. List models: curl http://localhost:${LOCAL_PORT}/v1/models"
@@ -719,8 +769,8 @@ case "$EXAMPLE" in
         ;;
 esac
 
-echo "  5. View logs: kubectl logs -n ${NAMESPACE} -l app=${EXAMPLE}"
-echo "  6. Monitor pods: kubectl get pods -n ${NAMESPACE} -l app=${EXAMPLE} -w"
+echo "  5. View logs: kubectl logs -n ${NAMESPACE} -l ${DGD_LABEL}"
+echo "  6. Monitor pods: kubectl get pods -n ${NAMESPACE} -l ${DGD_LABEL} -w"
 echo ""
 
 echo "Cleanup:"

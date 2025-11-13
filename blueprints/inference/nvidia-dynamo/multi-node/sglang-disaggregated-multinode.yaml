@@ -20,6 +20,10 @@ spec:
         key: HF_TOKEN
   - name: GLOO_SOCKET_IFNAME
     value: "eth0"
+  # v0.7.0 WORKAROUND: Disable GDRCopy transport to prevent NIXL failures
+  # See: https://github.com/ai-dynamo/dynamo/releases/tag/v0.7.0
+  - name: UCX_TLS
+    value: "^gdr_copy"
   backendFramework: sglang
   services:
     Frontend:
@@ -28,7 +32,7 @@ spec:
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0
           resources:
             requests:
               cpu: "4"
@@ -53,7 +57,7 @@ spec:
           memory: "100Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0
           workingDir: /workspace/components/backends/sglang
           command:
           - python3
@@ -99,7 +103,7 @@ spec:
           memory: "100Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.6.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0
           workingDir: /workspace/components/backends/sglang
           command:
           - python3
