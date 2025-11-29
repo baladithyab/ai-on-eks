@@ -6,7 +6,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-enable_nvidia_gpu_operator       = false  
+enable_nvidia_gpu_operator       = true
 dynamo_stack_version             = "v0.7.0"
 
 #---------------------------------------------------------------
@@ -47,14 +47,17 @@ huggingface_token = "REPLACE_WITH_YOUR_HUGGINGFACE_TOKEN"
 # For detailed documentation, see:
 # https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#platform-level-feature-configuration
 #---------------------------------------------------------------
-# Multi-node features disabled until Grove reaches stable release
-# Grove v0.1.0-alpha.3 has certificate rotation bugs causing crash loops
-# KAI Scheduler requires Grove or LWS+Volcano for multinode orchestration
-# Single-node deployments work perfectly without these components
-dynamo_enable_grove                               = false  # DISABLED - Alpha stability issues
-dynamo_enable_kai_scheduler                       = false  # DISABLED - No multinode orchestrator available
-# dynamo_operator_namespace_restriction_enabled     = false  # Restrict operator to dynamo-cloud namespace
-# dynamo_model_express_url                          = ""     # URL for existing Model Express server
+# Multi-node orchestration with Grove + Kai Scheduler
+#
+# NOTE: Grove v0.1.0-alpha.3 bundled with Dynamo v0.7.0 has a bug where the
+# cert-rotation controller triggers a pod restart on every startup, causing
+# crash loops. This is hardcoded behavior (RestartOnSecretRefresh=true) that
+# cannot be disabled via configuration.
+#
+# WORKAROUND: Disable Grove until a fixed version is released.
+#---------------------------------------------------------------
+dynamo_enable_grove         = false  # DISABLED - v0.1.0-alpha.3 has cert rotation bug
+dynamo_enable_kai_scheduler = true   # ENABLED - Dynamo-integrated v0.9.4 (GPU-aware scheduling)
 
 #---------------------------------------------------------------
 # Optional Overrides

@@ -458,9 +458,9 @@ variable "dynamo_enable_grove" {
 }
 
 variable "dynamo_enable_kai_scheduler" {
-  description = "Enable Kai Scheduler for intelligent resource allocation. If enabled, the Kai Scheduler operator will be deployed cluster-wide. Required for Grove-based multi-node deployments."
+  description = "Enable Kai Scheduler via Dynamo platform Helm chart (v0.9.4). Provides GPU-aware scheduling with queue management."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "dynamo_operator_namespace_restriction_enabled" {

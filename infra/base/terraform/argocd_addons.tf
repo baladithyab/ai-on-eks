@@ -23,7 +23,7 @@ resource "kubectl_manifest" "tempo_yaml" {
   yaml_body = file("${path.module}/argocd-addons/tempo.yaml")
 
   depends_on = [
-    module.eks_blueprints_addons
+    helm_release.argocd
   ]
 }
 
@@ -34,7 +34,7 @@ resource "kubectl_manifest" "dynamo_model_express_yaml" {
   yaml_body = file("${path.module}/argocd-addons/dynamo-model-express.yaml")
 
   depends_on = [
-    module.eks_blueprints_addons
+    helm_release.argocd
   ]
 }
 
@@ -49,7 +49,7 @@ resource "kubectl_manifest" "dynamo_shared_hf_cache" {
   })
 
   depends_on = [
-    module.eks_blueprints_addons,
+    helm_release.argocd,
     kubectl_manifest.nvidia_dynamo_platform_yaml
   ]
 }
@@ -226,7 +226,7 @@ resource "kubernetes_secret_v1" "nvidia_dynamo_repo" {
   }
 
   depends_on = [
-    module.eks_blueprints_addons
+    helm_release.argocd
   ]
 }
 
@@ -243,7 +243,7 @@ resource "kubernetes_namespace_v1" "dynamo_cloud" {
   }
 
   depends_on = [
-    module.eks_blueprints_addons
+    helm_release.argocd
   ]
 }
 

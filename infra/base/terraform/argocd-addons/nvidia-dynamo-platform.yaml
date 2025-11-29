@@ -38,16 +38,36 @@ spec:
               prometheusEndpoint: "http://kube-prometheus-stack-prometheus.kube-prometheus-stack.svc.cluster.local:9090"
           %{~ endif ~}
 
-        # Multi-node features disabled until Grove reaches stable release
-        # Grove v0.1.0-alpha.3: Certificate rotation bugs cause crash loops
-        # KAI Scheduler: Requires Grove or LWS+Volcano for multinode orchestration
-        # Decision: Keep deployment simple, focus on single-node workloads
-        # Revisit when Grove reaches stable v0.1.0 or later
-        # grove:
-          # enabled: ${dynamo_enable_grove}
+        # Multi-node orchestration with Grove + Kai Scheduler
+        # Grove: Network topology-aware gang scheduling and auto-scaling
+        # Kai Scheduler: GPU-aware scheduler with queue management
+        #
+        # NOTE: Grove v0.1.0-alpha.3 bundled with Dynamo v0.7.0 has a bug where
+        # the cert-rotation controller triggers a pod restart on every startup,
+        # causing crash loops. This is hardcoded behavior (RestartOnSecretRefresh=true)
+        # that cannot be disabled via configuration.
+        #
+        # WORKAROUND: Disable Grove until a fixed version is released.
+        grove:
+          enabled: false  # Disabled due to v0.1.0-alpha.3 cert rotation bug
 
-        # kai-scheduler:
-          # enabled: ${dynamo_enable_kai_scheduler}
+        # Kai Scheduler via Dynamo (v0.9.4)
+        # Provides GPU-aware scheduling with queue management
+        kai-scheduler:
+          enabled: true
+          global:
+            gpuSharing: true
+            clusterAutoscaling: true
+            leaderElection: false  # Single replica, no HA needed
+            nodeSelector:
+              NodeGroupType: core
+            tolerations:
+              - key: "CriticalAddonsOnly"
+                operator: "Exists"
+          defaultQueue:
+            createDefaultQueue: true
+            parentName: dynamo-default
+            childName: dynamo
 
         # NATS configuration - use EFS for JetStream persistence
         # Note: etcd inherits from global.storageClass, but NATS needs explicit setting
