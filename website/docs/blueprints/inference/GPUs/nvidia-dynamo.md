@@ -1484,7 +1484,7 @@ spec:
       value: "1"
     # Tempo endpoint
     - name: OTEL_EXPORT_ENDPOINT
-      value: "http://tempo.observability.svc.cluster.local:4317"
+      value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
 
   services:
     Frontend:
@@ -1528,7 +1528,7 @@ helm install tempo grafana/tempo \
    ```
 
 2. Add Tempo data source:
-   - URL: `http://tempo.observability.svc.cluster.local:3200`
+   - URL: `http://tempo.dynamo-cloud.svc.cluster.local:3200`
 
 3. Explore traces:
    - Navigate to Explore → Select Tempo

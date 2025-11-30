@@ -71,7 +71,7 @@ spec:
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: observability
+    namespace: dynamo-cloud
   syncPolicy:
     automated:
       prune: true

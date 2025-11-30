@@ -39,7 +39,7 @@ spec:
       value: "1"
     # Tempo endpoint (adjust if Tempo is in different namespace/cluster)
     - name: OTEL_EXPORT_ENDPOINT
-      value: "http://tempo.observability.svc.cluster.local:4317"
+      value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
 
   services:
     Frontend:
@@ -85,7 +85,7 @@ spec:
           memory: "20Gi"
       extraPodSpec:
         nodeSelector:
-          karpenter.sh/nodepool: g5-gpu-karpenter
+          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm
@@ -127,7 +127,7 @@ spec:
           memory: "20Gi"
       extraPodSpec:
         nodeSelector:
-          karpenter.sh/nodepool: g5-gpu-karpenter
+          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/components/backends/vllm

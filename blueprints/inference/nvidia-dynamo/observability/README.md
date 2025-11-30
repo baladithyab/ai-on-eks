@@ -36,7 +36,7 @@ spec:
     - name: OTEL_EXPORT_ENABLED
       value: "1"
     - name: OTEL_EXPORT_ENDPOINT
-      value: "http://tempo.observability.svc.cluster.local:4317"
+      value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
   
   services:
     Frontend:
@@ -176,7 +176,7 @@ Logs written to stdout in JSONL format
 2. **Add Tempo Data Source** (if not already configured):
    - Navigate to Configuration → Data Sources
    - Add Tempo data source
-   - URL: `http://tempo.observability.svc.cluster.local:3200`
+   - URL: `http://tempo.dynamo-cloud.svc.cluster.local:3200`
 
 3. **Explore Traces**:
    - Navigate to Explore → Select Tempo

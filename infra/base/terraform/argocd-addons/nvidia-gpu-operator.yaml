@@ -195,9 +195,19 @@ spec:
             create: false
             default: ""
 
-        # EKS AMIs come with the container toolkit installed
+        # Enable container toolkit for proper CUDA library injection
+        # Required for Bottlerocket to inject libcuda.so into containers
         toolkit:
-          enabled: false
+          enabled: true
+          env:
+            - name: CONTAINERD_CONFIG
+              value: /etc/containerd/config.toml
+            - name: CONTAINERD_SOCKET
+              value: /run/containerd/containerd.sock
+            - name: CONTAINERD_RUNTIME_CLASS
+              value: nvidia
+            - name: CONTAINERD_SET_AS_DEFAULT
+              value: "true"
 
         # Node feature discovery
         nfd:

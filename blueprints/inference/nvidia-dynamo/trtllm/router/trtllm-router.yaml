@@ -127,7 +127,7 @@ spec:
       extraPodSpec:
         # Karpenter node selector for GPU provisioning
         nodeSelector:
-          karpenter.sh/nodepool: g5-gpu-karpenter
+          karpenter.sh/nodepool: g5-nvidia
         # GPU tolerations for dedicated GPU nodes
         tolerations:
           - key: nvidia.com/gpu

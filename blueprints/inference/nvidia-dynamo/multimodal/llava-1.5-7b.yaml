@@ -62,7 +62,7 @@ spec:
           memory: "16Gi"
       extraPodSpec:
         nodeSelector:
-          karpenter.sh/nodepool: g5-gpu-karpenter
+          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/examples/multimodal
@@ -92,7 +92,7 @@ spec:
           memory: "16Gi"
       extraPodSpec:
         nodeSelector:
-          karpenter.sh/nodepool: g5-gpu-karpenter
+          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/examples/multimodal

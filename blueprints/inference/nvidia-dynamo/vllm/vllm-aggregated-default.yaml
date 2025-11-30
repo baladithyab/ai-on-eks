@@ -77,7 +77,7 @@ spec:
           gpu: "2"
       extraPodSpec:
         nodeSelector:
-          karpenter.sh/nodepool: g5-gpu-karpenter
+          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
           startupProbe:
             httpGet:

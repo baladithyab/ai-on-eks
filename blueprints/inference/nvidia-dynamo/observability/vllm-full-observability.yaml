@@ -23,7 +23,7 @@ spec:
       value: "1"
     # Tempo endpoint (adjust if Tempo is in different namespace/cluster)
     - name: OTEL_EXPORT_ENDPOINT
-      value: "http://tempo.observability.svc.cluster.local:4317"
+      value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
     # Optional: Set log level for detailed debugging
     # - name: DYN_LOG
     #   value: "info,dynamo_runtime::system_status_server:trace"
