@@ -1,49 +1,32 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Qwen2.5-VL 7B Multimodal Deployment - Image Configuration
+# LLaVA-NeXT-Video 7B Video Processing Deployment with KVBM Long-Context Caching
 #
-# This example demonstrates vision-language model deployment optimized for image understanding.
-# Qwen2.5-VL supports advanced image understanding with visual reasoning capabilities.
+# This is the recommended model for video understanding with NVIDIA Dynamo as it's
+# natively supported by the video_encode_worker.py pipeline.
 #
-# Architecture:
-# - EncodeWorker: Processes and encodes visual inputs (images)
-# - VLMWorker: Handles prefill phase for combined vision-text understanding
-# - Processor: Manages multimodal input preprocessing and prompt template formatting
+# Architecture (from dynamo/examples/multimodal):
+#   HTTP → Processor → VideoEncodeWorker → VLMWorker (prefill+decode)
+#                   ↓                    ↓
+#              video_url             frames via RDMA
 #
 # Key Features:
-# - Advanced image understanding and visual reasoning
-# - Multi-turn visual conversations
-# - Custom prompt template support
-# - 32K token context window (optimized for images)
-#
-# Requirements:
-# - 4 GPUs total (1 for EncodeWorker, 2 for VLMWorker with KVBM, 1 for Processor)
-# - HuggingFace token secret (hf-token-secret) for model download
-#
-# Resource Notes:
-# - VLMWorker: 2 GPUs + KVBM CPU/Disk offloading (100GB CPU cache + 200GB disk)
-# - VLMWorker: 200Gi memory for CPU cache and model
-# - EncodeWorker/Processor: 24Gi memory
-# - CPU/Memory requests ensure Karpenter provisions appropriately-sized GPU nodes
-# - KVBM three-tier caching: GPU (48GB) → CPU (100GB) → Disk (200GB)
-#
-# Extended Context / Tensor Parallelism:
-# - Default context: 32K tokens (--max-model-len 32768)
-# - For longer contexts (up to 64K), see qwen2.5-vl-7b-video.yaml
-# - For tensor parallelism across multiple GPUs, add --tensor-parallel-size N to VLMWorker args
-# - Note: TP requires N GPUs per VLMWorker replica (e.g., TP=2 needs 2 GPUs)
+# - Native video understanding via raw frame processing
+# - KVBM three-tier caching: GPU → CPU (100GB) → Disk (200GB)
+# - Dynamic frame sampling (8 frames default)
+# - Extended context for video sequences
 
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: qwen-vl
+  name: llava-video
   namespace: dynamo-cloud
 spec:
   backendFramework: vllm
   services:
     Frontend:
-      dynamoNamespace: qwen-vl
+      dynamoNamespace: llava-video
       componentType: frontend
       replicas: 1
       extraPodSpec:
@@ -57,18 +40,18 @@ spec:
               cpu: "4"
               memory: "8Gi"
 
-    EncodeWorker:
+    VideoEncodeWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: qwen-vl
+      dynamoNamespace: llava-video
       componentType: worker
       replicas: 1
       resources:
         requests:
           cpu: "4"
-          memory: "24Gi"
+          memory: "32Gi"
         limits:
           gpu: "1"
-          memory: "24Gi"
+          memory: "48Gi"
       extraPodSpec:
         runtimeClassName: nvidia
         mainContainer:
@@ -82,12 +65,12 @@ spec:
               port: 9090
             periodSeconds: 10
             timeoutSeconds: 30
-            failureThreshold: 120
+            failureThreshold: 180
           command:
             - /bin/sh
             - -c
           args:
-            - python3 components/encode_worker.py --model Qwen/Qwen2.5-VL-7B-Instruct
+            - python3 components/video_encode_worker.py --model llava-hf/LLaVA-NeXT-Video-7B-hf --num-frames-to-sample 8
         tolerations:
           - key: "nvidia.com/gpu"
             operator: "Exists"
@@ -95,24 +78,21 @@ spec:
 
     VLMWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: qwen-vl
+      dynamoNamespace: llava-video
       componentType: worker
       replicas: 1
       resources:
         requests:
           cpu: "16"
-          memory: "200Gi"
+          memory: "150Gi"
         limits:
-          gpu: "2"
-          memory: "250Gi"
+          gpu: "1"
+          memory: "200Gi"
       envs:
-        # Enable KVBM CPU cache (100GB of host memory for KV cache overflow)
         - name: DYN_KVBM_CPU_CACHE_GB
           value: "100"
-        # Enable KVBM disk cache (200GB for long context/image sequences)
         - name: DYN_KVBM_DISK_CACHE_GB
           value: "200"
-        # Enable KVBM metrics for monitoring cache performance
         - name: DYN_KVBM_METRICS
           value: "true"
       extraPodSpec:
@@ -128,24 +108,19 @@ spec:
               port: 9090
             periodSeconds: 10
             timeoutSeconds: 30
-            failureThreshold: 120  # 120 * 10s = 20 minutes for model loading + torch.compile
+            failureThreshold: 180
           command:
             - /bin/sh
             - -c
           args:
-            - python3 components/worker.py --model Qwen/Qwen2.5-VL-7B-Instruct --worker-type prefill --max-model-len 32768 --gpu-memory-utilization 0.85 --tensor-parallel-size 2
-          # Volume mount for disk cache
+            - python3 components/worker.py --model llava-hf/LLaVA-NeXT-Video-7B-hf --worker-type prefill --max-model-len 8192 --gpu-memory-utilization 0.85
           volumeMounts:
             - name: kvbm-disk-cache
               mountPath: /tmp/kvbm-cache
-        # Volume for disk cache storage
         volumes:
           - name: kvbm-disk-cache
             emptyDir:
               sizeLimit: 250Gi
-              # For production, use a PersistentVolumeClaim instead:
-              # persistentVolumeClaim:
-              #   claimName: qwen-vl-kvbm-cache-pvc
         tolerations:
           - key: "nvidia.com/gpu"
             operator: "Exists"
@@ -153,13 +128,13 @@ spec:
 
     Processor:
       envFromSecret: hf-token-secret
-      dynamoNamespace: qwen-vl
+      dynamoNamespace: llava-video
       componentType: worker
       replicas: 1
       resources:
         requests:
           cpu: "4"
-          memory: "24Gi"
+          memory: "16Gi"
         limits:
           gpu: "1"
           memory: "24Gi"
@@ -176,12 +151,12 @@ spec:
               port: 9090
             periodSeconds: 10
             timeoutSeconds: 30
-            failureThreshold: 120
+            failureThreshold: 180
           command:
             - /bin/sh
             - -c
           args:
-            - 'python3 components/processor.py --model Qwen/Qwen2.5-VL-7B-Instruct --prompt-template "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><prompt><|im_end|>\n<|im_start|>assistant\n"'
+            - 'python3 components/processor.py --model llava-hf/LLaVA-NeXT-Video-7B-hf --prompt-template "USER: <video>\n<prompt> ASSISTANT:"'
         tolerations:
           - key: "nvidia.com/gpu"
             operator: "Exists"

@@ -2,57 +2,45 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Test script for Qwen2.5-VL video understanding capabilities
+# Test script for LLaVA-NeXT-Video video understanding capabilities
 #
-# This script tests video processing with the Qwen2.5-VL model using the OpenAI-compatible API.
-# Qwen2.5-VL can comprehend videos over 1 hour long and pinpoint specific events.
+# This script tests video processing with LLaVA-NeXT-Video-7B model using the OpenAI-compatible API.
+# LLaVA-NeXT-Video is designed for video understanding with temporal reasoning.
 #
 # Usage:
-#   ./test-video.sh <service-name> <port> <model-name> <video-path>
+#   ./test-video.sh [port] [model-name]
 #
 # Example:
-#   ./test-video.sh qwen-vl-video-frontend 8000 Qwen/Qwen2.5-VL-7B-Instruct /path/to/video.mp4
+#   ./test-video.sh 8080 llava-hf/LLaVA-NeXT-Video-7B-hf
 #
 # Prerequisites:
 #   - kubectl port-forward to the frontend service
-#   - Video file accessible locally
 #   - jq installed for JSON parsing
 #
-# Note: For video inputs, the content must be provided as a local file path.
-# The video will be processed with dynamic FPS sampling for efficient understanding.
+# Note: Uses video_url content type for video inputs.
+# Video frames are sampled and processed via Dynamo's NIXL RDMA pipeline.
 
 set -e
 
-# Check arguments
-if [ "$#" -lt 3 ]; then
-    echo "Usage: $0 <service-name> <port> <model-name> [video-path]"
-    echo "Example: $0 qwen-vl-video-frontend 8000 Qwen/Qwen2.5-VL-7B-Instruct /path/to/video.mp4"
-    exit 1
-fi
+PORT=${1:-8080}
+MODEL=${2:-"llava-hf/LLaVA-NeXT-Video-7B-hf"}
 
-SERVICE_NAME=$1
-PORT=$2
-MODEL=$3
-VIDEO_PATH=${4:-""}
-
-# Default test video URL (for demonstration - actual video processing requires local files)
-DEFAULT_VIDEO_URL="https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen2-VL/space_woaudio.mp4"
+# Test video URL - Big Buck Bunny (reliable public video)
+VIDEO_URL="https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4"
 
 echo "=========================================="
-echo "Qwen2.5-VL Video Understanding Test"
+echo "LLaVA-NeXT-Video Understanding Test"
 echo "=========================================="
-echo "Service: $SERVICE_NAME"
 echo "Port: $PORT"
 echo "Model: $MODEL"
+echo "Video: $VIDEO_URL"
 echo ""
 
-# Test 1: Video description with URL (if supported by vLLM)
+# Test 1: Video description
 echo "Test 1: Describe video content"
 echo "-------------------------------------------"
-echo "Note: This test uses a video URL. For local video files, use the video-path parameter."
-echo ""
 
-curl -X POST "http://localhost:$PORT/v1/chat/completions" \
+RESPONSE=$(curl -s -X POST "http://localhost:$PORT/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   -d "{
     \"model\": \"$MODEL\",
@@ -60,30 +48,32 @@ curl -X POST "http://localhost:$PORT/v1/chat/completions" \
       {
         \"role\": \"user\",
         \"content\": [
-          {
-            \"type\": \"text\",
-            \"text\": \"Describe what happens in this video.\"
-          },
-          {
-            \"type\": \"image_url\",
-            \"image_url\": {\"url\": \"$DEFAULT_VIDEO_URL\"}
-          }
+          {\"type\": \"text\", \"text\": \"Describe what happens in this video.\"},
+          {\"type\": \"video_url\", \"video_url\": {\"url\": \"$VIDEO_URL\"}}
         ]
       }
     ],
     \"max_tokens\": 300
-  }" | jq '.'
+  }")
+
+echo "$RESPONSE" | jq '.'
+
+# Check if response was successful
+if echo "$RESPONSE" | jq -e '.choices[0].message.content' > /dev/null 2>&1; then
+    echo "✅ Test 1 PASSED"
+else
+    echo "❌ Test 1 FAILED"
+    echo "Error: $RESPONSE"
+fi
 
 echo ""
 echo ""
 
-# Test 2: Event pinpointing - Find specific moments
-echo "Test 2: Event pinpointing - Find specific moments"
+# Test 2: Count objects in video
+echo "Test 2: Object counting"
 echo "-------------------------------------------"
-echo "Testing the model's ability to identify when specific events occur in the video."
-echo ""
 
-curl -X POST "http://localhost:$PORT/v1/chat/completions" \
+RESPONSE=$(curl -s -X POST "http://localhost:$PORT/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   -d "{
     \"model\": \"$MODEL\",
@@ -91,30 +81,30 @@ curl -X POST "http://localhost:$PORT/v1/chat/completions" \
       {
         \"role\": \"user\",
         \"content\": [
-          {
-            \"type\": \"text\",
-            \"text\": \"At what point in the video does the main action occur? Describe the timing and what happens.\"
-          },
-          {
-            \"type\": \"image_url\",
-            \"image_url\": {\"url\": \"$DEFAULT_VIDEO_URL\"}
-          }
+          {\"type\": \"text\", \"text\": \"How many animated characters appear in this video? List them.\"},
+          {\"type\": \"video_url\", \"video_url\": {\"url\": \"$VIDEO_URL\"}}
         ]
       }
     ],
     \"max_tokens\": 200
-  }" | jq '.'
+  }")
+
+echo "$RESPONSE" | jq '.'
+
+if echo "$RESPONSE" | jq -e '.choices[0].message.content' > /dev/null 2>&1; then
+    echo "✅ Test 2 PASSED"
+else
+    echo "❌ Test 2 FAILED"
+fi
 
 echo ""
 echo ""
 
-# Test 3: Multi-turn conversation about video
-echo "Test 3: Multi-turn conversation about video"
+# Test 3: Temporal understanding
+echo "Test 3: Temporal understanding"
 echo "-------------------------------------------"
-echo "Testing multi-turn conversation with video context."
-echo ""
 
-curl -X POST "http://localhost:$PORT/v1/chat/completions" \
+RESPONSE=$(curl -s -X POST "http://localhost:$PORT/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   -d "{
     \"model\": \"$MODEL\",
@@ -122,68 +112,21 @@ curl -X POST "http://localhost:$PORT/v1/chat/completions" \
       {
         \"role\": \"user\",
         \"content\": [
-          {
-            \"type\": \"text\",
-            \"text\": \"What is the main subject of this video?\"
-          },
-          {
-            \"type\": \"image_url\",
-            \"image_url\": {\"url\": \"$DEFAULT_VIDEO_URL\"}
-          }
-        ]
-      },
-      {
-        \"role\": \"assistant\",
-        \"content\": [
-          {
-            \"type\": \"text\",
-            \"text\": \"This video shows a space-related scene.\"
-          }
-        ]
-      },
-      {
-        \"role\": \"user\",
-        \"content\": [
-          {
-            \"type\": \"text\",
-            \"text\": \"Can you describe the visual details and any movements you observe?\"
-          }
-        ]
-      }
-    ],
-    \"max_tokens\": 250
-  }" | jq '.'
-
-echo ""
-echo ""
-
-# Test 4: Detailed temporal analysis
-echo "Test 4: Detailed temporal analysis"
-echo "-------------------------------------------"
-echo "Testing the model's understanding of temporal sequences and changes over time."
-echo ""
-
-curl -X POST "http://localhost:$PORT/v1/chat/completions" \
-  -H 'Content-Type: application/json' \
-  -d "{
-    \"model\": \"$MODEL\",
-    \"messages\": [
-      {
-        \"role\": \"user\",
-        \"content\": [
-          {
-            \"type\": \"text\",
-            \"text\": \"Describe the sequence of events in this video from beginning to end. What changes occur over time?\"
-          },
-          {
-            \"type\": \"image_url\",
-            \"image_url\": {\"url\": \"$DEFAULT_VIDEO_URL\"}
-          }
+          {\"type\": \"text\", \"text\": \"What happens at the beginning, middle, and end of this video? Describe the sequence of events.\"},
+          {\"type\": \"video_url\", \"video_url\": {\"url\": \"$VIDEO_URL\"}}
         ]
       }
     ],
     \"max_tokens\": 400
-  }" | jq '.'
+  }")
+
+echo "$RESPONSE" | jq '.'
+
+if echo "$RESPONSE" | jq -e '.choices[0].message.content' > /dev/null 2>&1; then
+    echo "✅ Test 3 PASSED"
+else
+    echo "❌ Test 3 FAILED"
+fi
 
 echo ""
 echo ""
@@ -192,13 +135,12 @@ echo "Video Understanding Tests Complete!"
 echo "=========================================="
 echo ""
 echo "Notes:"
-echo "- Qwen2.5-VL supports videos over 1 hour long"
-echo "- Dynamic FPS sampling is used for efficient processing"
-echo "- Event pinpointing can identify specific moments in videos"
-echo "- Extended context window (64K tokens) supports long video sequences"
+echo "- LLaVA-NeXT-Video samples 8 frames from the video"
+echo "- Frames are transferred via NIXL RDMA to VLMWorker"
+echo "- Model context: 8192 tokens max"
 echo ""
-echo "For local video files:"
-echo "  Use the video-path parameter to specify a local .mp4 file"
-echo "  Example: $0 $SERVICE_NAME $PORT $MODEL /path/to/your/video.mp4"
+echo "Quick test:"
+echo "  kubectl port-forward svc/llava-video-frontend -n dynamo-cloud 8080:8000 &"
+echo "  ./test-video.sh 8080 llava-hf/LLaVA-NeXT-Video-7B-hf"
 echo ""
 
