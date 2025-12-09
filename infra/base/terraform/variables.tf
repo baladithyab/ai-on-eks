@@ -221,14 +221,33 @@ variable "enable_kuberay_operator" {
   default     = false
 }
 variable "huggingface_token" {
-  description = "Hugging Face Secret Token"
+  description = <<-EOF
+    HuggingFace API Token for model downloads.
+    
+    REQUIRED for NVIDIA Dynamo deployments (enable_dynamo_stack = true).
+    Get a token from: https://huggingface.co/settings/tokens
+    
+    Token must have read access to gated models like Llama-3, DeepSeek, etc.
+    Set in blueprint.tfvars: huggingface_token = "hf_your_token_here"
+  EOF
   type        = string
   default     = "DUMMY_TOKEN_REPLACE_ME"
   sensitive   = true
 }
 
 variable "ngc_api_key" {
-  description = "NVIDIA NGC API Key (required for NVIDIA Dynamo - get from https://ngc.nvidia.com/setup/api-key)"
+  description = <<-EOF
+    NVIDIA NGC API Key for container image pulls and Helm chart access.
+    
+    REQUIRED for NVIDIA Dynamo deployments (enable_dynamo_stack = true).
+    Get an API key from: https://ngc.nvidia.com/setup/api-key
+    
+    Key is used for:
+    - Pulling Dynamo runtime containers from nvcr.io
+    - Accessing Dynamo Helm charts from NGC
+    
+    Set in blueprint.tfvars: ngc_api_key = "your_ngc_key_here"
+  EOF
   type        = string
   default     = "DUMMY_NGC_KEY_REPLACE_ME"
   sensitive   = true
@@ -441,7 +460,7 @@ variable "enable_dynamo_stack" {
 }
 
 variable "dynamo_stack_version" {
-  description = "NVIDIA Dynamo Stack version"
+  description = "NVIDIA Dynamo Stack version for platform Helm charts. Note: Container images may use different versions (e.g., 0.7.0.post1)"
   type        = string
   default     = "v0.7.0"
 }
