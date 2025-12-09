@@ -24,7 +24,6 @@ spec:
   backendFramework: vllm
   services:
     Frontend:
-      dynamoNamespace: vllm-aggregated-kvbm
       componentType: frontend
       replicas: 1
       livenessProbe:
@@ -63,7 +62,6 @@ spec:
             - "python3 -m dynamo.frontend --http-port 8000"
     VllmWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: vllm-aggregated-kvbm
       componentType: worker
       replicas: 1
       livenessProbe:

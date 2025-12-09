@@ -10,7 +10,6 @@ spec:
   backendFramework: vllm
   services:
     Frontend:
-      dynamoNamespace: vllm-disaggregated-default
       componentType: frontend
       replicas: 1
       livenessProbe:
@@ -48,7 +47,6 @@ spec:
           args:
             - "python3 -m dynamo.frontend --http-port 8000"
     VllmDecodeWorker:
-      dynamoNamespace: vllm-disaggregated-default
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
@@ -93,7 +91,6 @@ spec:
           args:
             - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm-decode.log"
     VllmPrefillWorker:
-      dynamoNamespace: vllm-disaggregated-default
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1

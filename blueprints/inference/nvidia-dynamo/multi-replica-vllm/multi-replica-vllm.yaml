@@ -31,7 +31,6 @@ spec:
       envs:
         - name: DYN_ROUTER_MODE
           value: kv
-      dynamoNamespace: multi-replica-vllm
       componentType: frontend
       replicas: 1
       resources:
@@ -66,7 +65,6 @@ spec:
         periodSeconds: 10
         timeoutSeconds: 30
         failureThreshold: 60
-      dynamoNamespace: multi-replica-vllm
       componentType: worker
       replicas: 2
       resources:
@@ -111,7 +109,6 @@ spec:
         periodSeconds: 10
         timeoutSeconds: 30
         failureThreshold: 60
-      dynamoNamespace: multi-replica-vllm
       componentType: worker
       replicas: 2
       resources:

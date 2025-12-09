@@ -74,7 +74,6 @@ spec:
       value: "/models"
   services:
     Frontend:
-      dynamoNamespace: trtllm-disagg-multinode
       componentType: frontend
       replicas: 1
       extraPodSpec:
@@ -100,7 +99,6 @@ spec:
       volumeMounts:
         - name: trtllm-multinode-models
           mountPoint: /models
-      dynamoNamespace: trtllm-disagg-multinode
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
@@ -149,7 +147,6 @@ spec:
       volumeMounts:
         - name: trtllm-multinode-models
           mountPoint: /models
-      dynamoNamespace: trtllm-disagg-multinode
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1

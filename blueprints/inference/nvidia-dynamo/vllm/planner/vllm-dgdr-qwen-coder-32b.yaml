@@ -76,7 +76,6 @@ data:
           value: "/models"
       services:
         Frontend:
-          dynamoNamespace: vllm-disagg
           componentType: frontend
           replicas: 1
           volumeMounts:
@@ -86,7 +85,6 @@ data:
             mainContainer:
               image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
         VllmDecodeWorker:
-          dynamoNamespace: vllm-disagg
           envFromSecret: hf-token-secret
           componentType: worker
           subComponentType: decode
@@ -109,7 +107,6 @@ data:
                 - --model
                 - Qwen/Qwen2.5-Coder-32B-Instruct
         VllmPrefillWorker:
-          dynamoNamespace: vllm-disagg
           envFromSecret: hf-token-secret
           componentType: worker
           subComponentType: prefill

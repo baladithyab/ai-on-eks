@@ -14,7 +14,6 @@ spec:
   backendFramework: sglang
   services:
     Frontend:
-      dynamoNamespace: sglang-disaggregated-2gpu
       componentType: frontend
       replicas: 1
       livenessProbe:
@@ -50,7 +49,6 @@ spec:
           args:
             - "python3 -m dynamo.frontend --http-port=8000"
     SGLangDecodeWorker:
-      dynamoNamespace: sglang-disaggregated-2gpu
       envFromSecret: hf-token-secret
       componentType: worker
       subComponentType: decode
@@ -108,7 +106,6 @@ spec:
                 --disaggregation-bootstrap-port 12345 \
                 --host 0.0.0.0
     SGLangPrefillWorker:
-      dynamoNamespace: sglang-disaggregated-2gpu
       envFromSecret: hf-token-secret
       componentType: worker
       subComponentType: prefill

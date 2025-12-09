@@ -13,7 +13,6 @@ spec:
       envs:
         - name: DYN_ROUTER_MODE
           value: kv
-      dynamoNamespace: vllm-router
       componentType: frontend
       replicas: 1
       livenessProbe:
@@ -52,7 +51,6 @@ spec:
             - "python3 -m dynamo.frontend --http-port 8000 --router-mode kv --kv-overlap-score-weight 1.0 --router-temperature 0.1"
     VllmWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: vllm-router
       componentType: worker
       replicas: 2
       livenessProbe:

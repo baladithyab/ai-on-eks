@@ -20,7 +20,6 @@ spec:
   
   services:
     Frontend:
-      dynamoNamespace: llama-70b
       componentType: frontend
       replicas: 1
       envFromSecret: hf-token-secret
@@ -32,7 +31,6 @@ spec:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
     
     VllmDecodeWorker:
-      dynamoNamespace: llama-70b
       componentType: worker
       subComponentType: decode
       replicas: 1
@@ -65,7 +63,6 @@ spec:
             - "8"
 
     VllmPrefillWorker:
-      dynamoNamespace: llama-70b
       componentType: worker
       subComponentType: prefill
       replicas: 1

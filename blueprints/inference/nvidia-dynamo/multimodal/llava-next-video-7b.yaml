@@ -26,7 +26,6 @@ spec:
   backendFramework: vllm
   services:
     Frontend:
-      dynamoNamespace: llava-video
       componentType: frontend
       replicas: 1
       extraPodSpec:
@@ -42,7 +41,6 @@ spec:
 
     VideoEncodeWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: llava-video
       componentType: worker
       replicas: 1
       resources:
@@ -77,7 +75,6 @@ spec:
 
     VLMWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: llava-video
       componentType: worker
       replicas: 1
       resources:
@@ -126,7 +123,6 @@ spec:
 
     Processor:
       envFromSecret: hf-token-secret
-      dynamoNamespace: llava-video
       componentType: worker
       replicas: 1
       resources:

@@ -43,7 +43,6 @@ spec:
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
-      dynamoNamespace: vllm-aggregated-kv-router
       componentType: frontend
       replicas: 1
       resources:
@@ -83,7 +82,6 @@ spec:
         periodSeconds: 10
         timeoutSeconds: 30
         failureThreshold: 60
-      dynamoNamespace: vllm-aggregated-kv-router
       componentType: worker
       replicas: 3  # Multiple replicas to demonstrate KV Router benefits
       resources:

@@ -113,7 +113,6 @@ spec:
   
   services:
     Frontend:
-      dynamoNamespace: trtllm-planner
       componentType: frontend
       replicas: 1
       resources:
@@ -145,7 +144,6 @@ spec:
             - --no-kv-events
     
     Planner:
-      dynamoNamespace: trtllm-planner
       envFromSecret: hf-token-secret
       componentType: planner
       replicas: 1
@@ -178,7 +176,6 @@ spec:
             - --prometheus-port=9085
     
     TRTLLMDecodeWorker:
-      dynamoNamespace: trtllm-planner
       envFromSecret: hf-token-secret
       componentType: worker
       subComponentType: decode
@@ -242,7 +239,6 @@ spec:
             - decode
 
     TRTLLMPrefillWorker:
-      dynamoNamespace: trtllm-planner
       envFromSecret: hf-token-secret
       componentType: worker
       subComponentType: prefill

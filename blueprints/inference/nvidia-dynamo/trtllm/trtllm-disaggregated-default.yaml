@@ -79,7 +79,6 @@ spec:
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
-      dynamoNamespace: trtllm-disaggregated-default
       componentType: frontend
       replicas: 1
       resources:
@@ -99,7 +98,6 @@ spec:
           args:
             - "python3 -m dynamo.frontend --http-port 8000"
     TRTLLMDecodeWorker:
-      dynamoNamespace: trtllm-disaggregated-default
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
@@ -167,7 +165,6 @@ spec:
             - --disaggregation-mode
             - decode
     TRTLLMPrefillWorker:
-      dynamoNamespace: trtllm-disaggregated-default
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1

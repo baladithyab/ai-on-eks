@@ -46,7 +46,6 @@ spec:
       create: false  # PVC must be pre-created and profiling results must exist
   services:
     Frontend:
-      dynamoNamespace: vllm-disaggregated-planner
       componentType: frontend
       replicas: 1
       livenessProbe:
@@ -84,7 +83,6 @@ spec:
           args:
             - "python3 -m dynamo.frontend --http-port 8000"
     Planner:
-      dynamoNamespace: vllm-disaggregated-planner
       componentType: planner
       replicas: 1
       volumeMounts:
@@ -114,7 +112,6 @@ spec:
                 --profile-results-dir=/data/profiling_results \
                 2>&1 | tee /tmp/planner.log
     VllmDecodeWorker:
-      dynamoNamespace: vllm-disaggregated-planner
       envFromSecret: hf-token-secret
       componentType: worker
       subComponentType: decode
@@ -160,7 +157,6 @@ spec:
           args:
             - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm-decode.log"
     VllmPrefillWorker:
-      dynamoNamespace: vllm-disaggregated-planner
       envFromSecret: hf-token-secret
       componentType: worker
       subComponentType: prefill

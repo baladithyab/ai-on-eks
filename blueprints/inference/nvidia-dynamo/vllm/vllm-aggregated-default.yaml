@@ -28,7 +28,6 @@ spec:
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
-      dynamoNamespace: vllm-aggregated-default
       componentType: frontend
       replicas: 1
       resources:
@@ -63,7 +62,6 @@ spec:
         periodSeconds: 10
         timeoutSeconds: 30
         failureThreshold: 60
-      dynamoNamespace: vllm-aggregated-default
       componentType: worker
       replicas: 1
       resources:

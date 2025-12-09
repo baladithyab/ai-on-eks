@@ -52,7 +52,6 @@ spec:
       envs:
         - name: DYN_ROUTER_MODE
           value: kv
-      dynamoNamespace: trtllm-router
       componentType: frontend
       replicas: 1
       # Production-grade health checks with appropriate timeouts
@@ -98,7 +97,6 @@ spec:
 
     TRTLLMWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: trtllm-router
       componentType: worker
       replicas: 2  # Multiple workers for load balancing and cache distribution
       livenessProbe:

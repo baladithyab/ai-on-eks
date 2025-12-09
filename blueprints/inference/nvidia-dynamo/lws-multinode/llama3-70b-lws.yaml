@@ -21,7 +21,6 @@ metadata:
     # CRITICAL: This annotation forces LWS instead of Grove
     nvidia.com/enable-grove: "false"
 spec:
-  dynamoNamespace: "default"
   
   # Shared PVC for model cache (optional but recommended)
   pvcs:

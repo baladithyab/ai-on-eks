@@ -19,7 +19,6 @@ spec:
   
   services:
     Frontend:
-      dynamoNamespace: sglang-planner
       componentType: frontend
       replicas: 1
       resources:
@@ -42,7 +41,6 @@ spec:
             - "8000"
     
     Planner:
-      dynamoNamespace: sglang-planner
       envFromSecret: hf-token-secret
       componentType: planner
       replicas: 1
@@ -75,7 +73,6 @@ spec:
             - --prometheus-port=9085
     
     SGLangDecodeWorker:
-      dynamoNamespace: sglang-planner
       envFromSecret: hf-token-secret
       componentType: worker
       subComponentType: decode
@@ -139,7 +136,6 @@ spec:
             - "0.0.0.0"
     
     SGLangPrefillWorker:
-      dynamoNamespace: sglang-planner
       envFromSecret: hf-token-secret
       componentType: worker
       subComponentType: prefill

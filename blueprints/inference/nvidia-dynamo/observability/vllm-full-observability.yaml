@@ -30,7 +30,6 @@ spec:
 
   services:
     Frontend:
-      dynamoNamespace: vllm-full-obs
       componentType: frontend
       replicas: 1
       extraPodSpec:
@@ -57,7 +56,6 @@ spec:
               memory: "16Gi"
 
     VllmDecodeWorker:
-      dynamoNamespace: vllm-full-obs
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
@@ -95,7 +93,6 @@ spec:
             effect: "NoSchedule"
 
     VllmPrefillWorker:
-      dynamoNamespace: vllm-full-obs
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1

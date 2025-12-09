@@ -28,7 +28,6 @@ spec:
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
-      dynamoNamespace: trtllm-aggregated-high-performance
       componentType: frontend
       replicas: 1
       resources:
@@ -63,7 +62,6 @@ spec:
         periodSeconds: 10
         timeoutSeconds: 3
         failureThreshold: 60
-      dynamoNamespace: trtllm-aggregated-high-performance
       componentType: worker
       replicas: 1
       resources:

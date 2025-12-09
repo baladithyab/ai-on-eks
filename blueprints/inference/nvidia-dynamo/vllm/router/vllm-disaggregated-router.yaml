@@ -24,7 +24,6 @@ spec:
   backendFramework: vllm
   services:
     Frontend:
-      dynamoNamespace: vllm-disaggregated-router
       componentType: frontend
       replicas: 1
       livenessProbe:
@@ -67,7 +66,6 @@ spec:
         - name: DYN_ROUTER_MODE
           value: kv
     VllmDecodeWorker:
-      dynamoNamespace: vllm-disaggregated-router
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 2  # Multiple replicas to demonstrate KV Router benefits
@@ -113,7 +111,6 @@ spec:
             # Enable prefix caching for better KV Router performance
             - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B --enable-prefix-caching 2>&1 | tee /tmp/vllm-decode.log"
     VllmPrefillWorker:
-      dynamoNamespace: vllm-disaggregated-router
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1

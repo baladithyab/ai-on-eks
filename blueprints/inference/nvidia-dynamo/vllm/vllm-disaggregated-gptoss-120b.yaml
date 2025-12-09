@@ -35,7 +35,6 @@ spec:
 
   services:
     Frontend:
-      dynamoNamespace: gptoss-120b
       componentType: frontend
       replicas: 1
       volumeMounts:
@@ -46,7 +45,6 @@ spec:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
 
     VllmDecodeWorker:
-      dynamoNamespace: gptoss-120b
       componentType: worker
       subComponentType: decode
       replicas: 1
@@ -82,7 +80,6 @@ spec:
             - harmony
 
     VllmPrefillWorker:
-      dynamoNamespace: gptoss-120b
       componentType: worker
       subComponentType: prefill
       replicas: 1

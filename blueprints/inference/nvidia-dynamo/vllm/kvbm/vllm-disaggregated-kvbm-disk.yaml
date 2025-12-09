@@ -15,7 +15,6 @@ spec:
   backendFramework: vllm
   services:
     Frontend:
-      dynamoNamespace: vllm-kvbm-disk
       componentType: frontend
       replicas: 1
       extraPodSpec:
@@ -38,7 +37,6 @@ spec:
               memory: "16Gi"
 
     VllmDecodeWorker:
-      dynamoNamespace: vllm-kvbm-disk
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
@@ -97,7 +95,6 @@ spec:
             effect: "NoSchedule"
 
     VllmPrefillWorker:
-      dynamoNamespace: vllm-kvbm-disk
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
