@@ -6,6 +6,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
+# enable_volcano                  = true
 # GPU Operator disabled - Bottlerocket NVIDIA AMI includes pre-installed:
 # - NVIDIA driver, container toolkit, device plugin, and CDI specs
 # The GPU Operator conflicts with Bottlerocket's CDI-based runtime
