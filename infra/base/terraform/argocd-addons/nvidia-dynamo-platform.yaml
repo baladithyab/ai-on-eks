@@ -49,12 +49,12 @@ spec:
         #
         # WORKAROUND: Disable Grove until a fixed version is released.
         grove:
-          enabled: false  # Disabled due to v0.1.0-alpha.3 cert rotation bug
+          enabled: ${dynamo_enable_grove}
 
         # Kai Scheduler via Dynamo (v0.9.4)
         # Provides GPU-aware scheduling with queue management
         kai-scheduler:
-          enabled: true
+          enabled: ${dynamo_enable_kai_scheduler}
           global:
             gpuSharing: true
             clusterAutoscaling: true
