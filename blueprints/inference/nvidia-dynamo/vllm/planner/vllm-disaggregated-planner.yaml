@@ -76,7 +76,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
@@ -99,7 +99,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/src/dynamo/planner
           command:
             - /bin/sh
@@ -152,7 +152,7 @@ spec:
               port: 9090
             periodSeconds: 10
             failureThreshold: 60
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
@@ -198,7 +198,7 @@ spec:
               port: 9090
             periodSeconds: 10
             failureThreshold: 60
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh

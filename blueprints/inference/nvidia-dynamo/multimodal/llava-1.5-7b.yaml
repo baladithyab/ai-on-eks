@@ -44,7 +44,7 @@ spec:
           memory: "8Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
 
     EncodeWorker:
       envFromSecret: hf-token-secret
@@ -64,7 +64,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/examples/multimodal
           command:
             - /bin/sh
@@ -94,7 +94,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/examples/multimodal
           command:
             - /bin/sh
@@ -120,7 +120,7 @@ spec:
           memory: "16Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/examples/multimodal
           command:
             - /bin/sh

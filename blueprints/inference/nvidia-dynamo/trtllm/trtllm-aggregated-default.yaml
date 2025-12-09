@@ -67,7 +67,7 @@ spec:
           memory: "2Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
@@ -115,7 +115,7 @@ spec:
             configMap:
               name: trtllm-agg-config
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/trtllm
           startupProbe:
             httpGet:

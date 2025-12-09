@@ -46,7 +46,7 @@ spec:
         mainContainer:
           # NOTE: The 'dynamo' base container doesn't exist on NGC.
           # Using vllm-runtime which includes the dynamo Python libraries.
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/examples/custom_backend/hello_world/
           command:
             - /bin/sh
@@ -90,7 +90,7 @@ spec:
         mainContainer:
           # NOTE: The 'dynamo' base container doesn't exist on NGC.
           # Using vllm-runtime which includes the dynamo Python libraries.
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/examples/custom_backend/hello_world/
           command:
             - /bin/sh

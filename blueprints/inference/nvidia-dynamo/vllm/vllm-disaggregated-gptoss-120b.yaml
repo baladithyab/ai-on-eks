@@ -43,7 +43,7 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
 
     VllmDecodeWorker:
       dynamoNamespace: gptoss-120b
@@ -60,7 +60,7 @@ spec:
         size: 48Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           command:
           - python3
@@ -96,7 +96,7 @@ spec:
         size: 48Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           command:
           - python3

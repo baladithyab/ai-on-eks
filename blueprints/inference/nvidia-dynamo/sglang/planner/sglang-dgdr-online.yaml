@@ -22,7 +22,7 @@ spec:
   backend: sglang
 
   profilingConfig:
-    profilerImage: "nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0"
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1"
     config:
       # Sweep/profiling configuration
       sweep:
@@ -37,7 +37,7 @@ spec:
         itl: 20.0      # Inter-Token Latency (ms)
 
   deploymentOverrides:
-    workersImage: "nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0"
+    workersImage: "nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1"
 
   # Auto-deploy after profiling
   autoApply: true

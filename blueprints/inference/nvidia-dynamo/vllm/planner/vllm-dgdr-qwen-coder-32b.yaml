@@ -25,7 +25,7 @@ spec:
   backend: vllm
 
   profilingConfig:
-    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0"
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1"
     # Reference ConfigMap with EFS cache configuration
     configMapRef:
       name: qwen-coder-32b-dgd-config
@@ -51,7 +51,7 @@ spec:
         itl: 30.0      # Inter-Token Latency (ms)
 
   deploymentOverrides:
-    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0"
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1"
 
   autoApply: true
 ---
@@ -84,7 +84,7 @@ data:
               mountPoint: /models
           extraPodSpec:
             mainContainer:
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
         VllmDecodeWorker:
           dynamoNamespace: vllm-disagg
           envFromSecret: hf-token-secret
@@ -99,7 +99,7 @@ data:
               gpu: "2"
           extraPodSpec:
             mainContainer:
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
               workingDir: /workspace/components/backends/vllm
               command:
               - python3
@@ -122,7 +122,7 @@ data:
               gpu: "2"
           extraPodSpec:
             mainContainer:
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
               workingDir: /workspace/components/backends/vllm
               command:
               - python3

@@ -40,7 +40,7 @@ NAMESPACE="dynamo-cloud"
 
 # Dynamo version management
 TFVARS_FILE="${SCRIPT_DIR}/../../../infra/nvidia-dynamo/terraform/blueprint.tfvars"
-DEFAULT_VERSION="v0.7.0"  # Fallback if tfvars file not found
+DEFAULT_VERSION="v0.7.0.post1"  # Fallback if tfvars file not found
 VERSION_SOURCE=""  # Track where version came from
 
 # Utility functions

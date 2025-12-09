@@ -32,7 +32,7 @@ spec:
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1
           resources:
             requests:
               cpu: "4"
@@ -57,7 +57,7 @@ spec:
           memory: "100Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/sglang
           command:
           - python3
@@ -103,7 +103,7 @@ spec:
           memory: "100Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/sglang
           command:
           - python3
