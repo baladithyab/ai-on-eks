@@ -53,7 +53,7 @@ Frontend:
     nodeSelector:
       karpenter.sh/nodepool: cpu-karpenter  # CPU-only node
     mainContainer:
-      image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0
+      image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1
       workingDir: /workspace/components/backends/sglang
       args:
         # Clear namespace for clean startup
@@ -85,7 +85,7 @@ SGLangWorker:
       operator: Exists
       effect: NoSchedule
     mainContainer:
-      image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0
+      image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1
       workingDir: /workspace/components/backends/sglang
       args:
         - "python3"

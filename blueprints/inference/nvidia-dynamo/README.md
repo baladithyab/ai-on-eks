@@ -204,9 +204,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 ### NGC Container Images
 All examples use official NVIDIA NGC prebuilt containers with full source code:
-- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0`
-- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0`
-- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.0`
+- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1`
+- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1`
+- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.0.post1`
 
 **Key Features:**
 - ✅ **Full Source Included**: All Python code available at `/workspace/`
@@ -319,7 +319,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -337,7 +337,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           args: ["python3", "-m", "dynamo.vllm", "--model", "Qwen/Qwen3-0.6B"]
 ```
 
@@ -576,7 +576,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter  # CPU-only frontend
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -598,7 +598,7 @@ spec:
           operator: Exists
           effect: NoSchedule
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.vllm", "--model", "your-model-here"]
 ```
