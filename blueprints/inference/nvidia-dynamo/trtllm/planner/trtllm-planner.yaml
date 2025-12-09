@@ -240,9 +240,7 @@ spec:
             - engine_configs/decode.yaml
             - --disaggregation-mode
             - decode
-            - --disaggregation-strategy
-            - decode_first
-    
+
     TRTLLMPrefillWorker:
       dynamoNamespace: trtllm-planner
       envFromSecret: hf-token-secret
@@ -306,6 +304,4 @@ spec:
             - engine_configs/prefill.yaml
             - --disaggregation-mode
             - prefill
-            - --disaggregation-strategy
-            - decode_first
 

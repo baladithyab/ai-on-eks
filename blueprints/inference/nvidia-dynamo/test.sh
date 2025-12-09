@@ -170,30 +170,64 @@ section "Prerequisites Check"
 # Check if example is deployed
 # Try exact match first, then try alternative naming patterns
 DEPLOYMENT_NAME=""
-if kubectl get dynamographdeployment "$EXAMPLE" -n "${NAMESPACE}" >/dev/null 2>&1; then
-    DEPLOYMENT_NAME="$EXAMPLE"
-else
-    # Try common naming variations (some YAMLs have different deployment names than filenames)
-    for alt in \
-        "$(echo "$EXAMPLE" | sed 's/-disaggregated-kvbm-disk/-kvbm-disk/')" \
-        "$(echo "$EXAMPLE" | sed 's/-aggregated-router/-aggregated-kv-router/')" \
-        "$(echo "$EXAMPLE" | sed 's/llava-1.5-7b/llava/')" \
-        "$(echo "$EXAMPLE" | sed 's/qwen2.5-vl-7b/qwen-vl/')" \
-        "$(echo "$EXAMPLE" | sed 's/vllm-otel-tracing/vllm-otel/')" \
-        "$(echo "$EXAMPLE" | sed 's/vllm-audit-logging/vllm-audit/')" \
-        "$(echo "$EXAMPLE" | sed 's/vllm-full-observability/vllm-full-obs/')"; do
-        if kubectl get dynamographdeployment "$alt" -n "${NAMESPACE}" >/dev/null 2>&1; then
-            DEPLOYMENT_NAME="$alt"
-            info "Found deployment with alternative name: ${DEPLOYMENT_NAME}"
-            break
+IS_DGDR=false
+
+# Check if this is a DGDR (DynamoGraphDeploymentRequest) example
+if [[ "$EXAMPLE" == *"dgdr"* ]]; then
+    IS_DGDR=true
+    # For DGDR, check the DGDR status and find the created DGD
+    DGDR_NAME=$(echo "$EXAMPLE" | sed 's/vllm-dgdr-/vllm-/')
+    if kubectl get dgdr "$DGDR_NAME" -n "${NAMESPACE}" >/dev/null 2>&1; then
+        # Get the DGD created by this DGDR
+        DGDR_STATUS=$(kubectl get dgdr "$DGDR_NAME" -n "${NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+        if [ "$DGDR_STATUS" = "Ready" ]; then
+            # Find the DGD created by this DGDR
+            DEPLOYMENT_NAME=$(kubectl get dgd -n "${NAMESPACE}" -o jsonpath='{.items[?(@.metadata.ownerReferences[0].name=="'"$DGDR_NAME"'")].metadata.name}' 2>/dev/null)
+            if [ -z "$DEPLOYMENT_NAME" ]; then
+                # Try to find by label or naming convention
+                DEPLOYMENT_NAME=$(kubectl get dgd -n "${NAMESPACE}" --no-headers -o custom-columns=":metadata.name" 2>/dev/null | grep -E "^${DGDR_NAME}" | head -1)
+            fi
+        else
+            warn "DGDR '${DGDR_NAME}' is in status: ${DGDR_STATUS}"
+            info "DGDR must be in 'Ready' status to test. Current status: ${DGDR_STATUS}"
+            info "Check DGDR status: kubectl describe dgdr ${DGDR_NAME} -n ${NAMESPACE}"
+            exit 1
         fi
-    done
+    fi
+fi
+
+if [ -z "$DEPLOYMENT_NAME" ]; then
+    if kubectl get dynamographdeployment "$EXAMPLE" -n "${NAMESPACE}" >/dev/null 2>&1; then
+        DEPLOYMENT_NAME="$EXAMPLE"
+    else
+        # Try common naming variations (some YAMLs have different deployment names than filenames)
+        for alt in \
+            "$(echo "$EXAMPLE" | sed 's/-disaggregated-kvbm-disk/-kvbm-disk/')" \
+            "$(echo "$EXAMPLE" | sed 's/-aggregated-router/-aggregated-kv-router/')" \
+            "$(echo "$EXAMPLE" | sed 's/llava-1.5-7b/llava/')" \
+            "$(echo "$EXAMPLE" | sed 's/qwen2.5-vl-7b/qwen-vl/')" \
+            "$(echo "$EXAMPLE" | sed 's/vllm-otel-tracing/vllm-otel/')" \
+            "$(echo "$EXAMPLE" | sed 's/vllm-audit-logging/vllm-audit/')" \
+            "$(echo "$EXAMPLE" | sed 's/vllm-full-observability/vllm-full-obs/')" \
+            "$(echo "$EXAMPLE" | sed 's/vllm-disaggregated-70b/vllm-70b-disagg/')" \
+            "$(echo "$EXAMPLE" | sed 's/vllm-disaggregated-olmo-32b/vllm-olmo-32b-disagg/')" \
+            "$(echo "$EXAMPLE" | sed 's/vllm-disaggregated-gptoss-120b/vllm-gptoss-120b-disagg/')"; do
+            if kubectl get dynamographdeployment "$alt" -n "${NAMESPACE}" >/dev/null 2>&1; then
+                DEPLOYMENT_NAME="$alt"
+                info "Found deployment with alternative name: ${DEPLOYMENT_NAME}"
+                break
+            fi
+        done
+    fi
 fi
 
 if [ -z "$DEPLOYMENT_NAME" ]; then
     error "Example '${EXAMPLE}' is not deployed in namespace '${NAMESPACE}'"
     info "Deploy it first: ./deploy.sh ${EXAMPLE}"
     info "Tried variants: $EXAMPLE and common alternatives"
+    if [ "$IS_DGDR" = true ]; then
+        info "For DGDR examples, check profiling status: kubectl get dgdr -n ${NAMESPACE}"
+    fi
     exit 1
 fi
 success "Example '${DEPLOYMENT_NAME}' is deployed"

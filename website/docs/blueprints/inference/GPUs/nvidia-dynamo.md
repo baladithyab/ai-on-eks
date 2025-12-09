@@ -1208,6 +1208,195 @@ kubectl logs -n dynamo-cloud -l app=vllm-disaggregated-planner-planner -f
 
 # Expected output:
 # [INFO] Current TTFT: 120ms, Target: 100ms
+# [INFO] Scaling prefill workers: 1 -> 2
+```
+
+### DynamoGraphDeploymentRequest (DGDR) - Automated Profiling
+
+**Available Since**: Dynamo v0.7.0+
+
+DGDR automates the entire profiling and deployment workflow. Instead of manually running profiling scripts and creating DGD manifests, DGDR handles everything automatically.
+
+**Key Benefits:**
+- ✅ Automated profiling with AIPerf or AI Configurator
+- ✅ Optimal GPU configuration discovery
+- ✅ SLA-based deployment generation
+- ✅ Single manifest for profiling + deployment
+
+**Architecture:**
+
+```text
+DGDR Manifest → Profiler Pod → AIPerf Benchmarks → Optimal Config → DGD Creation
+                     ↓
+              [Sweep GPU configs]
+              [Measure TTFT/ITL]
+              [Find best TP setting]
+```
+
+**Profiling Modes:**
+
+| Mode | Method | Time | Hardware Support |
+|------|--------|------|------------------|
+| **Online (AIPerf)** | Real GPU benchmarks | 2-5 hours | Any GPU |
+| **AI Configurator** | Pre-computed lookup | ~30 seconds | A100, H100, H200 only |
+
+:::warning Hardware Compatibility
+**AI Configurator** only works with NVIDIA's pre-profiled hardware (A100, H100, H200, B100/B200). For other GPUs like **L40S (g6e instances)** or **A10G (g5 instances)**, you must use **Online Profiling** with AIPerf.
+:::
+
+**Basic DGDR Configuration:**
+
+```yaml
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: my-model
+  namespace: dynamo-cloud
+spec:
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0"
+    config:
+      deployment:
+        timeout: 2400  # Model loading timeout (seconds)
+      hardware:
+        min_num_gpus_per_engine: 2
+        max_num_gpus_per_engine: 4
+        num_gpus_per_node: 4
+      sweep:
+        use_ai_configurator: false  # Use AIPerf (online profiling)
+      sla:
+        isl: 2048      # Input sequence length
+        osl: 512       # Output sequence length
+        ttft: 300.0    # Time to First Token (ms)
+        itl: 30.0      # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0"
+
+  autoApply: true  # Auto-deploy after profiling
+```
+
+**Using ConfigMap for Advanced Configuration:**
+
+For large models or custom configurations (PVC mounts, HF tokens, custom args):
+
+```yaml
+# Step 1: Create ConfigMap with base DGD config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llama-70b-config
+  namespace: dynamo-cloud
+data:
+  disagg.yaml: |
+    pvcs:
+      - name: dynamo-shared-models
+        create: false
+    envFromSecret: hf-token-secret
+    envs:
+      - name: HF_HOME
+        value: "/models"
+    volumeMounts:
+      - name: dynamo-shared-models
+        mountPoint: /models
+    services:
+      VllmDecodeWorker:
+        args:
+          - --model
+          - meta-llama/Llama-3.3-70B-Instruct
+          - --max-model-len
+          - "8192"
+          - --enforce-eager
+---
+# Step 2: Reference ConfigMap in DGDR
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-70b
+  namespace: dynamo-cloud
+spec:
+  model: meta-llama/Llama-3.3-70B-Instruct
+  backend: vllm
+  profilingConfig:
+    configMapRef:
+      name: llama-70b-config
+      key: disagg.yaml
+    config:
+      hardware:
+        min_num_gpus_per_engine: 4
+        max_num_gpus_per_engine: 8
+```
+
+**Deploying DGDR:**
+
+```bash
+# Deploy DGDR (starts profiling automatically)
+kubectl apply -f vllm-dgdr-qwen-coder-32b.yaml -n dynamo-cloud
+
+# Monitor profiling progress
+kubectl get dgdr -n dynamo-cloud -w
+
+# Watch profiler logs
+kubectl logs -n dynamo-cloud -l nvidia.com/component=profiler -f
+
+# Status progression: Pending → Profiling → Deploying → Ready
+```
+
+**Available DGDR Blueprints:**
+
+| Blueprint | Model | Size | GPUs | Time | EFS Cache |
+|-----------|-------|------|------|------|-----------|
+| `vllm-dgdr-online.yaml` | Qwen3-0.6B | 0.6B | 1 | ~30 min | ❌ |
+| `vllm-dgdr-qwen-coder-32b.yaml` | Qwen2.5-Coder-32B | 32B | 2-4 | 2-3 hrs | ✅ |
+| `vllm-dgdr-deepseek-32b.yaml` | DeepSeek-R1-Distill-32B | 32B | 2-4 | 2-3 hrs | ✅ |
+| `vllm-dgdr-olmo-32b.yaml` | OLMo-3-32B-Think | 32B | 2-4 | 2-3 hrs | ✅ |
+| `vllm-dgdr-gptoss-20b.yaml` | GPT-OSS-20B | 20B | 1-2 | 1-2 hrs | ✅ |
+
+:::info EFS Model Caching
+Blueprints with EFS caching include a ConfigMap that configures:
+- `dynamo-shared-models` PVC mount at `/models`
+- `HF_HOME=/models` environment variable
+- Model weights are cached in EFS and shared across pods
+
+This significantly reduces model loading time for subsequent deployments.
+:::
+
+**Direct DGD Deployment (Bypass Profiling):**
+
+When profiling isn't practical or you know your configuration:
+
+| Blueprint | Model | GPUs | Use Case |
+|-----------|-------|------|----------|
+| `vllm-disaggregated-70b.yaml` | Llama-3.3-70B | 16 (TP=8) | Large model, known config |
+| `vllm-disaggregated-olmo-32b.yaml` | OLMo-3-32B-Think | 8 (TP=4) | Open-source reasoning |
+| `vllm-disaggregated-gptoss-120b.yaml` | GPT-OSS-120B | 16 (TP=8) | Reasoning + tool calling |
+
+**GPT-OSS Model Notes:**
+
+GPT-OSS is OpenAI's open-source reasoning model with tool calling support. It requires special parsers:
+
+```yaml
+args:
+  - --dyn-reasoning-parser
+  - gpt_oss
+  - --dyn-tool-call-parser
+  - harmony
+```
+
+**Troubleshooting DGDR:**
+
+```bash
+# Check DGDR status
+kubectl describe dgdr <name> -n dynamo-cloud
+
+# Common issues:
+# - Timeout: Increase deployment.timeout for large models
+# - OOM: Increase min_num_gpus_per_engine or reduce max_context_length
+# - AIPerf extraction fails: Use direct DGD deployment as workaround
+```
 
 ### AIPerf Benchmarking
 
@@ -1237,11 +1426,6 @@ kubectl exec -it <worker-pod> -n dynamo-cloud -- \
 # - Latency (P50, P95, P99)
 # - Time-to-First-Token (TTFT)
 # - Inter-Token Latency (ITL)
-```
-
-# [INFO] Scaling prefill workers: 1 -> 2
-# [INFO] Current ITL: 15ms, Target: 10ms
-# [INFO] Scaling decode workers: 2 -> 3
 ```
 
 ### Multimodal Support

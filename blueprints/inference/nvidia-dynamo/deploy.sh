@@ -104,12 +104,20 @@ AVAILABLE_EXAMPLES=(
     "hello-world:Simple CPU-only example for testing Dynamo functionality"
     "vllm-aggregated-default:vLLM aggregated serving with default settings"
     "vllm-disaggregated-default:vLLM disaggregated serving (separate prefill/decode workers)"
+    "vllm-disaggregated-70b:vLLM disaggregated Llama-3.3-70B (TP=8, 16 GPUs)"
+    "vllm-disaggregated-olmo-32b:vLLM disaggregated OLMo-3-32B-Think (TP=4, 8 GPUs)"
+    "vllm-disaggregated-gptoss-120b:vLLM disaggregated GPT-OSS-120B (TP=8, 16 GPUs)"
     "vllm-router:vLLM with KV-aware routing (3 variants)"
     "vllm-aggregated-router:vLLM aggregated with KV router"
     "vllm-disaggregated-router:vLLM disaggregated with KV router"
     "vllm-aggregated-kvbm:vLLM with KV Block Manager (disk offloading)"
     "vllm-disaggregated-kvbm-disk:vLLM disaggregated with KVBM disk offloading"
     "vllm-disaggregated-planner:vLLM with SLA-based automatic scaling"
+    "vllm-dgdr-online:vLLM DGDR online profiling (Qwen3-0.6B)"
+    "vllm-dgdr-qwen-coder-32b:vLLM DGDR profiling (Qwen2.5-Coder-32B)"
+    "vllm-dgdr-deepseek-32b:vLLM DGDR profiling (DeepSeek-R1-Distill-32B)"
+    "vllm-dgdr-olmo-32b:vLLM DGDR profiling (OLMo-3-32B-Think)"
+    "vllm-dgdr-gptoss-20b:vLLM DGDR profiling (GPT-OSS-20B)"
     "sglang-aggregated-default:SGLang aggregated serving with RadixAttention"
     "sglang-disaggregated-default:SGLang disaggregated serving"
     "sglang-router:SGLang with KV-aware routing"
@@ -159,7 +167,7 @@ EXAMPLE=""
 if [ $# -gt 0 ]; then
     EXAMPLE="$1"
     # Validate provided example
-    VALID_EXAMPLES=("hello-world" "vllm-aggregated-default" "vllm-disaggregated-default" "vllm-router" "vllm-aggregated-router" "vllm-disaggregated-router" "vllm-aggregated-kvbm" "vllm-disaggregated-kvbm-disk" "vllm-disaggregated-planner" "sglang-aggregated-default" "sglang-disaggregated-default" "sglang-router" "sglang-planner" "trtllm-aggregated-default" "trtllm-aggregated-high-performance" "trtllm-disaggregated-default" "trtllm-router" "trtllm-planner" "multi-replica-vllm" "llava-1.5-7b" "qwen2.5-vl-7b" "vllm-disaggregated-multinode" "sglang-disaggregated-multinode" "trtllm-disaggregated-multinode" "vllm-otel-tracing" "vllm-audit-logging" "vllm-full-observability")
+    VALID_EXAMPLES=("hello-world" "vllm-aggregated-default" "vllm-disaggregated-default" "vllm-disaggregated-70b" "vllm-disaggregated-olmo-32b" "vllm-disaggregated-gptoss-120b" "vllm-router" "vllm-aggregated-router" "vllm-disaggregated-router" "vllm-aggregated-kvbm" "vllm-disaggregated-kvbm-disk" "vllm-disaggregated-planner" "vllm-dgdr-online" "vllm-dgdr-qwen-coder-32b" "vllm-dgdr-deepseek-32b" "vllm-dgdr-olmo-32b" "vllm-dgdr-gptoss-20b" "sglang-aggregated-default" "sglang-disaggregated-default" "sglang-router" "sglang-planner" "trtllm-aggregated-default" "trtllm-aggregated-high-performance" "trtllm-disaggregated-default" "trtllm-router" "trtllm-planner" "multi-replica-vllm" "llava-1.5-7b" "qwen2.5-vl-7b" "vllm-disaggregated-multinode" "sglang-disaggregated-multinode" "trtllm-disaggregated-multinode" "vllm-otel-tracing" "vllm-audit-logging" "vllm-full-observability")
     if [[ ! " ${VALID_EXAMPLES[@]} " =~ " ${EXAMPLE} " ]]; then
         error "Invalid example: ${EXAMPLE}"
         info "Available examples: ${VALID_EXAMPLES[*]}"
@@ -193,7 +201,7 @@ get_example_path() {
     local example="$1"
     case "$example" in
         # vLLM examples
-        "vllm-aggregated-default"|"vllm-disaggregated-default")
+        "vllm-aggregated-default"|"vllm-disaggregated-default"|"vllm-disaggregated-70b"|"vllm-disaggregated-olmo-32b"|"vllm-disaggregated-gptoss-120b")
             echo "vllm"
             ;;
         "vllm-router"|"vllm-aggregated-router"|"vllm-disaggregated-router")
@@ -202,7 +210,7 @@ get_example_path() {
         "vllm-aggregated-kvbm"|"vllm-disaggregated-kvbm-disk")
             echo "vllm/kvbm"
             ;;
-        "vllm-disaggregated-planner")
+        "vllm-disaggregated-planner"|"vllm-dgdr-online"|"vllm-dgdr-qwen-coder-32b"|"vllm-dgdr-deepseek-32b"|"vllm-dgdr-olmo-32b"|"vllm-dgdr-gptoss-20b")
             echo "vllm/planner"
             ;;
         # SGLang examples

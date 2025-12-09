@@ -1,3 +1,30 @@
+# =============================================================================
+# NVIDIA GPU Operator - ArgoCD Application
+# =============================================================================
+#
+# IMPORTANT: Bottlerocket NVIDIA AMI Compatibility
+# ------------------------------------------------
+# When using Bottlerocket NVIDIA AMI (aws-k8s-*-nvidia), the GPU Operator
+# conflicts with Bottlerocket's built-in NVIDIA components. Bottlerocket
+# includes pre-installed:
+#   - NVIDIA driver
+#   - NVIDIA container toolkit (CDI mode)
+#   - NVIDIA device plugin (CDI-CRI mode)
+#   - CDI specs at /etc/cdi/nvidia.json
+#
+# The GPU Operator's device plugin uses different configuration than
+# Bottlerocket's built-in components, causing GPU allocation failures.
+#
+# RECOMMENDATION: Set enable_nvidia_gpu_operator=false in blueprint.tfvars
+# when using Bottlerocket NVIDIA AMI and rely on Bottlerocket's built-in
+# GPU support instead.
+#
+# If you must use GPU Operator with Bottlerocket, you need to:
+# 1. Disable toolkit (enabled: false) - Bottlerocket has it pre-installed
+# 2. Disable device plugin (enabled: false) - Use Bottlerocket's built-in
+# 3. Only use GFD, NFD, and DCGM exporter from GPU Operator
+# =============================================================================
+
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -187,27 +214,26 @@ spec:
                     - devices: [6, 7]
                       mig-enabled: false
 
-        # Device plugin configuration
+        # Device plugin configuration for Bottlerocket
+        # Use envvar mode - Bottlerocket's nvidia-container-runtime handles device injection
+        # via NVIDIA_VISIBLE_DEVICES environment variable
         devicePlugin:
           enabled: true
-          config:
-            name: ""
-            create: false
-            default: ""
-
-        # Enable container toolkit for proper CUDA library injection
-        # Required for Bottlerocket to inject libcuda.so into containers
-        toolkit:
-          enabled: true
           env:
-            - name: CONTAINERD_CONFIG
-              value: /etc/containerd/config.toml
-            - name: CONTAINERD_SOCKET
-              value: /run/containerd/containerd.sock
-            - name: CONTAINERD_RUNTIME_CLASS
-              value: nvidia
-            - name: CONTAINERD_SET_AS_DEFAULT
+            - name: PASS_DEVICE_SPECS
               value: "true"
+            - name: FAIL_ON_INIT_ERROR
+              value: "true"
+            - name: DEVICE_LIST_STRATEGY
+              value: "envvar"
+            - name: DEVICE_ID_STRATEGY
+              value: "uuid"
+
+        # Disable container toolkit for Bottlerocket
+        # Bottlerocket AMI comes with NVIDIA container toolkit pre-installed
+        # The toolkit container fails on Bottlerocket due to read-only filesystem
+        toolkit:
+          enabled: false
 
         # Node feature discovery
         nfd:

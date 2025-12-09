@@ -53,7 +53,6 @@ spec:
           gpu: "1"
           memory: "48Gi"
       extraPodSpec:
-        runtimeClassName: nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/examples/multimodal
@@ -96,7 +95,6 @@ spec:
         - name: DYN_KVBM_METRICS
           value: "true"
       extraPodSpec:
-        runtimeClassName: nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/examples/multimodal
@@ -139,7 +137,6 @@ spec:
           gpu: "1"
           memory: "24Gi"
       extraPodSpec:
-        runtimeClassName: nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
           workingDir: /workspace/examples/multimodal

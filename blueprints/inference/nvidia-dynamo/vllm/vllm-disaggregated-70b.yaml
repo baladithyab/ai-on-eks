@@ -1,0 +1,100 @@
+# vLLM Disaggregated Deployment for Llama 3.3 70B
+# Uses EFS-cached model weights with --enforce-eager to avoid CUDA graph OOM
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-70b-disagg
+  namespace: dynamo-cloud
+spec:
+  # Use shared HF cache from EFS
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+  
+  # Set HF_HOME and offline mode for all services
+  envs:
+    - name: HF_HOME
+      value: "/models"
+    - name: HF_HUB_OFFLINE
+      value: "1"
+  
+  services:
+    Frontend:
+      dynamoNamespace: llama-70b
+      componentType: frontend
+      replicas: 1
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+    
+    VllmDecodeWorker:
+      dynamoNamespace: llama-70b
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      resources:
+        limits:
+          gpu: "8"
+      sharedMemory:
+        size: 40Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - meta-llama/Llama-3.3-70B-Instruct
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --enforce-eager
+            - --tensor-parallel-size
+            - "8"
+
+    VllmPrefillWorker:
+      dynamoNamespace: llama-70b
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      resources:
+        limits:
+          gpu: "8"
+      sharedMemory:
+        size: 40Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - meta-llama/Llama-3.3-70B-Instruct
+            - --is-prefill-worker
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --enforce-eager
+            - --tensor-parallel-size
+            - "8"
+

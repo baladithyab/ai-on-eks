@@ -6,7 +6,10 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-enable_nvidia_gpu_operator       = true
+# GPU Operator disabled - Bottlerocket NVIDIA AMI includes pre-installed:
+# - NVIDIA driver, container toolkit, device plugin, and CDI specs
+# The GPU Operator conflicts with Bottlerocket's CDI-based runtime
+enable_nvidia_gpu_operator       = false
 dynamo_stack_version             = "v0.7.0"
 
 #---------------------------------------------------------------
@@ -39,8 +42,8 @@ dynamo_shared_cache_size = "500Gi"  # Size of shared model cache PVC
 # Get NGC API key from: https://ngc.nvidia.com/setup/api-key
 # Get HuggingFace token from: https://huggingface.co/settings/tokens
 #---------------------------------------------------------------
-ngc_api_key       = "REPLACE_WITH_YOUR_NGC_API_KEY"
-huggingface_token = "REPLACE_WITH_YOUR_HUGGINGFACE_TOKEN"
+ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
+huggingface_token = "YOUR_HF_TOKEN_HERE"
 
 #---------------------------------------------------------------
 # Platform-Level Features (Optional)
@@ -57,7 +60,7 @@ huggingface_token = "REPLACE_WITH_YOUR_HUGGINGFACE_TOKEN"
 # WORKAROUND: Disable Grove until a fixed version is released.
 #---------------------------------------------------------------
 dynamo_enable_grove         = false  # DISABLED - v0.1.0-alpha.3 has cert rotation bug
-dynamo_enable_kai_scheduler = true   # ENABLED - Dynamo-integrated v0.9.4 (GPU-aware scheduling)
+dynamo_enable_kai_scheduler = false  # DISABLED - Stabilizing configuration
 
 #---------------------------------------------------------------
 # Optional Overrides

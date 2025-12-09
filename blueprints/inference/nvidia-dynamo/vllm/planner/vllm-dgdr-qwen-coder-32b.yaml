@@ -1,0 +1,135 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM DGDR - Qwen2.5-Coder-32B-Instruct Online Profiling with EFS Cache
+#
+# This profiles and auto-deploys Qwen2.5-Coder-32B-Instruct for code generation:
+# - EFS-backed model cache (dynamo-shared-models PVC)
+# - No gated model access required (open weights)
+# - Requires 2-4 GPUs with ~80GB combined (TP=2 on g6e.12xlarge recommended)
+# - Optimized for code completion and generation tasks
+#
+# Expected profiling time: 2-3 hours
+#
+# Prerequisites:
+# - dynamo-shared-models PVC created (EFS-backed)
+# - g6e.12xlarge or similar (4x L40S, 192GB total VRAM)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-qwen-coder-32b
+  namespace: dynamo-cloud
+spec:
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0"
+    # Reference ConfigMap with EFS cache configuration
+    configMapRef:
+      name: qwen-coder-32b-dgd-config
+      key: disagg.yaml
+    config:
+      deployment:
+        # Model loading timeout (32B takes ~15-20 mins to download + load)
+        # Increased to 60 minutes for decode interpolation phase
+        timeout: 3600  # 60 minutes
+      hardware:
+        # 32B model needs ~64GB VRAM, fits on 2x L40S (96GB)
+        min_num_gpus_per_engine: 2
+        max_num_gpus_per_engine: 4
+        num_gpus_per_node: 4
+      sweep:
+        # Online profiling (AIPerf benchmarks) - required for L40S
+        use_ai_configurator: false
+      sla:
+        # Code generation optimized SLA targets
+        isl: 2048      # Typical code context
+        osl: 256       # Code completion length
+        ttft: 300.0    # Time To First Token (ms)
+        itl: 30.0      # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0"
+
+  autoApply: true
+---
+# ConfigMap with full DGD base config for Qwen2.5-Coder-32B with EFS cache
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qwen-coder-32b-dgd-config
+  namespace: dynamo-cloud
+data:
+  disagg.yaml: |
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeployment
+    metadata:
+      name: vllm-disagg
+    spec:
+      pvcs:
+        - name: dynamo-shared-models
+          create: false
+      envs:
+        - name: HF_HOME
+          value: "/models"
+      services:
+        Frontend:
+          dynamoNamespace: vllm-disagg
+          componentType: frontend
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+        VllmDecodeWorker:
+          dynamoNamespace: vllm-disagg
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: decode
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            limits:
+              gpu: "2"
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - Qwen/Qwen2.5-Coder-32B-Instruct
+        VllmPrefillWorker:
+          dynamoNamespace: vllm-disagg
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: prefill
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            limits:
+              gpu: "2"
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - Qwen/Qwen2.5-Coder-32B-Instruct
+                - --is-prefill-worker
+
