@@ -143,6 +143,17 @@ All examples have been comprehensively tested on EKS with Karpenter auto-provisi
 | **[trtllm](trtllm/)** disaggregated | TRT-LLM disaggregated | ❌ | ✅ Fully Working | Fixed case sensitivity bug |
 | **[sglang](sglang/)** disaggregated | Disaggregated with RadixAttention | ❌ | ⚠️ Known Issue | Use aggregated instead |
 
+### Multi-Node Examples (Large Models)
+| Example | Description | Orchestration | Test Status | Notes |
+|---------|-------------|---------------|-------------|-------|
+| **[lws-multinode](lws-multinode/)** | LeaderWorkerSet tensor parallel | LWS + Volcano | 📝 Documentation | Manual LWS/Volcano install required |
+| **[multi-node](multi-node/)** | Grove-based multi-node | Grove (alpha) | ⚠️ Experimental | Grove has stability issues |
+
+### Model Management
+| Resource | Description | Notes |
+|----------|-------------|-------|
+| **[model-management](model-management/)** | DynamoModel CRD examples | Base models and LoRA adapters |
+
 ## Deployment Guide
 
 ### Automated Deployment
@@ -261,7 +272,27 @@ args: ["--router-mode kv --kv-overlap-score-weight 1.0"]
 Dynamo supports mixing different inference backends:
 - **Cross-Discovery**: SGLang frontend can serve vLLM models
 - **Model Aggregation**: Single API serving multiple backends
-- **Namespace Isolation**: Use `dynamoNamespace` for logical separation
+- **Namespace Isolation**: Use `dynamoNamespace` for logical separation (⚠️ deprecated in v0.7.0+)
+
+### Multi-Node Inference Options
+
+For large models requiring multiple GPUs across nodes, Dynamo provides two orchestration approaches:
+
+| Approach | Status | Use Case | Documentation |
+|----------|--------|----------|---------------|
+| **Grove** | ⚠️ Alpha (v0.1.0-alpha.3) | Built-in orchestration | Disabled by default due to stability issues |
+| **LeaderWorkerSet (LWS)** | ✅ Stable | Kubernetes-native | [lws-multinode/README.md](lws-multinode/README.md) |
+
+**Recommendation**: Use LeaderWorkerSet for production multi-node deployments until Grove stabilizes. See [lws-multinode/](lws-multinode/) for setup instructions.
+
+### Model Management (DynamoModel CRD)
+
+The `DynamoModel` CRD provides lifecycle management for models and adapters:
+- **Base Models**: Register and track model versions
+- **LoRA Adapters**: Extend base models with fine-tuned adapters
+- **Version Tracking**: Maintain model metadata and provenance
+
+See [model-management/](model-management/) for examples and [DynamoModel Documentation](../../infra/nvidia-dynamo/README.md#dynamomodel-crd) for details.
 
 ## Understanding Example Structure
 
@@ -1032,6 +1063,20 @@ Modified `blueprints/inference/nvidia-dynamo/trtllm/trtllm-disaggregated-default
 - ✅ **Fixed** in this repository
 - ✅ **Fully functional** after fix
 - 📝 **Recommended**: NVIDIA should update official manifests
+
+---
+
+### `dynamoNamespace` Field Deprecation Notice
+
+**Status**: ⚠️ Deprecated in v0.7.0+
+
+The `dynamoNamespace` field in DynamoGraphDeployment specs is officially deprecated. From the CRD schema:
+
+> *"DynamoNamespace is deprecated and will be removed in a future version. The DGD Kubernetes namespace and DynamoGraphDeployment name are used to construct the Dynamo namespace for each component."*
+
+**Impact**: The field still works but generates warnings. All 103 usages in existing blueprints will be removed in a future update.
+
+**Migration**: No action required - the system auto-derives namespace from `{k8s-namespace}/{dgd-name}`.
 
 ---
 
