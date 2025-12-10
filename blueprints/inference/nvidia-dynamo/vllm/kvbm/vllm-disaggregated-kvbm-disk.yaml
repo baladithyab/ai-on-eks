@@ -9,7 +9,7 @@
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: vllm-kvbm-disk
+  name: vllm-disaggregated-kvbm-disk
   namespace: dynamo-cloud
 spec:
   backendFramework: vllm

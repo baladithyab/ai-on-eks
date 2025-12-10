@@ -115,14 +115,33 @@ Both NGC API key and HuggingFace token are **required** and must be configured i
 
 ## 📋 Comprehensive Testing Results
 
-**See [TESTING_RESULTS.md](TESTING_RESULTS.md) for detailed testing results of all deployment examples.**
+![Test Status](https://img.shields.io/badge/Tests-7%2F7%20Passed-brightgreen) ![Platform](https://img.shields.io/badge/Platform-Production%20Ready-success) ![Version](https://img.shields.io/badge/Dynamo-v0.7.0.post1-blue)
 
-All examples have been comprehensively tested on EKS with Karpenter auto-provisioning. The testing document includes:
-- ✅ Fully working deployments with test results
-- ⚠️ Known issues and workarounds
-- 🔬 NIXL backend comprehensive testing across all engines
-- 🐛 Bug reports and fixes
-- 🎯 Production recommendations
+**See [DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md](../../../../DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md) for detailed testing results.**
+
+### Test Summary (December 2025)
+
+| Tier | Blueprints Tested | Pass Rate | Key Validations |
+|------|-------------------|-----------|-----------------|
+| **Tier 1** | hello-world, vllm-aggregated | 2/2 (100%) | Basic deployment, model loading |
+| **Tier 2** | vllm-disaggregated, vllm-router, vllm-dgdr | 3/3 (100%) | Disaggregated serving, KV routing, DGDR |
+| **Tier 3** | sglang-aggregated, trtllm-aggregated | 2/2 (100%) | Alternative backends |
+
+### Testing Documentation
+- 📊 **Comprehensive Report**: [DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md](../../../../DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md)
+- 📝 **Tier 1 Details**: [docs/TIER1_VLLM_AGGREGATED_TEST_RESULTS.md](../../../../docs/TIER1_VLLM_AGGREGATED_TEST_RESULTS.md)
+- 📝 **Tier 2 Details**: [docs/TIER2_VLLM_ADVANCED_TEST_RESULTS.md](../../../../docs/TIER2_VLLM_ADVANCED_TEST_RESULTS.md)
+- 📝 **Tier 3 Details**: [docs/TIER3_ALTERNATIVE_BACKEND_TEST_RESULTS.md](../../../../docs/TIER3_ALTERNATIVE_BACKEND_TEST_RESULTS.md)
+- 🔍 **Quality Audit**: [DYNAMO_BLUEPRINT_QUALITY_AUDIT.md](../../../../DYNAMO_BLUEPRINT_QUALITY_AUDIT.md)
+- 📋 **Testing Plan**: [BLUEPRINT_TESTING_PLAN.md](../../../../BLUEPRINT_TESTING_PLAN.md)
+
+### Validated Features
+- ✅ Multi-backend support (vLLM, SGLang, TensorRT-LLM)
+- ✅ Disaggregated serving (prefill/decode separation)
+- ✅ KV-aware intelligent routing
+- ✅ SLA-driven deployment planning (DGDR)
+- ✅ Karpenter auto-scaling with A10G GPUs
+- ✅ Clean resource lifecycle management
 
 ## Available Examples
 
