@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Test: Base Model Registration with DynamoModel
+#
+# This test validates the DynamoModel CRD for base model registration
+# as documented in DYNAMO_MODEL_INTEGRATION_DEEP_DIVE.md
+#
+# Expected behavior:
+# 1. DynamoModel CR created successfully
+# 2. Controller discovers endpoints with matching baseModelName label
+# 3. Status shows totalEndpoints and readyEndpoints counts
+# 4. If no DGD workers exist, status will show 0 endpoints (expected)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: qwen-base-test
+  namespace: dynamo-cloud
+  labels:
+    app: dynamo-model-test
+    test-type: base-model
+spec:
+  # Full model identifier
+  modelName: Qwen/Qwen3-0.6B
+  
+  # Base model name - used for discovery via headless services
+  # This should match the label dynamo.ai/base-model-name on worker pods
+  baseModelName: Qwen/Qwen3-0.6B
+  
+  # Model type: base, lora, or adapter
+  modelType: base

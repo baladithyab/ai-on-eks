@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Test: LoRA Adapter Registration with DynamoModel
+#
+# This test validates the DynamoModel CRD for LoRA adapter management
+# as documented in DYNAMO_MODEL_INTEGRATION_DEEP_DIVE.md
+#
+# Expected behavior:
+# 1. DynamoModel CR created successfully
+# 2. Controller looks for endpoints serving the baseModelName
+# 3. For LoRA models, controller probes /loras endpoint to load adapter
+# 4. If no base model endpoints exist, status shows 0 endpoints
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: sql-lora-test
+  namespace: dynamo-cloud
+  labels:
+    app: dynamo-model-test
+    test-type: lora-adapter
+spec:
+  # Unique identifier for this LoRA adapter
+  modelName: sql-generation-lora
+  
+  # Base model this LoRA extends
+  # Must match the baseModelName used by a running DGD
+  baseModelName: Qwen/Qwen3-0.6B
+  
+  # Model type: lora for LoRA adapters
+  modelType: lora
+  
+  # Source location for LoRA weights from HuggingFace
+  source:
+    # HuggingFace URI format: hf://org/model@revision (revision is optional)
+    # Using a real small LoRA adapter for SQL coding on Qwen
+    uri: hf://predibase/qwen3-0.6b-sql-lora
