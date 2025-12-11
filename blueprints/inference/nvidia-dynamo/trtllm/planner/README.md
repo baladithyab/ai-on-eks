@@ -1,6 +1,6 @@
-# SLA Planner Examples
+# TRT-LLM SLA Planner & DGDR Examples
 
-Deploy TensorRT-LLM with SLA-based automatic scaling (Dynamo v0.6.0+).
+Deploy TensorRT-LLM with SLA-based automatic scaling (Dynamo v0.7.0+).
 
 ## 📚 Full Documentation
 
@@ -10,7 +10,67 @@ For comprehensive documentation on SLA Planner including architecture, profiling
 
 ## Available Examples
 
-- **`trtllm-planner.yaml`** - Disaggregated deployment with SLA Planner for automatic scaling
+| File | Description | Status | Notes |
+|------|-------------|--------|-------|
+| `trtllm-planner.yaml` | Disaggregated deployment with SLA Planner | Manual | Requires pre-profiling |
+| `trtllm-dgdr-online.yaml` | DGDR with online GPU profiling | ✅ Tested | 32 min, Qwen3-0.6B |
+| `trtllm-dgdr-aic.yaml` | DGDR with AI Configurator (simulation) | ✅ Tested | **25 sec**, Qwen3-32B |
+
+## DGDR (DynamoGraphDeploymentRequest) - Tested Results
+
+### trtllm-dgdr-online (December 2025)
+
+**Online profiling** deploys actual GPU workloads to measure performance.
+
+| Metric | Result |
+|--------|--------|
+| Model | Qwen/Qwen3-0.6B |
+| Total Duration | 32 minutes |
+| SLA Targets | TTFT=200ms, ITL=20ms |
+| Best Config | TP=1 prefill, TP=1 decode |
+| Achieved TTFT | 67.37 ms ✅ |
+| Achieved ITL | 3.36 ms ✅ |
+| Throughput | 44,527 tokens/s/GPU |
+
+```bash
+# Deploy
+kubectl apply -f trtllm-dgdr-online.yaml -n dynamo-cloud
+
+# Monitor profiling progress
+kubectl logs -f -n dynamo-cloud -l job-name=profile-trtllm-dgdr-online -c profiler
+```
+
+### trtllm-dgdr-aic (December 2025)
+
+**AI Configurator** uses simulation instead of actual GPU profiling - **75x faster!**
+
+| Metric | Result |
+|--------|--------|
+| Model | Qwen/Qwen3-32B |
+| Total Duration | **25 seconds** |
+| SLA Targets | TTFT=200ms, ITL=20ms |
+| Mode | Simulation (H100 SXM model) |
+| Speedup vs Online | 75x faster |
+
+```bash
+# Deploy
+kubectl apply -f trtllm-dgdr-aic.yaml -n dynamo-cloud
+
+# AI Configurator completes in ~25 seconds
+kubectl get dgdr trtllm-aic -n dynamo-cloud -w
+```
+
+**When to use AI Configurator:**
+- Rapid prototyping and configuration exploration
+- H100/H200 systems (simulation models available)
+- Cost-sensitive environments (no GPU usage during profiling)
+
+**When to use Online profiling:**
+- Production validation with real hardware measurements
+- Non-H100/H200 systems
+- When exact performance metrics are required
+
+---
 
 ## Features
 
