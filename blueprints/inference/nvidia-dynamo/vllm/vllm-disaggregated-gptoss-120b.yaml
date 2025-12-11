@@ -48,6 +48,9 @@ spec:
       componentType: worker
       subComponentType: decode
       replicas: 1
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       volumeMounts:
         - name: dynamo-shared-models
           mountPoint: /models
@@ -83,6 +86,9 @@ spec:
       componentType: worker
       subComponentType: prefill
       replicas: 1
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       volumeMounts:
         - name: dynamo-shared-models
           mountPoint: /models

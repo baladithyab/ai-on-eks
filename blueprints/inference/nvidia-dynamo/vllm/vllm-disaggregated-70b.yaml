@@ -35,6 +35,9 @@ spec:
       subComponentType: decode
       replicas: 1
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       volumeMounts:
         - name: dynamo-shared-models
           mountPoint: /models
@@ -67,6 +70,9 @@ spec:
       subComponentType: prefill
       replicas: 1
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       volumeMounts:
         - name: dynamo-shared-models
           mountPoint: /models

@@ -50,6 +50,9 @@ spec:
             - "python3 -m dynamo.frontend --http-port=8000"
     SGLangDecodeWorker:
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       subComponentType: decode
       replicas: 1
@@ -107,6 +110,9 @@ spec:
                 --host 0.0.0.0
     SGLangPrefillWorker:
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       subComponentType: prefill
       replicas: 1

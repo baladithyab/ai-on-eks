@@ -48,6 +48,9 @@ spec:
             - "python3 -m dynamo.frontend --http-port 8000"
     VllmDecodeWorker:
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       replicas: 1
       livenessProbe:
@@ -92,6 +95,9 @@ spec:
             - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm-decode.log"
     VllmPrefillWorker:
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       replicas: 1
       livenessProbe:

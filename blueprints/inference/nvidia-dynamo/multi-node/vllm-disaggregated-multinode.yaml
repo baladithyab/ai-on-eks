@@ -38,6 +38,9 @@ spec:
 
     decode:
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       replicas: 1
       multinode:
@@ -69,6 +72,9 @@ spec:
 
     prefill:
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       replicas: 1
       multinode:

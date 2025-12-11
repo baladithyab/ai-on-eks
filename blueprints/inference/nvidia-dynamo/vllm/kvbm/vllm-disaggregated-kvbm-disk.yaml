@@ -48,6 +48,9 @@ spec:
           gpu: "1"
           memory: "250Gi"
       envs:
+        # Disable shared memory transport to avoid broadcast deadlock
+        - name: UCX_TLS
+          value: "^mm"
         # CPU cache size in GB (required for disaggregated decode)
         - name: DYN_KVBM_CPU_CACHE_GB
           value: "100"
@@ -106,6 +109,9 @@ spec:
           gpu: "1"
           memory: "250Gi"
       envs:
+        # Disable shared memory transport to avoid broadcast deadlock
+        - name: UCX_TLS
+          value: "^mm"
         # CPU cache size in GB (required)
         - name: DYN_KVBM_CPU_CACHE_GB
           value: "100"

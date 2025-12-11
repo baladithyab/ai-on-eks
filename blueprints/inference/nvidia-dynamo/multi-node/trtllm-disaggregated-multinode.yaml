@@ -66,6 +66,8 @@ spec:
   pvcs:
     - name: trtllm-multinode-models
   envs:
+    - name: UCX_TLS
+      value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
     - name: OMPI_ALLOW_RUN_AS_ROOT
       value: "1"
     - name: OMPI_ALLOW_RUN_AS_ROOT_CONFIRM

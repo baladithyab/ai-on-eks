@@ -99,6 +99,9 @@ spec:
             - "python3 -m dynamo.frontend --http-port 8000"
     TRTLLMDecodeWorker:
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       replicas: 1
       livenessProbe:
@@ -166,6 +169,9 @@ spec:
             - decode
     TRTLLMPrefillWorker:
       envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       replicas: 1
       livenessProbe:
