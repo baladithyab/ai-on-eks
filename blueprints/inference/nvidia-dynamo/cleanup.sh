@@ -21,6 +21,10 @@
 #   - Does NOT delete Dynamo platform (operator, etcd, NATS)
 #   - Does NOT delete shared model cache PVC
 #   - Only removes DynamoGraphDeployment resources and their pods
+#
+# Catalog support:
+#   If a catalog id is passed, cleanup.sh resolves it to the deployed
+#   metadata.name before deleting the resource.
 #---------------------------------------------------------------
 
 set -euo pipefail
@@ -42,6 +46,138 @@ NAMESPACE="dynamo-cloud"
 VERBOSE=false
 DRY_RUN=false
 FORCE=false
+
+#---------------------------------------------------------------
+# Catalog resolution (stable ids -> manifests)
+#---------------------------------------------------------------
+
+CATALOG_FILE="${SCRIPT_DIR}/catalog/catalog.yaml"
+
+catalog_entries() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+
+    awk '
+      function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); return s }
+      BEGIN{ id=""; path=""; backend=""; tier=""; prereqs=""; notes="" }
+      /^[[:space:]]*-[[:space:]]*id:[[:space:]]*/ {
+        if (id!="") print id "|" path "|" backend "|" tier "|" prereqs "|" notes
+        id=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", id)
+        path=backend=tier=prereqs=notes=""
+        next
+      }
+      /^[[:space:]]*path:[[:space:]]*/ { path=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", path); next }
+      /^[[:space:]]*backend:[[:space:]]*/ { backend=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", backend); next }
+      /^[[:space:]]*tier:[[:space:]]*/ { tier=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", tier); next }
+      /^[[:space:]]*prereqs:[[:space:]]*/ { prereqs=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", prereqs); next }
+      /^[[:space:]]*notes:[[:space:]]*/ { notes=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", notes); next }
+      END{ if (id!="") print id "|" path "|" backend "|" tier "|" prereqs "|" notes }
+    ' "$file"
+}
+
+catalog_lookup() {
+    local id="$1"
+    catalog_entries "$CATALOG_FILE" 2>/dev/null | awk -F'|' -v id="$id" '$1==id{print; exit 0} END{exit 1}'
+}
+
+manifest_detect_primary_kind() {
+    local file="$1"
+    if grep -q "^kind:[[:space:]]*DynamoGraphDeployment\\b" "$file" 2>/dev/null; then
+        echo "DynamoGraphDeployment"
+        return 0
+    fi
+    if grep -q "^kind:[[:space:]]*DynamoGraphDeploymentRequest\\b" "$file" 2>/dev/null; then
+        echo "DynamoGraphDeploymentRequest"
+        return 0
+    fi
+    if grep -q "^kind:[[:space:]]*DynamoModel\\b" "$file" 2>/dev/null; then
+        echo "DynamoModel"
+        return 0
+    fi
+    echo "unknown"
+    return 1
+}
+
+manifest_get_meta_field() {
+    local file="$1"
+    local wanted_kind="$2"
+    local wanted_field="$3"
+
+    awk -v kind="$wanted_kind" -v field="$wanted_field" '
+      BEGIN{ in_kind=0; in_meta=0 }
+      $0 ~ "^kind:[[:space:]]*" kind "[[:space:]]*$" { in_kind=1; in_meta=0; next }
+      in_kind && $0 ~ "^metadata:[[:space:]]*$" { in_meta=1; next }
+      in_meta && $0 ~ "^[[:space:]]*" field ":[[:space:]]*" {
+        v=$0
+        sub("^[[:space:]]*" field ":[[:space:]]*", "", v)
+        gsub(/\"/, "", v)
+        print v
+        exit 0
+      }
+      in_meta && $0 ~ "^[^[:space:]]" { in_meta=0 }
+    ' "$file" 2>/dev/null || true
+}
+
+resolve_manifest_for_input() {
+    local input="$1"
+
+    # 1) Catalog lookup
+    if [ -f "$CATALOG_FILE" ]; then
+        local row=""
+        if row=$(catalog_lookup "$input" 2>/dev/null); then
+            local rel
+            rel=$(echo "$row" | awk -F'|' '{print $2}')
+            echo "${SCRIPT_DIR}/${rel}"
+            return 0
+        fi
+    fi
+
+    # 2) Best-effort file path / filename lookup
+    if [[ "$input" == *.yaml ]] && [ -f "${SCRIPT_DIR}/${input}" ]; then
+        echo "${SCRIPT_DIR}/${input}"
+        return 0
+    fi
+
+    local found
+    found=$(find "${SCRIPT_DIR}" -type f -name "${input}.yaml" \
+        -not -path "*/catalog/*" -not -path "*/_internal/*" -print -quit 2>/dev/null || true)
+
+    if [ -n "$found" ]; then
+        echo "$found"
+        return 0
+    fi
+
+    return 1
+}
+
+# Resolve stable catalog id -> deployed resource name
+resolve_deployment_name() {
+    local input="$1"
+    local manifest=""
+
+    if manifest=$(resolve_manifest_for_input "$input" 2>/dev/null) && [ -f "$manifest" ]; then
+        local kind
+        kind=$(manifest_detect_primary_kind "$manifest" 2>/dev/null || echo "unknown")
+        case "$kind" in
+            DynamoGraphDeployment)
+                manifest_get_meta_field "$manifest" "DynamoGraphDeployment" "name"
+                return 0
+                ;;
+            DynamoGraphDeploymentRequest)
+                manifest_get_meta_field "$manifest" "DynamoGraphDeploymentRequest" "name"
+                return 0
+                ;;
+            DynamoModel)
+                manifest_get_meta_field "$manifest" "DynamoModel" "name"
+                return 0
+                ;;
+        esac
+    fi
+
+    # Fallback: return input as-is (legacy behavior)
+    echo "$input"
+    return 0
+}
 
 # Utility functions
 info() {
@@ -224,8 +360,14 @@ if [ "${CLEANUP_ALL}" = true ]; then
     DEPLOYMENTS_TO_CLEAN=("${DEPLOYMENT_ARRAY[@]}")
     warn "Cleaning ALL deployments across all namespaces"
 elif [ -n "${DEPLOYMENT_NAME}" ]; then
+    # Attempt catalog id resolution to get the real deployed resource name
+    RESOLVED_NAME=$(resolve_deployment_name "${DEPLOYMENT_NAME}")
+    if [ "$RESOLVED_NAME" != "$DEPLOYMENT_NAME" ]; then
+        info "Resolved catalog id '${DEPLOYMENT_NAME}' -> deployed name '${RESOLVED_NAME}'"
+    fi
+
     # Check if deployment exists in the specified namespace
-    TARGET_ENTRY="${NAMESPACE}:${DEPLOYMENT_NAME}"
+    TARGET_ENTRY="${NAMESPACE}:${RESOLVED_NAME}"
     FOUND=false
     for dep in "${DEPLOYMENT_ARRAY[@]}"; do
         if [ "$dep" = "$TARGET_ENTRY" ]; then
@@ -234,9 +376,12 @@ elif [ -n "${DEPLOYMENT_NAME}" ]; then
             break
         fi
     done
-    
+
     if [ "$FOUND" = false ]; then
-        error "Deployment '${DEPLOYMENT_NAME}' not found in namespace '${NAMESPACE}'"
+        error "Deployment '${RESOLVED_NAME}' not found in namespace '${NAMESPACE}'"
+        if [ "$RESOLVED_NAME" != "$DEPLOYMENT_NAME" ]; then
+            info "  (resolved from catalog id '${DEPLOYMENT_NAME}')"
+        fi
         info "Available deployments:"
         for dep in "${DEPLOYMENT_ARRAY[@]}"; do
             dep_ns="${dep%%:*}"

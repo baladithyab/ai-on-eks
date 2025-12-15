@@ -67,13 +67,16 @@ nano terraform/blueprint.tfvars
 ```bash
 # Deploy any example (secrets already configured via Terraform)
 cd ../../blueprints/inference/nvidia-dynamo
-./deploy.sh vllm           # or any other example
+./deploy.sh vllm-aggregated-default   # Core vLLM example
+
+# List all available examples with tiers + backends
+./deploy.sh --list
 ```
 
 ### 4. Test Deployment
 ```bash
 # Port forward and test API
-kubectl port-forward svc/vllm-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward svc/vllm-agg-frontend 8000:8000 -n dynamo-cloud
 curl http://localhost:8000/v1/models
 ```
 
@@ -84,22 +87,43 @@ cd infra/nvidia-dynamo
 ./cleanup.sh
 ```
 
-## Quick Reference
+## Showcase Catalog
 
-**Single Command Deployment:**
+> **📘 See [catalog/README.md](catalog/README.md) for the full catalog of tiered examples.**
+
+Examples are organized by tier:
+- **Core**: Essential, multi-backend examples for getting started
+- **Standard**: Production-quality advanced patterns
+- **Advanced**: Specialized use-cases (DGDR, profiling, large models)
+- **Experimental**: Early features and internal test manifests
+
+**List all examples:**
 ```bash
-cd blueprints/inference/nvidia-dynamo
-./deploy.sh vllm/vllm-aggregated-default.yaml  # Deploy
-./test.sh vllm-aggregated-default              # Test
-./cleanup.sh vllm-aggregated-default           # Clean up
+./deploy.sh --list
 ```
 
-**Common Patterns:**
-- **Basic**: `vllm-aggregated-default` (TP=4, Qwen3-8B)
-- **Disaggregated**: `vllm-disaggregated-default` (separate prefill/decode)
-- **Advanced KVBM**: `vllm-disaggregated-kvbm-disk` (multi-tier caching)
-- **Routing**: `vllm-router` (cache-aware request routing)
-- **Multimodal**: `qwen2.5-vl-7b` (vision-language)
+**Quick Reference:**
+```bash
+cd blueprints/inference/nvidia-dynamo
+./deploy.sh vllm-aggregated-default    # Deploy using stable catalog id
+./test.sh vllm-aggregated-default      # Test
+./cleanup.sh vllm-aggregated-default   # Cleanup
+```
+
+**Core Showcase Examples (backend-diverse):**
+| ID | Backend | Description |
+|----|---------|-------------|
+| `vllm-aggregated-default` | vLLM | Standard aggregated inference |
+| `sglang-aggregated-default` | SGLang | RadixAttention caching |
+| `trtllm-aggregated-default` | TRT-LLM | TensorRT-optimized inference |
+| `vllm-disaggregated-default` | vLLM | Prefill/decode separation |
+| `vllm-router` | vLLM | KV-aware routing |
+| `multi-replica-vllm` | vLLM | Multi-replica HA |
+
+**Common Patterns (backwards-compatible aliases):**
+- `vllm` → `vllm-aggregated-default`
+- `sglang` → `sglang-aggregated-default`
+- `trtllm` → `trtllm-aggregated-default`
 
 ## Prerequisites
 
@@ -145,46 +169,68 @@ Both NGC API key and HuggingFace token are **required** and must be configured i
 
 ## Available Examples
 
-### Basic Examples (Production Ready)
-| Example | Description | Models | KVBM | Test Status |
-|---------|-------------|--------|------|-------------|
-| **[vllm](vllm/)** | vLLM aggregated serving | Qwen3-0.6B | ❌ | ✅ Fully Working |
-| **[sglang](sglang/)** | SGLang with advanced caching | DeepSeek-R1-Distill-Llama-8B | ❌ | ✅ Fully Working |
-| **[trtllm](trtllm/)** | TensorRT-LLM optimized | Qwen3-0.6B | ❌ | ✅ Fully Working |
-| **[multi-replica-vllm](multi-replica-vllm/)** | Multi-replica HA deployment | Qwen3-0.6B | ❌ | ✅ Fully Working |
-| **[multimodal](multimodal/)** | Vision-language models | LLaVA 1.5 7B | ❌ | ✅ Fully Working |
+> **📘 Full catalog with tiers + backends: [catalog/README.md](catalog/README.md)**
 
-### Advanced Examples (Disaggregated Serving)
-| Example | Description | KVBM | Test Status | Notes |
-|---------|-------------|------|-------------|-------|
-| **[vllm](vllm/)** disaggregated | Separate prefill/decode workers | ✅ CPU+GPU | ✅ Fully Working | NIXL backend tested |
-| **[vllm](vllm/kvbm/)** KVBM disk | Multi-tier GPU→CPU→Disk caching | ✅ CPU+GPU+Disk | ✅ Fully Working | **New in v0.6.1** |
-| **[trtllm](trtllm/)** disaggregated | TRT-LLM disaggregated | ❌ | ✅ Fully Working | Fixed case sensitivity bug |
-| **[sglang](sglang/)** disaggregated | Disaggregated with RadixAttention | ❌ | ⚠️ Known Issue | Use aggregated instead |
+### Core Tier (Production Ready, Backend-Diverse)
+| Catalog ID | Backend | Description | Models | KVBM | Test Status |
+|------------|---------|-------------|--------|------|-------------|
+| **`vllm-aggregated-default`** | vLLM | Aggregated serving | Qwen3-0.6B | ❌ | ✅ Fully Working |
+| **`sglang-aggregated-default`** | SGLang | RadixAttention caching | DeepSeek-R1-Distill-Llama-8B | ❌ | ✅ Fully Working |
+| **`trtllm-aggregated-default`** | TRT-LLM | TensorRT-optimized | Qwen3-0.6B | ❌ | ✅ Fully Working |
+| **`vllm-disaggregated-default`** | vLLM | Prefill/decode separation | Qwen3-0.6B | ✅ CPU+GPU | ✅ Fully Working |
+| **`vllm-router`** | vLLM | KV-aware routing | Qwen3-0.6B | ❌ | ✅ Fully Working |
+| **`multi-replica-vllm`** | vLLM | Multi-replica HA | Qwen3-0.6B | ❌ | ✅ Fully Working |
 
-### Multi-Node Examples (Large Models)
-| Example | Description | Orchestration | Test Status | Notes |
-|---------|-------------|---------------|-------------|-------|
-| **[lws-multinode](lws-multinode/)** | LeaderWorkerSet tensor parallel | LWS + Volcano | 📝 Documentation | Manual LWS/Volcano install required |
-| **[multi-node](multi-node/)** | Grove-based multi-node | Grove (alpha) | ⚠️ Experimental | Grove has stability issues |
+### Standard Tier (Advanced Production Patterns)
+| Catalog ID | Backend | Description | KVBM | Test Status | Notes |
+|------------|---------|-------------|------|-------------|-------|
+| **`vllm-disaggregated-kvbm-disk`** | vLLM | Multi-tier GPU→CPU→Disk caching | ✅ CPU+GPU+Disk | ✅ Fully Working | **New in v0.6.1** |
+| **`trtllm-disaggregated-default`** | TRT-LLM | TRT-LLM disaggregated | ❌ | ✅ Fully Working | Fixed case sensitivity bug |
+| **`llava-1.5-7b`** | vLLM | Vision-language (LLaVA) | ❌ | ✅ Fully Working | Multimodal |
+| **`llava-next-video-7b`** | vLLM | Video-language model | ❌ | ✅ Fully Working | Multimodal |
+| **`vllm-full-observability`** | vLLM | Full metrics + tracing | ❌ | ✅ Fully Working | Observability |
+
+### Advanced Tier (DGDR, Multi-node, Specialized)
+| Catalog ID | Backend | Description | Test Status | Notes |
+|------------|---------|-------------|-------------|-------|
+| **`trtllm-dgdr-online`** | TRT-LLM | DGDR online planning | ✅ Fully Working | SLA-driven |
+| **`lws-multinode`** | vLLM | LeaderWorkerSet tensor parallel | 📝 Documentation | LWS + Volcano install required |
+| **`multi-node`** | vLLM | Grove-based multi-node | ⚠️ Experimental | Grove alpha, stability issues |
+
+### Experimental Tier (Early Features)
+| Catalog ID | Backend | Description | Test Status | Notes |
+|------------|---------|-------------|-------------|-------|
+| **`sglang-disaggregated-default`** | SGLang | Disaggregated with RadixAttention | ⚠️ Known Issue | Use aggregated instead |
 
 ### Model Management
 | Resource | Description | Notes |
 |----------|-------------|-------|
 | **[model-management](model-management/)** | DynamoModel CRD examples | Base models and LoRA adapters |
 
+> **Note:** Internal test manifests are in [`model-management/_internal/`](model-management/_internal/).
+
 ## Deployment Guide
 
-### Automated Deployment
+### Automated Deployment (Using Catalog)
 ```bash
-# Interactive menu (recommended)
-./deploy.sh
+# List all available examples with tiers + backends
+./deploy.sh --list
 
-# Direct deployment with automatic HF token handling
-export HF_TOKEN="your-token-here"  # Optional: set token in environment
-./deploy.sh vllm           # Deploy vLLM with Qwen3-0.6B
-./deploy.sh sglang         # Deploy SGLang with DeepSeek model
-./deploy.sh trtllm         # Deploy TensorRT-LLM optimized
+# Deploy using stable catalog ID (recommended)
+./deploy.sh vllm-aggregated-default      # Core vLLM aggregated
+./deploy.sh sglang-aggregated-default    # Core SGLang
+./deploy.sh trtllm-aggregated-default    # Core TRT-LLM
+
+# Interactive menu (if no argument)
+./deploy.sh
+```
+
+**Backwards-Compatible Aliases:**
+```bash
+# These short names still work (resolved via catalog)
+./deploy.sh vllm           # → vllm-aggregated-default
+./deploy.sh sglang         # → sglang-aggregated-default
+./deploy.sh trtllm         # → trtllm-aggregated-default
 ```
 
 ### Manual Deployment
@@ -194,10 +240,10 @@ kubectl create secret generic hf-token-secret \
   --from-literal=HF_TOKEN="your-token" -n dynamo-cloud
 
 # Deploy specific example
-kubectl apply -f vllm/vllm.yaml -n dynamo-cloud
+kubectl apply -f vllm/vllm-aggregated-default.yaml -n dynamo-cloud
 
 # Monitor deployment
-kubectl get pods -n dynamo-cloud -l app=vllm -w
+kubectl get pods -n dynamo-cloud -l app=vllm-agg -w
 ```
 
 ### Testing Deployments

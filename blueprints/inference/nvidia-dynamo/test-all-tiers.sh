@@ -2,6 +2,16 @@
 # Automated Sequential Testing for NVIDIA Dynamo Examples
 # Tests examples in tiers from simple to complex
 # Logs all outputs for analysis
+#
+# Usage:
+#   ./test-all-tiers.sh [tier|all|core|standard|advanced|experimental]
+#
+# Now supports catalog-based tier selection:
+#   ./test-all-tiers.sh core           # All 'core' tier examples from catalog
+#   ./test-all-tiers.sh standard       # All 'standard' tier examples
+#   ./test-all-tiers.sh vllm           # All vllm backend examples
+#   ./test-all-tiers.sh 1              # Legacy tier 1 examples
+#   ./test-all-tiers.sh all            # All legacy tiers
 
 set -e
 
@@ -19,7 +29,45 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Tier definitions
+#---------------------------------------------------------------
+# Catalog integration
+#---------------------------------------------------------------
+
+CATALOG_FILE="${SCRIPT_DIR}/catalog/catalog.yaml"
+
+catalog_entries() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+
+    awk '
+      function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); return s }
+      BEGIN{ id=""; path=""; backend=""; tier=""; prereqs=""; notes="" }
+      /^[[:space:]]*-[[:space:]]*id:[[:space:]]*/ {
+        if (id!="") print id "|" path "|" backend "|" tier "|" prereqs "|" notes
+        id=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", id)
+        path=backend=tier=prereqs=notes=""
+        next
+      }
+      /^[[:space:]]*path:[[:space:]]*/ { path=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", path); next }
+      /^[[:space:]]*backend:[[:space:]]*/ { backend=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", backend); next }
+      /^[[:space:]]*tier:[[:space:]]*/ { tier=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", tier); next }
+      /^[[:space:]]*prereqs:[[:space:]]*/ { prereqs=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", prereqs); next }
+      /^[[:space:]]*notes:[[:space:]]*/ { notes=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", notes); next }
+      END{ if (id!="") print id "|" path "|" backend "|" tier "|" prereqs "|" notes }
+    ' "$file"
+}
+
+catalog_ids_by_tier() {
+    local t="$1"
+    catalog_entries "$CATALOG_FILE" 2>/dev/null | awk -F'|' -v t="$t" '$4==t{print $1}'
+}
+
+catalog_ids_by_backend() {
+    local b="$1"
+    catalog_entries "$CATALOG_FILE" 2>/dev/null | awk -F'|' -v b="$b" '$3==b{print $1}'
+}
+
+# Tier definitions (legacy - kept for backwards compatibility)
 declare -A TIERS
 declare -A TIER_NAMES
 
@@ -148,8 +196,35 @@ log "Timestamp: ${TIMESTAMP}"
 log "========================================="
 log ""
 
-if [[ "${TIER}" == "all" ]]; then
-    log "Testing ALL tiers (1, 2, 3, 4, 7)"
+# Check for catalog-based tier/backend selection
+if [[ "${TIER}" == "core" || "${TIER}" == "standard" || "${TIER}" == "advanced" || "${TIER}" == "experimental" ]]; then
+    log "Testing catalog tier: ${TIER}"
+    log ""
+    
+    CATALOG_EXAMPLES=$(catalog_ids_by_tier "${TIER}")
+    if [ -z "$CATALOG_EXAMPLES" ]; then
+        log_error "No examples found in catalog for tier '${TIER}'"
+        exit 1
+    fi
+    
+    for example in $CATALOG_EXAMPLES; do
+        test_example "${example}"
+    done
+elif [[ "${TIER}" == "vllm" || "${TIER}" == "sglang" || "${TIER}" == "trtllm" ]]; then
+    log "Testing catalog backend: ${TIER}"
+    log ""
+    
+    CATALOG_EXAMPLES=$(catalog_ids_by_backend "${TIER}")
+    if [ -z "$CATALOG_EXAMPLES" ]; then
+        log_error "No examples found in catalog for backend '${TIER}'"
+        exit 1
+    fi
+    
+    for example in $CATALOG_EXAMPLES; do
+        test_example "${example}"
+    done
+elif [[ "${TIER}" == "all" ]]; then
+    log "Testing ALL legacy tiers (1, 2, 3, 4, 7)"
     log ""
 
     for tier_num in 1 2 3 4 7; do
@@ -165,7 +240,7 @@ if [[ "${TIER}" == "all" ]]; then
         log ""
     done
 elif [[ -n "${TIERS[$TIER]}" ]]; then
-    log "Testing Tier ${TIER}: ${TIER_NAMES[$TIER]}"
+    log "Testing legacy tier ${TIER}: ${TIER_NAMES[$TIER]}"
     log ""
 
     for example in ${TIERS[$TIER]}; do
@@ -173,7 +248,10 @@ elif [[ -n "${TIERS[$TIER]}" ]]; then
     done
 else
     log_error "Invalid tier: ${TIER}"
-    log "Valid tiers: 1, 2, 3, 4, 7, all"
+    log "Valid options:"
+    log "  Legacy tiers: 1, 2, 3, 4, 7, all"
+    log "  Catalog tiers: core, standard, advanced, experimental"
+    log "  Backends: vllm, sglang, trtllm"
     exit 1
 fi
 

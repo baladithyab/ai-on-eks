@@ -155,8 +155,115 @@ Service Discovery:
   Services are discovered dynamically using Kubernetes labels, not hardcoded names.
   This allows testing ANY deployment name, not just predefined examples.
 
+Catalog support:
+  If <example-name> is a stable catalog id (see ./deploy.sh --list), the script will
+  resolve it to the actual deployed resource name (metadata.name) before testing.
+
 HELP
     exit 0
+}
+
+#---------------------------------------------------------------
+# Catalog resolution (stable ids -> manifests)
+#---------------------------------------------------------------
+
+CATALOG_FILE="${SCRIPT_DIR}/catalog/catalog.yaml"
+
+catalog_entries() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+
+    awk '
+      function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); return s }
+      BEGIN{ id=""; path=""; backend=""; tier=""; prereqs=""; notes="" }
+      /^[[:space:]]*-[[:space:]]*id:[[:space:]]*/ {
+        if (id!="") print id "|" path "|" backend "|" tier "|" prereqs "|" notes
+        id=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", id)
+        path=backend=tier=prereqs=notes=""
+        next
+      }
+      /^[[:space:]]*path:[[:space:]]*/ { path=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", path); next }
+      /^[[:space:]]*backend:[[:space:]]*/ { backend=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", backend); next }
+      /^[[:space:]]*tier:[[:space:]]*/ { tier=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", tier); next }
+      /^[[:space:]]*prereqs:[[:space:]]*/ { prereqs=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", prereqs); next }
+      /^[[:space:]]*notes:[[:space:]]*/ { notes=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", notes); next }
+      END{ if (id!="") print id "|" path "|" backend "|" tier "|" prereqs "|" notes }
+    ' "$file"
+}
+
+catalog_lookup() {
+    local id="$1"
+    catalog_entries "$CATALOG_FILE" 2>/dev/null | awk -F'|' -v id="$id" '$1==id{print; exit 0} END{exit 1}'
+}
+
+manifest_detect_primary_kind() {
+    local file="$1"
+    if grep -q "^kind:[[:space:]]*DynamoGraphDeployment\\b" "$file" 2>/dev/null; then
+        echo "DynamoGraphDeployment"
+        return 0
+    fi
+    if grep -q "^kind:[[:space:]]*DynamoGraphDeploymentRequest\\b" "$file" 2>/dev/null; then
+        echo "DynamoGraphDeploymentRequest"
+        return 0
+    fi
+    if grep -q "^kind:[[:space:]]*DynamoModel\\b" "$file" 2>/dev/null; then
+        echo "DynamoModel"
+        return 0
+    fi
+    echo "unknown"
+    return 1
+}
+
+manifest_get_meta_field() {
+    local file="$1"
+    local wanted_kind="$2"
+    local wanted_field="$3"
+
+    awk -v kind="$wanted_kind" -v field="$wanted_field" '
+      BEGIN{ in_kind=0; in_meta=0 }
+      $0 ~ "^kind:[[:space:]]*" kind "[[:space:]]*$" { in_kind=1; in_meta=0; next }
+      in_kind && $0 ~ "^metadata:[[:space:]]*$" { in_meta=1; next }
+      in_meta && $0 ~ "^[[:space:]]*" field ":[[:space:]]*" {
+        v=$0
+        sub("^[[:space:]]*" field ":[[:space:]]*", "", v)
+        gsub(/\"/, "", v)
+        print v
+        exit 0
+      }
+      in_meta && $0 ~ "^[^[:space:]]" { in_meta=0 }
+    ' "$file" 2>/dev/null || true
+}
+
+resolve_manifest_for_input() {
+    local input="$1"
+
+    # 1) Catalog lookup
+    if [ -f "$CATALOG_FILE" ]; then
+        local row=""
+        if row=$(catalog_lookup "$input" 2>/dev/null); then
+            local rel
+            rel=$(echo "$row" | awk -F'|' '{print $2}')
+            echo "${SCRIPT_DIR}/${rel}"
+            return 0
+        fi
+    fi
+
+    # 2) Best-effort file path / filename lookup
+    if [[ "$input" == *.yaml ]] && [ -f "${SCRIPT_DIR}/${input}" ]; then
+        echo "${SCRIPT_DIR}/${input}"
+        return 0
+    fi
+
+    local found
+    found=$(find "${SCRIPT_DIR}" -type f -name "${input}.yaml" \
+        -not -path "*/catalog/*" -not -path "*/_internal/*" -print -quit 2>/dev/null || true)
+
+    if [ -n "$found" ]; then
+        echo "$found"
+        return 0
+    fi
+
+    return 1
 }
 
 # Get the correct label selector for Dynamo pods
@@ -1250,33 +1357,110 @@ select_example() {
 
 verify_deployment() {
     section "Deployment Verification"
-    
-    local is_dgdr=false
-    
-    # Check if this is a DGDR (DynamoGraphDeploymentRequest) example
-    if [[ "$EXAMPLE" == *"dgdr"* ]]; then
-        is_dgdr=true
-        local dgdr_name=$(echo "$EXAMPLE" | sed 's/vllm-dgdr-/vllm-/')
-        
-        if kubectl get dgdr "$dgdr_name" -n "${NAMESPACE}" >/dev/null 2>&1; then
-            local dgdr_status=$(kubectl get dgdr "$dgdr_name" -n "${NAMESPACE}" \
+
+    local input="${EXAMPLE}"
+    local manifest=""
+    local kind=""
+
+    # Try to resolve stable catalog id -> manifest -> deployed name
+    if [ -n "$input" ]; then
+        if manifest=$(resolve_manifest_for_input "$input" 2>/dev/null); then
+            if [ -f "$manifest" ]; then
+                kind=$(manifest_detect_primary_kind "$manifest" 2>/dev/null || echo "unknown")
+
+                case "$kind" in
+                    DynamoGraphDeployment)
+                        local dgd_name
+                        dgd_name=$(manifest_get_meta_field "$manifest" "DynamoGraphDeployment" "name")
+                        if [ -n "$dgd_name" ]; then
+                            info "Resolved '${input}' -> DGD '${dgd_name}'"
+                            DEPLOYMENT_NAME="$dgd_name"
+                        fi
+                        ;;
+                    DynamoGraphDeploymentRequest)
+                        local dgdr_name
+                        dgdr_name=$(manifest_get_meta_field "$manifest" "DynamoGraphDeploymentRequest" "name")
+                        if [ -z "$dgdr_name" ]; then
+                            error "Could not read metadata.name for DGDR manifest: ${manifest}"
+                            exit 1
+                        fi
+
+                        info "Resolved '${input}' -> DGDR '${dgdr_name}'"
+
+                        if ! kubectl get dgdr "$dgdr_name" -n "${NAMESPACE}" >/dev/null 2>&1; then
+                            error "DGDR '${dgdr_name}' is not deployed in namespace '${NAMESPACE}'"
+                            info "Deploy it first: ./deploy.sh ${input}"
+                            exit 1
+                        fi
+
+                        local dgdr_status
+                        dgdr_status=$(kubectl get dgdr "$dgdr_name" -n "${NAMESPACE}" \
+                            -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+
+                        if [ "$dgdr_status" != "Ready" ]; then
+                            warn "DGDR '${dgdr_name}' is in status: ${dgdr_status}"
+                            exit 1
+                        fi
+
+                        # Find the owned DGD (best-effort), fall back to prefix match
+                        DEPLOYMENT_NAME=$(kubectl get dgd -n "${NAMESPACE}" \
+                            -o jsonpath='{.items[?(@.metadata.ownerReferences[0].name=="'"$dgdr_name"'")].metadata.name}' 2>/dev/null || true)
+
+                        if [ -z "$DEPLOYMENT_NAME" ]; then
+                            DEPLOYMENT_NAME=$(kubectl get dgd -n "${NAMESPACE}" --no-headers \
+                                -o custom-columns=":metadata.name" 2>/dev/null | grep -E "^${dgdr_name}" | head -1 || true)
+                        fi
+
+                        if [ -z "$DEPLOYMENT_NAME" ]; then
+                            error "DGDR '${dgdr_name}' is Ready, but no owned DGD was found."
+                            info "Check DGDs: kubectl get dgd -n ${NAMESPACE}"
+                            exit 1
+                        fi
+                        ;;
+                    DynamoModel)
+                        error "'${input}' resolves to a DynamoModel manifest (${manifest})."
+                        error "test.sh can only validate deployed DynamoGraphDeployment workloads (DGD/DGDR)."
+                        exit 1
+                        ;;
+                    *)
+                        warn "Could not determine resource kind from manifest '${manifest}', falling back to name-based lookup"
+                        ;;
+                esac
+            fi
+        else
+            # Backwards-compatible warning: not found in catalog, will treat as deployed name
+            if [ -f "$CATALOG_FILE" ]; then
+                warn "'${input}' not found in catalog; treating it as a deployed resource name (legacy behavior)"
+            fi
+        fi
+    fi
+
+    # Legacy DGDR heuristic (kept for backwards compatibility)
+    if [ -z "${DEPLOYMENT_NAME:-}" ] && [[ "$EXAMPLE" == *"dgdr"* ]]; then
+        local dgdr_guess
+        dgdr_guess=$(echo "$EXAMPLE" | sed -E 's/^([a-z]+)-dgdr-/\1-/')
+
+        if kubectl get dgdr "$dgdr_guess" -n "${NAMESPACE}" >/dev/null 2>&1; then
+            local dgdr_status
+            dgdr_status=$(kubectl get dgdr "$dgdr_guess" -n "${NAMESPACE}" \
                 -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-            
+
             if [ "$dgdr_status" = "Ready" ]; then
                 DEPLOYMENT_NAME=$(kubectl get dgd -n "${NAMESPACE}" \
-                    -o jsonpath='{.items[?(@.metadata.ownerReferences[0].name=="'"$dgdr_name"'")].metadata.name}' 2>/dev/null)
+                    -o jsonpath='{.items[?(@.metadata.ownerReferences[0].name=="'"$dgdr_guess"'")].metadata.name}' 2>/dev/null || true)
                 if [ -z "$DEPLOYMENT_NAME" ]; then
                     DEPLOYMENT_NAME=$(kubectl get dgd -n "${NAMESPACE}" --no-headers \
-                        -o custom-columns=":metadata.name" 2>/dev/null | grep -E "^${dgdr_name}" | head -1)
+                        -o custom-columns=":metadata.name" 2>/dev/null | grep -E "^${dgdr_guess}" | head -1 || true)
                 fi
             else
-                warn "DGDR '${dgdr_name}' is in status: ${dgdr_status}"
+                warn "DGDR '${dgdr_guess}' is in status: ${dgdr_status}"
                 exit 1
             fi
         fi
     fi
-    
-    if [ -z "$DEPLOYMENT_NAME" ]; then
+
+    # Final fallback: treat input as the deployed DGD name
+    if [ -z "${DEPLOYMENT_NAME:-}" ]; then
         if kubectl get dynamographdeployment "$EXAMPLE" -n "${NAMESPACE}" >/dev/null 2>&1; then
             DEPLOYMENT_NAME="$EXAMPLE"
         else
@@ -1285,11 +1469,12 @@ verify_deployment() {
             exit 1
         fi
     fi
-    
+
     success "Deployment verified: ${DEPLOYMENT_NAME}"
-    
+
     # Get pod status
-    local dgd_label=$(get_dgd_label_selector "${DEPLOYMENT_NAME}")
+    local dgd_label
+    dgd_label=$(get_dgd_label_selector "${DEPLOYMENT_NAME}")
     info "Pod status:"
     kubectl get pods -n "${NAMESPACE}" -l "${dgd_label}" 2>/dev/null || warn "No pods found"
 }
