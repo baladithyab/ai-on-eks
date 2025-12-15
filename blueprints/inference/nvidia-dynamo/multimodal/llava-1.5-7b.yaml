@@ -3,7 +3,7 @@
 #
 # LLaVA 1.5 7B Multimodal Deployment
 # Supports image understanding and visual question answering
-# Requires 2 GPUs (EncodeWorker + VLMWorker; Processor is CPU-only)
+# Requires 3 GPUs (EncodeWorker + VLMWorker + Processor)
 #
 # IMPORTANT: Image URL Access Limitations
 # - External URLs may return 403 Forbidden (Wikipedia, some CDNs)
@@ -110,17 +110,32 @@ spec:
       resources:
         requests:
           cpu: "4"
-          memory: "16Gi"
+          memory: "24Gi"
         limits:
-          cpu: "4"
-          memory: "16Gi"
+          gpu: "1"
+          memory: "24Gi"
       extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 120
           command:
             - /bin/sh
             - -c
           args:
             - 'python3 components/processor.py --model llava-hf/llava-1.5-7b-hf --prompt-template "USER: <image>\n<prompt> ASSISTANT:"'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
 
