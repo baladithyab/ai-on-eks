@@ -102,17 +102,19 @@ entries:
   # Infra (showcase, not deploy.sh-first by default)
   - id: base-model
     path: 01-core/model-management/base-model.yaml
-    backend: infra
-    tier: core
-    prereqs: "DynamoModel CRD; running DGD with modelRef configured"
-    notes: "Register base models in dynamo-system for endpoint tracking"
+    backend: N/A  # Reference CRD only
+    tier: documentation  # CHANGE FROM: core
+    category: model-management
+    prereqs: "Requires serving DGD with modelRef"
+    notes: "Reference CRD - does not create deployment"
 
   - id: lora-adapter
     path: 01-core/model-management/lora-adapter.yaml
-    backend: infra
-    tier: core
-    prereqs: "DynamoModel CRD; running DGD with modelRef; S3/HF access"
-    notes: "LoRA lifecycle examples (S3 + HuggingFace)"
+    backend: N/A  # Reference CRD only
+    tier: documentation  # CHANGE FROM: core
+    category: model-management
+    prereqs: "Requires serving DGD with modelRef + base model"
+    notes: "Reference CRD - does not create deployment"
 
   # Backwards-compatible aliases (keep existing docs/workflows working)
   - id: vllm

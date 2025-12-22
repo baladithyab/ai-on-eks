@@ -38,7 +38,7 @@ spec:
     - name: OTEL_EXPORT_ENABLED
       value: "1"
     # Tempo endpoint (adjust if Tempo is in different namespace/cluster)
-    - name: OTEL_EXPORT_ENDPOINT
+    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
       value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
 
   services:

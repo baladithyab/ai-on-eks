@@ -2,6 +2,21 @@
 
 This directory contains example manifests for using the `DynamoModel` Custom Resource Definition (CRD) to manage models and LoRA adapters in NVIDIA Dynamo deployments.
 
+## Important: DynamoModel is a Reference CRD
+
+DynamoModel CRDs do NOT create deployments, pods, or HTTP endpoints. They are **reference objects** that track existing model endpoints created by DGDs.
+
+### Prerequisites
+1. Deploy a serving DGD with `modelRef` field configured
+2. The DGD creates pods with model hash labels
+3. Apply DynamoModel CR - controller discovers endpoints via hash matching
+4. DynamoModel status shows totalEndpoints > 0
+
+### Testing base-model and lora-adapter
+These examples expect 0 endpoints unless a serving DGD exists. Status `NoServicesFound` is correct behavior.
+
+For full integration testing, see: `_internal/test-dgd-with-modelref.yaml`
+
 ## Overview
 
 `DynamoModel` provides declarative model lifecycle management for Dynamo deployments. It enables:
