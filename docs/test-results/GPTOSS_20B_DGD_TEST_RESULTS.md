@@ -204,11 +204,11 @@ This is the **same issue** observed in the DeepSeek-70B DGD test:
 kubectl apply -f ai-on-eks/blueprints/inference/nvidia-dynamo/vllm/vllm-disaggregated-gptoss-20b.yaml
 
 # Monitor
-kubectl get pods -n dynamo-cloud | grep gptoss
-kubectl logs <worker-pod> -n dynamo-cloud --tail=50
+kubectl get pods -n dynamo | grep gptoss
+kubectl logs <worker-pod> -n dynamo --tail=50
 
 # Test (would have used if workers became ready)
-kubectl port-forward svc/vllm-gptoss-20b-disagg-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward svc/vllm-gptoss-20b-disagg-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -218,7 +218,7 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 
 # Cleanup
-kubectl delete dgd vllm-gptoss-20b-disagg -n dynamo-cloud
+kubectl delete dgd vllm-gptoss-20b-disagg -n dynamo
 ```
 
 ---

@@ -8,7 +8,7 @@ We have identified three distinct categories of failures. This framework defines
 
 | Category | Examples | Root Cause Hypothesis | Success Criteria |
 |----------|----------|-----------------------|------------------|
-| **Observability** | `vllm-full-observability`<br>`vllm-otel-tracing`<br>`vllm-audit-logging` | **Misconfigured OTEL Endpoint:** The DGDs are configured to send traces to `http://tempo.dynamo-cloud.svc.cluster.local:4317`, but the Tempo service might be in a different namespace (e.g., `observability`) or not running. | Traces appear in Tempo/Grafana; Audit logs are generated; Tests pass. |
+| **Observability** | `vllm-full-observability`<br>`vllm-otel-tracing`<br>`vllm-audit-logging` | **Misconfigured OTEL Endpoint:** The DGDs are configured to send traces to `http://tempo.dynamo.svc.cluster.local:4317`, but the Tempo service might be in a different namespace (e.g., `observability`) or not running. | Traces appear in Tempo/Grafana; Audit logs are generated; Tests pass. |
 | **Multimodal** | `llava-1.5-7b`<br>`llava-next-video-7b`<br>`qwen2.5-vl-7b` | **Processor Device Allocation:** The `Processor` component requests GPU in `limits` but not `requests`, or the privileged mode interferes with the NVIDIA device plugin's ability to inject the device. Upstream bug suspected. | Processor pod starts successfully; GPU is accessible; Multimodal inference works. |
 | **DynamoModel** | `base-model`<br>`lora-adapter` | **Missing Prerequisites:** The test cases apply `DynamoModel` CRDs without a corresponding running `DynamoGraphDeployment` (DGD) that serves the referenced base model. The DGD controller must first create the headless service and labels. | `DynamoModel` status shows `readyEndpoints > 0`; Service discovery works. |
 
@@ -24,16 +24,16 @@ We have identified three distinct categories of failures. This framework defines
     ```bash
     kubectl get pods -n observability
     kubectl get svc -n observability
-    kubectl get svc -n dynamo-cloud  # Check if ExternalName or service exists here
+    kubectl get svc -n dynamo  # Check if ExternalName or service exists here
     ```
 2.  **Check DGD Configuration:**
     *   Inspect `ai-on-eks/blueprints/inference/nvidia-dynamo/01-core/observability/vllm-full-observability.yaml`.
-    *   Current Config: `OTEL_EXPORT_ENDPOINT: "http://tempo.dynamo-cloud.svc.cluster.local:4317"`
+    *   Current Config: `OTEL_EXPORT_ENDPOINT: "http://tempo.dynamo.svc.cluster.local:4317"`
     *   **Action:** If Tempo is in `observability` namespace, this URL is incorrect (unless there's a local service proxy). It should likely be `http://tempo.observability.svc.cluster.local:4317`.
 3.  **Analyze Pod Logs:**
     *   Check logs for connection refused errors to the OTEL endpoint.
     ```bash
-    kubectl logs -n dynamo-cloud -l app.kubernetes.io/name=vllm-full-obs --tail=100 | grep -i "otel"
+    kubectl logs -n dynamo -l app.kubernetes.io/name=vllm-full-obs --tail=100 | grep -i "otel"
     ```
 
 **Potential Fix:**
@@ -45,7 +45,7 @@ We have identified three distinct categories of failures. This framework defines
 **Investigation Steps:**
 1.  **Inspect Processor Pod Status:**
     ```bash
-    kubectl describe pod -n dynamo-cloud -l component=processor
+    kubectl describe pod -n dynamo -l component=processor
     ```
     *   Look for `FailedScheduling` or `ContainerCreating` errors related to GPU resources.
 2.  **Check GPU Allocation:**
@@ -85,7 +85,7 @@ We have identified three distinct categories of failures. This framework defines
     *   **Correct Sequence:**
         1.  Deploy DGD (e.g., `vllm-aggregated-default`) with `modelRef: Qwen/Qwen3-0.6B`.
         2.  Wait for DGD to be Ready.
-        3.  Verify Headless Service creation: `kubectl get svc -n dynamo-cloud -l nvidia.com/dynamo-base-model-hash`.
+        3.  Verify Headless Service creation: `kubectl get svc -n dynamo -l nvidia.com/dynamo-base-model-hash`.
         4.  Apply `DynamoModel` CRD referencing `Qwen/Qwen3-0.6B`.
 3.  **Deep Dive Verification:**
     *   Check for the hash label on pods: `nvidia.com/dynamo-base-model-hash`.

@@ -33,35 +33,35 @@ entries:
     path: 01-core/vllm/vllm-aggregated-default.yaml
     backend: vllm
     tier: core
-    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo-cloud"
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
     notes: "Baseline aggregated serving (vLLM)"
 
   - id: sglang-aggregated-default
     path: 01-core/sglang/sglang-aggregated-default.yaml
     backend: sglang
     tier: core
-    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo-cloud"
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
     notes: "Backend diversity: minimal SGLang 'first success'"
 
   - id: trtllm-aggregated-default
     path: 01-core/trtllm/trtllm-aggregated-default.yaml
     backend: trtllm
     tier: core
-    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo-cloud"
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
     notes: "Backend diversity: minimal TensorRT-LLM 'first success'"
 
   - id: vllm-disaggregated-default
     path: 01-core/vllm/vllm-disaggregated-default.yaml
     backend: vllm
     tier: core
-    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo-cloud"
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
     notes: "Baseline disaggregated prefill/decode"
 
   - id: vllm-router
     path: 01-core/vllm/vllm-router.yaml
     backend: vllm
     tier: core
-    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo-cloud"
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
     notes: "KV-aware routing (router-mode=kv)"
 
   - id: vllm-disaggregated-kvbm-disk
@@ -75,7 +75,7 @@ entries:
     path: 01-core/multi-replica-vllm/multi-replica-vllm.yaml
     backend: vllm
     tier: core
-    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo-cloud"
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
     notes: "Multi-replica HA pattern + KV routing"
 
   - id: vllm-full-observability

@@ -68,13 +68,13 @@ DGDR (DynamoGraphDeploymentRequest) is an asynchronous profiling workflow:
 ./deploy.sh vllm-dgdr-online
 
 # 2. Monitor profiling (can take hours!)
-kubectl get dgdr -n dynamo-cloud -w
+kubectl get dgdr -n dynamo -w
 
 # 3. View profiler job status
-kubectl get jobs -n dynamo-cloud | grep profiler
+kubectl get jobs -n dynamo | grep profiler
 
 # 4. Once complete, a DGD is auto-created
-kubectl get dgd -n dynamo-cloud
+kubectl get dgd -n dynamo
 
 # 5. Test the resulting deployment
 ./test.sh vllm-dgdr-online
@@ -97,7 +97,7 @@ kubectl get dgd -n dynamo-cloud
 ./deploy.sh vllm-aggregated-gptoss-20b
 
 # For DGDR, ensure Prometheus is working first
-kubectl get servicemonitor -n dynamo-cloud
+kubectl get servicemonitor -n dynamo
 ./deploy.sh vllm-dgdr-online
 ```
 

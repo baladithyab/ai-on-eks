@@ -76,7 +76,7 @@ cd ../../blueprints/inference/nvidia-dynamo
 ### 4. Test Deployment
 ```bash
 # Port forward and test API
-kubectl port-forward svc/vllm-agg-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward svc/vllm-agg-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/v1/models
 ```
 
@@ -237,22 +237,22 @@ Both NGC API key and HuggingFace token are **required** and must be configured i
 ```bash
 # Create HuggingFace secret (for GPU examples)
 kubectl create secret generic hf-token-secret \
-  --from-literal=HF_TOKEN="your-token" -n dynamo-cloud
+  --from-literal=HF_TOKEN="your-token" -n dynamo
 
 # Deploy specific example
-kubectl apply -f vllm/vllm-aggregated-default.yaml -n dynamo-cloud
+kubectl apply -f vllm/vllm-aggregated-default.yaml -n dynamo
 
 # Monitor deployment
-kubectl get pods -n dynamo-cloud -l app=vllm-agg -w
+kubectl get pods -n dynamo -l app=vllm-agg -w
 ```
 
 ### Testing Deployments
 ```bash
 # Port forward via Service (recommended) - enables both API and metrics access
-kubectl port-forward service/vllm-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-frontend 8000:8000 -n dynamo
 
 # Alternative: Direct deployment port-forward
-# kubectl port-forward deployment/vllm-frontend 8000:8000 -n dynamo-cloud
+# kubectl port-forward deployment/vllm-frontend 8000:8000 -n dynamo
 
 # Test health, models, and metrics
 curl http://localhost:8000/health
@@ -614,11 +614,11 @@ extraPodSpec:
 #### **Step 3: Study Existing Code**
 ```bash
 # Explore container contents
-kubectl exec -it vllm-frontend-xxx -n dynamo-cloud -- ls -la /workspace/
-kubectl exec -it vllm-frontend-xxx -n dynamo-cloud -- find /workspace/ -name "*.py" | head -20
+kubectl exec -it vllm-frontend-xxx -n dynamo -- ls -la /workspace/
+kubectl exec -it vllm-frontend-xxx -n dynamo -- find /workspace/ -name "*.py" | head -20
 
 # Check backend-specific implementations
-kubectl exec -it vllm-worker-xxx -n dynamo-cloud -- ls -la /workspace/components/backends/
+kubectl exec -it vllm-worker-xxx -n dynamo -- ls -la /workspace/components/backends/
 ```
 
 #### **Step 4: Create Custom YAML Template**
@@ -885,7 +885,7 @@ envs:
 Workers expose Prometheus-compatible metrics:
 ```bash
 # Check worker metrics
-kubectl port-forward vllm-worker-xxx 9090:9090 -n dynamo-cloud
+kubectl port-forward vllm-worker-xxx 9090:9090 -n dynamo
 curl http://localhost:9090/metrics
 ```
 
@@ -902,14 +902,14 @@ The most efficient approach uses the existing Service with AWS Load Balancer Con
 kubectl annotate service ${EXAMPLE}-frontend \
   service.beta.kubernetes.io/aws-load-balancer-type="nlb" \
   service.beta.kubernetes.io/aws-load-balancer-target-type="ip" \
-  -n dynamo-cloud
+  -n dynamo
 
 # Option B: Application Load Balancer (ALB) - More Features
 kubectl annotate service ${EXAMPLE}-frontend \
   service.beta.kubernetes.io/aws-load-balancer-type="external" \
   service.beta.kubernetes.io/aws-load-balancer-target-type="ip" \
   service.beta.kubernetes.io/aws-load-balancer-scheme="internet-facing" \
-  -n dynamo-cloud
+  -n dynamo
 ```
 
 **Key Benefits:**
@@ -927,7 +927,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: ${EXAMPLE}-ingress
-  namespace: dynamo-cloud
+  namespace: dynamo
   annotations:
     kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
@@ -1001,10 +1001,10 @@ EXAMPLE="vllm"  # or sglang, trtllm, etc.
 kubectl annotate service ${EXAMPLE}-frontend \
   service.beta.kubernetes.io/aws-load-balancer-type="nlb" \
   service.beta.kubernetes.io/aws-load-balancer-target-type="ip" \
-  -n dynamo-cloud
+  -n dynamo
 
 # Get external endpoint
-kubectl get service ${EXAMPLE}-frontend -n dynamo-cloud
+kubectl get service ${EXAMPLE}-frontend -n dynamo
 ```
 
 ### Security Considerations
@@ -1022,7 +1022,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: ${EXAMPLE}-frontend-netpol
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   podSelector:
     matchLabels:
@@ -1054,10 +1054,10 @@ The Service created by the deploy script enables both API access and Prometheus 
 
 ```bash
 # Check service endpoints
-kubectl get endpoints ${EXAMPLE}-frontend -n dynamo-cloud
+kubectl get endpoints ${EXAMPLE}-frontend -n dynamo
 
 # Verify load balancer health checks
-kubectl describe service ${EXAMPLE}-frontend -n dynamo-cloud
+kubectl describe service ${EXAMPLE}-frontend -n dynamo
 
 # Monitor via ServiceMonitor (automatically created)
 curl http://<load-balancer-url>/metrics
@@ -1191,8 +1191,8 @@ envs:
 **Verification**:
 ```bash
 # Check namespace isolation is working
-kubectl port-forward svc/vllm-frontend 8001:8000 -n dynamo-cloud &
-kubectl port-forward svc/sglang-frontend 8002:8000 -n dynamo-cloud &
+kubectl port-forward svc/vllm-frontend 8001:8000 -n dynamo &
+kubectl port-forward svc/sglang-frontend 8002:8000 -n dynamo &
 
 # vllm should only show Qwen model
 curl http://localhost:8001/health | jq '.instances[].namespace' | sort -u
@@ -1239,7 +1239,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: ${EXAMPLE}-frontend
-  namespace: dynamo-cloud
+  namespace: dynamo
   labels:
     app: ${EXAMPLE}-frontend
 spec:
@@ -1259,7 +1259,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: ${EXAMPLE}-frontend-monitor
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   selector:
     matchLabels:
@@ -1372,9 +1372,9 @@ Each test script can be run directly:
 **1. Pod Stuck in Pending - Node Selection Issues**
 ```bash
 # Check pod events and node availability
-kubectl describe pod <pod-name> -n dynamo-cloud
+kubectl describe pod <pod-name> -n dynamo
 kubectl get nodes -l karpenter.sh/nodepool=g5-gpu-karpenter
-kubectl get events -n dynamo-cloud --sort-by='.lastTimestamp' | grep -i pending
+kubectl get events -n dynamo --sort-by='.lastTimestamp' | grep -i pending
 ```
 
 **Possible Solutions:**
@@ -1458,8 +1458,8 @@ extraPodSpec:
 **4. Model Download Failures**
 ```bash
 # Check HuggingFace token secret and network access
-kubectl get secret hf-token-secret -n dynamo-cloud -o yaml
-kubectl logs <worker-pod> -n dynamo-cloud | grep -i "download\|token\|auth"
+kubectl get secret hf-token-secret -n dynamo -o yaml
+kubectl logs <worker-pod> -n dynamo | grep -i "download\|token\|auth"
 ```
 
 **Possible Solutions:**
@@ -1470,8 +1470,8 @@ kubectl logs <worker-pod> -n dynamo-cloud | grep -i "download\|token\|auth"
 **5. Frontend Not Finding Workers**
 ```bash
 # Check service discovery and namespace configuration
-kubectl logs <frontend-pod> -n dynamo-cloud | grep -i discover
-kubectl get pods -n dynamo-cloud -l componentType=worker
+kubectl logs <frontend-pod> -n dynamo | grep -i discover
+kubectl get pods -n dynamo -l componentType=worker
 etcdctl get --prefix /dynamo/ --keys-only  # If etcd is accessible
 ```
 
@@ -1483,8 +1483,8 @@ etcdctl get --prefix /dynamo/ --keys-only  # If etcd is accessible
 **6. API 503 Errors**
 ```bash
 # Check worker readiness and health
-kubectl get pods -n dynamo-cloud -l componentType=worker
-kubectl logs <worker-pod> -n dynamo-cloud --tail=100 | grep -i "ready\|health\|error"
+kubectl get pods -n dynamo -l componentType=worker
+kubectl logs <worker-pod> -n dynamo --tail=100 | grep -i "ready\|health\|error"
 ```
 
 **Possible Solutions:**
@@ -1507,13 +1507,13 @@ readinessProbe:
 ### Cleanup and Reset
 ```bash
 # Remove specific deployment
-kubectl delete dynamographdeployment <name> -n dynamo-cloud
+kubectl delete dynamographdeployment <name> -n dynamo
 
 # Full cleanup (removes all infrastructure)
 cd infra/nvidia-dynamo && ./cleanup.sh
 
 # Reset just the examples (keep platform)
-kubectl delete dynamographdeployment --all -n dynamo-cloud
+kubectl delete dynamographdeployment --all -n dynamo
 ```
 
 ## Documentation and Resources
@@ -1527,7 +1527,7 @@ kubectl delete dynamographdeployment --all -n dynamo-cloud
 ### Additional Examples
 Explore the `/workspace/` directory in containers for more examples:
 ```bash
-kubectl exec -it <pod-name> -n dynamo-cloud -- find /workspace/examples -type f -name "*.py"
+kubectl exec -it <pod-name> -n dynamo -- find /workspace/examples -type f -name "*.py"
 ```
 
 ---

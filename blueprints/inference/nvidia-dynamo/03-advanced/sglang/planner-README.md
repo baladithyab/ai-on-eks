@@ -40,7 +40,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: dynamo-pvc
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   accessModes:
     - ReadWriteOnce
@@ -54,7 +54,7 @@ EOF
 # This step generates profiling_results/ directory in the PVC
 
 # 3. Verify profiling results exist
-kubectl exec -n dynamo-cloud -it <profiling-pod> -- ls -la /data/profiling_results/
+kubectl exec -n dynamo -it <profiling-pod> -- ls -la /data/profiling_results/
 ```
 
 ### 2. Prometheus
@@ -65,21 +65,21 @@ The SLA Planner requires Prometheus to collect metrics. Ensure you have Promethe
 
 ```bash
 # 1. Ensure profiling is complete and PVC exists
-kubectl get pvc dynamo-pvc -n dynamo-cloud
+kubectl get pvc dynamo-pvc -n dynamo
 
 # 2. Deploy with SLA Planner
-kubectl apply -f sglang-planner.yaml -n dynamo-cloud
+kubectl apply -f sglang-planner.yaml -n dynamo
 
 # 3. Wait for all components to be ready
-kubectl wait --for=condition=ready pod -l nvidia.com/dynamo-component=Frontend -n dynamo-cloud --timeout=600s
-kubectl wait --for=condition=ready pod -l nvidia.com/dynamo-component=Planner -n dynamo-cloud --timeout=600s
+kubectl wait --for=condition=ready pod -l nvidia.com/dynamo-component=Frontend -n dynamo --timeout=600s
+kubectl wait --for=condition=ready pod -l nvidia.com/dynamo-component=Planner -n dynamo --timeout=600s
 
 # 4. Test the deployment
-kubectl port-forward service/sglang-planner-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/sglang-planner-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/health
 
 # 5. Monitor planner decisions
-kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-component=Planner -f
+kubectl logs -n dynamo -l nvidia.com/dynamo-component=Planner -f
 ```
 
 ## Key Configuration
@@ -159,7 +159,7 @@ args:
 
 ```bash
 # View planner scaling decisions
-kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-component=Planner -f
+kubectl logs -n dynamo -l nvidia.com/dynamo-component=Planner -f
 
 # Look for lines like:
 # "Scaling prefill workers from 2 to 3"
@@ -171,7 +171,7 @@ kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-component=Planner -f
 The planner exposes metrics on port 9085:
 
 ```bash
-kubectl port-forward -n dynamo-cloud <planner-pod> 9085:9085
+kubectl port-forward -n dynamo <planner-pod> 9085:9085
 curl http://localhost:9085/metrics
 ```
 
@@ -184,10 +184,10 @@ curl http://localhost:9085/metrics
 
 ```bash
 # Watch worker pods scale up/down
-kubectl get pods -n dynamo-cloud -l nvidia.com/dynamo-component=Worker -w
+kubectl get pods -n dynamo -l nvidia.com/dynamo-component=Worker -w
 
 # Check current replica counts
-kubectl get dgd sglang-planner -n dynamo-cloud -o yaml | grep replicas
+kubectl get dgd sglang-planner -n dynamo -o yaml | grep replicas
 ```
 
 ## Troubleshooting
@@ -196,7 +196,7 @@ kubectl get dgd sglang-planner -n dynamo-cloud -o yaml | grep replicas
 
 ```bash
 # Check planner logs for errors
-kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-component=Planner
+kubectl logs -n dynamo -l nvidia.com/dynamo-component=Planner
 
 # Common issues:
 # - Profiling results not found in PVC
@@ -208,31 +208,31 @@ kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-component=Planner
 
 ```bash
 # Verify PVC is mounted correctly
-kubectl describe pod -n dynamo-cloud <planner-pod> | grep -A 5 "Mounts:"
+kubectl describe pod -n dynamo <planner-pod> | grep -A 5 "Mounts:"
 
 # Check profiling results exist
-kubectl exec -n dynamo-cloud <planner-pod> -- ls -la /data/profiling_results/
+kubectl exec -n dynamo <planner-pod> -- ls -la /data/profiling_results/
 ```
 
 ### Workers not responding to scaling
 
 ```bash
 # Check DGD status
-kubectl get dgd sglang-planner -n dynamo-cloud -o yaml
+kubectl get dgd sglang-planner -n dynamo -o yaml
 
 # Verify planner has permissions to update DGD
-kubectl auth can-i update dynamographdeployments --as=system:serviceaccount:dynamo-cloud:default -n dynamo-cloud
+kubectl auth can-i update dynamographdeployments --as=system:serviceaccount:dynamo:default -n dynamo
 ```
 
 ### Disaggregation connection issues
 
 ```bash
 # Check NIXL transfer backend connectivity
-kubectl logs -n dynamo-cloud <prefill-worker-pod> | grep -i nixl
-kubectl logs -n dynamo-cloud <decode-worker-pod> | grep -i nixl
+kubectl logs -n dynamo <prefill-worker-pod> | grep -i nixl
+kubectl logs -n dynamo <decode-worker-pod> | grep -i nixl
 
 # Verify bootstrap port is accessible
-kubectl exec -n dynamo-cloud <prefill-worker-pod> -- netstat -tlnp | grep 12345
+kubectl exec -n dynamo <prefill-worker-pod> -- netstat -tlnp | grep 12345
 ```
 
 For complete profiling instructions and advanced configuration, see the [full documentation](https://awslabs.github.io/ai-on-eks/docs/blueprints/inference/GPUs/nvidia-dynamo#sla-planner).

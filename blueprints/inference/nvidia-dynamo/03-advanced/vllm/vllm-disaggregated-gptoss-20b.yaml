@@ -28,7 +28,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
   name: vllm-gptoss-20b-disagg
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   # Use shared HF cache from EFS
   pvcs:

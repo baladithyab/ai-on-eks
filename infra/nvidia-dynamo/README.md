@@ -59,7 +59,7 @@ This script will:
 
 ```bash
 # Check Dynamo platform pods
-kubectl get pods -n dynamo-cloud
+kubectl get pods -n dynamo
 
 # Expected output:
 # dynamo-operator-xxx        Running
@@ -68,7 +68,7 @@ kubectl get pods -n dynamo-cloud
 # dynamo-shared-hf-cache-xxx Running (if using EFS cache)
 
 # Check persistent volume claims
-kubectl get pvc -n dynamo-cloud
+kubectl get pvc -n dynamo
 
 # Expected output:
 # dynamo-shared-hf-cache   Bound   (500Gi EFS volume)
@@ -222,8 +222,8 @@ dynamo_enable_kai_scheduler = true   # Intelligent resource allocation
 | Component | Namespace | Description |
 |-----------|-----------|-------------|
 | **dynamo-crds** | default | Custom Resource Definitions for Dynamo |
-| **dynamo-platform** | dynamo-cloud | Core platform (operator, etcd, NATS) |
-| **dynamo-shared-hf-cache** | dynamo-cloud | Shared model cache (EFS PVC) |
+| **dynamo-platform** | dynamo | Core platform (operator, etcd, NATS) |
+| **dynamo-shared-hf-cache** | dynamo | Shared model cache (EFS PVC) |
 | **tempo** (optional) | observability | Distributed tracing backend |
 
 ### Deployed via Terraform
@@ -242,7 +242,7 @@ dynamo_enable_kai_scheduler = true   # Intelligent resource allocation
 │ Amazon EKS Cluster                                          │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ dynamo-cloud namespace                               │  │
+│  │ dynamo namespace                               │  │
 │  │                                                      │  │
 │  │  ┌────────────────┐  ┌────────────────┐            │  │
 │  │  │ Dynamo         │  │ etcd           │            │  │
@@ -354,10 +354,10 @@ Remove all Dynamo resources and infrastructure:
 **Selective Cleanup**:
 ```bash
 # Remove only workloads (keep platform)
-kubectl delete dynamographdeployment --all -n dynamo-cloud
+kubectl delete dynamographdeployment --all -n dynamo
 
 # Remove specific workload
-kubectl delete dynamographdeployment <name> -n dynamo-cloud
+kubectl delete dynamographdeployment <name> -n dynamo
 ```
 
 ## Cost Analysis
@@ -414,8 +414,8 @@ Costs vary based on GPU usage. See [`OMADA_HEALTH_COST_ANALYSIS.md`](OMADA_HEALT
 
 ```bash
 # Check events
-kubectl describe pod <pod-name> -n dynamo-cloud
-kubectl get events -n dynamo-cloud --sort-by='.lastTimestamp'
+kubectl describe pod <pod-name> -n dynamo
+kubectl get events -n dynamo --sort-by='.lastTimestamp'
 ```
 
 **Common Causes**:
@@ -427,7 +427,7 @@ kubectl get events -n dynamo-cloud --sort-by='.lastTimestamp'
 
 ```bash
 # Check operator logs
-kubectl logs -n dynamo-cloud -l app=dynamo-operator
+kubectl logs -n dynamo -l app=dynamo-operator
 
 # Check ArgoCD applications
 kubectl get applications -n argocd
@@ -437,10 +437,10 @@ kubectl get applications -n argocd
 
 ```bash
 # Verify HuggingFace secret
-kubectl get secret hf-token-secret -n dynamo-cloud -o yaml
+kubectl get secret hf-token-secret -n dynamo -o yaml
 
 # Check worker logs
-kubectl logs <worker-pod> -n dynamo-cloud | grep -i download
+kubectl logs <worker-pod> -n dynamo | grep -i download
 ```
 
 **Solution**: Regenerate HuggingFace token and update secret.

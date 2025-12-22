@@ -22,7 +22,7 @@ NC='\033[0m' # No Color
 #---------------------------------------------------------------
 # Default Configuration
 #---------------------------------------------------------------
-NAMESPACE="${NAMESPACE:-dynamo-cloud}"
+NAMESPACE="${NAMESPACE:-dynamo}"
 TEMPO_NAMESPACE="${TEMPO_NAMESPACE:-observability}"
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-60}"
 LOCAL_PORT="${LOCAL_PORT:-}"

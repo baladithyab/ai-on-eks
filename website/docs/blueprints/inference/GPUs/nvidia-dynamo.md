@@ -46,7 +46,7 @@ cd ../../blueprints/inference/nvidia-dynamo
 # ./deploy.sh vllm           # Deploy vLLM with interactive setup
 
 # 4. Test your deployment (wait for model download)
-kubectl port-forward svc/vllm-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward svc/vllm-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/health
 ```
 
@@ -224,7 +224,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
   name: my-deployment              # Unique name for this deployment
-  namespace: dynamo-cloud           # Must be dynamo-cloud
+  namespace: dynamo           # Must be dynamo
 spec:
   services:                         # Define all services in the graph
     Frontend:                       # Frontend service (required)
@@ -290,7 +290,7 @@ spec:
 #### 1. Metadata Section
 
 - **name**: Unique identifier for your deployment (used in `kubectl` commands)
-- **namespace**: Must be `dynamo-cloud` (where Dynamo platform runs)
+- **namespace**: Must be `dynamo` (where Dynamo platform runs)
 
 #### 2. Services Section
 
@@ -436,7 +436,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
   name: llama-70b-production
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   services:
     Frontend:
@@ -545,7 +545,7 @@ SKIP_SERVICE_MONITOR=true ./deploy.sh trtllm-aggregated-default
 1. Validates prerequisites (kubectl, namespace exists)
 2. Reads Dynamo version from tfvars or environment
 3. Prompts for HuggingFace token if needed
-4. Creates `hf-token-secret` in dynamo-cloud namespace
+4. Creates `hf-token-secret` in dynamo namespace
 5. Applies the DGD YAML manifest
 6. Creates ServiceMonitor for Prometheus (optional)
 7. Shows deployment status and next steps
@@ -612,7 +612,7 @@ Access your deployment directly:
 
 ```bash
 # Start port forwarding
-kubectl port-forward svc/vllm-aggregated-default-frontend 8000:8000 -n dynamo-cloud &
+kubectl port-forward svc/vllm-aggregated-default-frontend 8000:8000 -n dynamo &
 
 # Test health endpoint
 curl http://localhost:8000/health
@@ -801,15 +801,15 @@ Planner:
 ```bash
 # Check cluster status
 kubectl get nodes
-kubectl get pods -n dynamo-cloud
+kubectl get pods -n dynamo
 
 # View logs
 kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server
-kubectl logs -n dynamo-cloud -l app=vllm-worker
+kubectl logs -n dynamo -l app=vllm-worker
 
 # Check deployments
-kubectl get dynamographdeployment -n dynamo-cloud
-kubectl describe dynamographdeployment <name> -n dynamo-cloud
+kubectl get dynamographdeployment -n dynamo
+kubectl describe dynamographdeployment <name> -n dynamo
 ```
 
 ## Node Selection and Customization
@@ -1047,10 +1047,10 @@ Frontend:
 
 ```bash
 # Deploy KV Router example
-kubectl apply -f blueprints/inference/nvidia-dynamo/vllm/router/vllm-aggregated-router.yaml -n dynamo-cloud
+kubectl apply -f blueprints/inference/nvidia-dynamo/vllm/router/vllm-aggregated-router.yaml -n dynamo
 
 # Test with repeated prompts to see cache benefits
-kubectl port-forward service/vllm-aggregated-router-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-aggregated-router-frontend 8000:8000 -n dynamo
 
 # First request (cold cache)
 curl -X POST http://localhost:8000/v1/chat/completions \
@@ -1130,10 +1130,10 @@ KVBM deployments require high-memory GPU instances:
 
 ```bash
 # Deploy KVBM example
-kubectl apply -f blueprints/inference/nvidia-dynamo/vllm/kvbm/vllm-aggregated-kvbm.yaml -n dynamo-cloud
+kubectl apply -f blueprints/inference/nvidia-dynamo/vllm/kvbm/vllm-aggregated-kvbm.yaml -n dynamo
 
 # Test with large context
-kubectl port-forward service/vllm-aggregated-kvbm-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-aggregated-kvbm-frontend 8000:8000 -n dynamo
 
 # Test with 32K token context
 curl -X POST http://localhost:8000/v1/chat/completions \
@@ -1204,7 +1204,7 @@ Planner:
 
 ```bash
 # Watch planner scaling decisions
-kubectl logs -n dynamo-cloud -l app=vllm-disaggregated-planner-planner -f
+kubectl logs -n dynamo -l app=vllm-disaggregated-planner-planner -f
 
 # Expected output:
 # [INFO] Current TTFT: 120ms, Target: 100ms
@@ -1251,7 +1251,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: my-model
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   model: Qwen/Qwen2.5-Coder-32B-Instruct
   backend: vllm
@@ -1289,7 +1289,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: llama-70b-config
-  namespace: dynamo-cloud
+  namespace: dynamo
 data:
   disagg.yaml: |
     pvcs:
@@ -1316,7 +1316,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: vllm-70b
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   model: meta-llama/Llama-3.3-70B-Instruct
   backend: vllm
@@ -1334,13 +1334,13 @@ spec:
 
 ```bash
 # Deploy DGDR (starts profiling automatically)
-kubectl apply -f vllm-dgdr-qwen-coder-32b.yaml -n dynamo-cloud
+kubectl apply -f vllm-dgdr-qwen-coder-32b.yaml -n dynamo
 
 # Monitor profiling progress
-kubectl get dgdr -n dynamo-cloud -w
+kubectl get dgdr -n dynamo -w
 
 # Watch profiler logs
-kubectl logs -n dynamo-cloud -l nvidia.com/component=profiler -f
+kubectl logs -n dynamo -l nvidia.com/component=profiler -f
 
 # Status progression: Pending → Profiling → Deploying → Ready
 ```
@@ -1390,7 +1390,7 @@ args:
 
 ```bash
 # Check DGDR status
-kubectl describe dgdr <name> -n dynamo-cloud
+kubectl describe dgdr <name> -n dynamo
 
 # Common issues:
 # - Timeout: Increase deployment.timeout for large models
@@ -1413,7 +1413,7 @@ AIPerf is the standardized benchmarking tool built into Dynamo containers, repla
 **Running AIPerf:**
 ```bash
 # From within a Dynamo worker pod
-kubectl exec -it <worker-pod> -n dynamo-cloud -- \
+kubectl exec -it <worker-pod> -n dynamo -- \
   python3 -m dynamo.benchmarks.aiperf \
   --model Qwen/Qwen3-8B \
   --backend vllm \
@@ -1510,10 +1510,10 @@ services:
 
 ```bash
 # Deploy multimodal example
-kubectl apply -f blueprints/inference/nvidia-dynamo/multimodal/llava-1.5-7b.yaml -n dynamo-cloud
+kubectl apply -f blueprints/inference/nvidia-dynamo/multimodal/llava-1.5-7b.yaml -n dynamo
 
 # Test with image understanding
-kubectl port-forward service/llava-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/llava-frontend 8000:8000 -n dynamo
 
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
@@ -1624,16 +1624,16 @@ When you add `multinode.nodeCount` to a service in your DGD:
 
 ```bash
 # Deploy multi-node example
-kubectl apply -f blueprints/inference/nvidia-dynamo/multi-node/vllm-disaggregated-multinode.yaml -n dynamo-cloud
+kubectl apply -f blueprints/inference/nvidia-dynamo/multi-node/vllm-disaggregated-multinode.yaml -n dynamo
 
 # Monitor Grove coordination
-kubectl logs -n dynamo-cloud -l app.kubernetes.io/name=grove-operator -f
+kubectl logs -n dynamo -l app.kubernetes.io/name=grove-operator -f
 
 # Wait for all pods to be ready
-kubectl wait --for=condition=ready pod -l app=vllm-disagg-multinode-prefill -n dynamo-cloud --timeout=900s
+kubectl wait --for=condition=ready pod -l app=vllm-disagg-multinode-prefill -n dynamo --timeout=900s
 
 # Test the deployment
-kubectl port-forward service/vllm-disagg-multinode-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-disagg-multinode-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/health
 ```
 
@@ -1668,7 +1668,7 @@ spec:
       value: "1"
     # Tempo endpoint
     - name: OTEL_EXPORT_ENDPOINT
-      value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
+      value: "http://tempo.dynamo.svc.cluster.local:4317"
 
   services:
     Frontend:
@@ -1712,7 +1712,7 @@ helm install tempo grafana/tempo \
    ```
 
 2. Add Tempo data source:
-   - URL: `http://tempo.dynamo-cloud.svc.cluster.local:3200`
+   - URL: `http://tempo.dynamo.svc.cluster.local:3200`
 
 3. Explore traces:
    - Navigate to Explore → Select Tempo
@@ -1739,10 +1739,10 @@ Audit logs are automatically generated for all `/v1/chat/completions` requests w
 
 ```bash
 # View frontend logs in JSONL format
-kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-component=Frontend | jq .
+kubectl logs -n dynamo -l nvidia.com/dynamo-component=Frontend | jq .
 
 # Filter for specific request IDs
-kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-component=Frontend | jq 'select(.x_request_id=="test-001")'
+kubectl logs -n dynamo -l nvidia.com/dynamo-component=Frontend | jq 'select(.x_request_id=="test-001")'
 ```
 
 #### Prometheus Metrics
@@ -1764,7 +1764,7 @@ The `deploy.sh` script automatically creates ServiceMonitor resources for Promet
 
 ```bash
 # Port-forward to frontend service
-kubectl port-forward service/vllm-disagg-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-disagg-frontend 8000:8000 -n dynamo
 
 # View metrics
 curl http://localhost:8000/metrics
@@ -1876,13 +1876,13 @@ To remove a specific inference deployment:
 
 ```bash
 # Delete a specific DynamoGraphDeployment
-kubectl delete dynamographdeployment <deployment-name> -n dynamo-cloud
+kubectl delete dynamographdeployment <deployment-name> -n dynamo
 
 # Example: Delete vLLM deployment
-kubectl delete dynamographdeployment vllm-aggregated-default -n dynamo-cloud
+kubectl delete dynamographdeployment vllm-aggregated-default -n dynamo
 
 # Delete associated secrets
-kubectl delete secret hf-token-secret -n dynamo-cloud
+kubectl delete secret hf-token-secret -n dynamo
 ```
 
 **What gets deleted:**

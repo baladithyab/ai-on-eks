@@ -239,7 +239,7 @@ resource "kubernetes_namespace_v1" "dynamo_cloud" {
   count = var.enable_dynamo_stack ? 1 : 0
 
   metadata {
-    name = "dynamo-cloud"
+    name = "dynamo"
   }
 
   depends_on = [
@@ -248,7 +248,7 @@ resource "kubernetes_namespace_v1" "dynamo_cloud" {
 }
 
 #---------------------------------------------------------------
-# NVIDIA Dynamo Secrets in dynamo-cloud namespace
+# NVIDIA Dynamo Secrets in dynamo namespace
 # IMPORTANT: These must be created BEFORE the ArgoCD Application
 # because the platform Helm chart references ngc-secret in imagePullSecrets
 #---------------------------------------------------------------

@@ -30,7 +30,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Default namespace (used when a manifest doesn't specify metadata.namespace)
-NAMESPACE="dynamo-cloud"
+NAMESPACE="dynamo"
 
 # Catalog
 CATALOG_FILE="${SCRIPT_DIR}/catalog/catalog.yaml"
@@ -193,7 +193,7 @@ manifest_get_meta_field() {
         v=$0
         sub("^[[:space:]]*" field ":[[:space:]]*", "", v)
         gsub(/\"/, "", v)
-        # Strip inline comments (e.g., "dynamo-cloud  # comment")
+        # Strip inline comments (e.g., "dynamo  # comment")
         sub(/[[:space:]]*#.*$/, "", v)
         # Trim trailing whitespace
         sub(/[[:space:]]+$/, "", v)
@@ -663,10 +663,10 @@ SERVICEMONITOR_TEMPLATE="${SCRIPT_DIR}/servicemonitor-template.yaml"
 if [ -f "${SERVICEMONITOR_TEMPLATE}" ]; then
     TEMP_SERVICEMONITOR="/tmp/${DEPLOYMENT_NAME}-servicemonitor.yaml"
 
-    # Replace both example name placeholder and namespace (template defaults to dynamo-cloud)
+    # Replace both example name placeholder and namespace (template defaults to dynamo)
     sed "s/EXAMPLE_NAME/${DEPLOYMENT_NAME}/g" "${SERVICEMONITOR_TEMPLATE}" \
-      | sed "s/namespace: dynamo-cloud/namespace: ${TARGET_NAMESPACE}/g" \
-      | sed "s/- dynamo-cloud/- ${TARGET_NAMESPACE}/g" \
+      | sed "s/namespace: dynamo/namespace: ${TARGET_NAMESPACE}/g" \
+      | sed "s/- dynamo/- ${TARGET_NAMESPACE}/g" \
       > "${TEMP_SERVICEMONITOR}"
 
     info "Creating Service and ServiceMonitor for ${DEPLOYMENT_NAME} metrics..."

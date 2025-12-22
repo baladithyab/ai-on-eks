@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Hello World DynamoGraphDeployment for ArgoCD deployment
-# This should be applied to the dynamo-cloud namespace where the platform is deployed
+# This should be applied to the dynamo namespace where the platform is deployed
 
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
   name: hello-world
-  namespace: dynamo-cloud  # CRITICAL: Must be in same namespace as platform
+  namespace: dynamo  # CRITICAL: Must be in same namespace as platform
 spec:
   services:
     Frontend:
@@ -52,7 +52,7 @@ spec:
             - -c
           args:
             - "python3 client.py"
-        # NGC authentication handled by dynamo-cloud namespace secret
+        # NGC authentication handled by dynamo namespace secret
         imagePullSecrets:
           - name: ngc-secret
     HelloWorldWorker:
@@ -95,6 +95,6 @@ spec:
             - -c
           args:
             - python3 hello_world.py
-        # NGC authentication handled by dynamo-cloud namespace secret
+        # NGC authentication handled by dynamo namespace secret
         imagePullSecrets:
           - name: ngc-secret

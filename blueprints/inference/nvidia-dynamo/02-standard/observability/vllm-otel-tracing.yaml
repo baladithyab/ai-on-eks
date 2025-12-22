@@ -26,7 +26,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
   name: vllm-otel
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   backendFramework: vllm
   # Common environment variables for all services
@@ -39,7 +39,7 @@ spec:
       value: "1"
     # Tempo endpoint (adjust if Tempo is in different namespace/cluster)
     - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-      value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
+      value: "http://tempo.dynamo.svc.cluster.local:4317"
 
   services:
     Frontend:

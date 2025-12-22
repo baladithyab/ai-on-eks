@@ -11,7 +11,7 @@
 #   ./test-video-kvbm.sh [deployment-name] [namespace]
 #
 # Example:
-#   ./test-video-kvbm.sh qwen-vl-video dynamo-cloud
+#   ./test-video-kvbm.sh qwen-vl-video dynamo
 #
 # Prerequisites:
 #   - Qwen2.5-VL video deployment running
@@ -29,7 +29,7 @@ set -e
 
 # Configuration
 DEPLOYMENT_NAME="${1:-qwen-vl-video}"
-NAMESPACE="${2:-dynamo-cloud}"
+NAMESPACE="${2:-dynamo}"
 MODEL="Qwen/Qwen2.5-VL-7B-Instruct"
 
 # Colors for output

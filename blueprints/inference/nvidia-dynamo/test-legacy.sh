@@ -47,7 +47,7 @@ MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 # Default configuration
-NAMESPACE="dynamo-cloud"
+NAMESPACE="dynamo"
 TEMPO_NAMESPACE="observability"
 REQUEST_TIMEOUT=60
 PARALLEL_REQUESTS=5

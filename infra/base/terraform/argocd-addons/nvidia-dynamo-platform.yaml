@@ -23,7 +23,7 @@ spec:
           %{~ if dynamo_operator_namespace_restriction_enabled ~}
           namespaceRestriction:
             enabled: true
-            targetNamespace: dynamo-cloud
+            targetNamespace: dynamo
           %{~ endif ~}
           %{~ if dynamo_model_express_url != "" ~}
           modelExpressURL: ${dynamo_model_express_url}
@@ -96,7 +96,7 @@ spec:
           storageClass: efs-sc-dynamic
   destination:
     server: https://kubernetes.default.svc
-    namespace: dynamo-cloud
+    namespace: dynamo
   syncPolicy:
     automated:
       prune: true

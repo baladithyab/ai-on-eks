@@ -71,7 +71,7 @@ spec:
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: dynamo-cloud
+    namespace: dynamo
   syncPolicy:
     automated:
       prune: true

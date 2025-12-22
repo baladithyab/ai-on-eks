@@ -37,7 +37,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Default configuration
-NAMESPACE="dynamo-cloud"
+NAMESPACE="dynamo"
 
 # Test flags
 EXAMPLE=""

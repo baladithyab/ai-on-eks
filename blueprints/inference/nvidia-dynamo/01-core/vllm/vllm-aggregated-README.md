@@ -18,7 +18,7 @@ This example demonstrates:
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace with secrets configured
+- `dynamo` namespace with secrets configured
 - G5 GPU nodes available (at least 1 GPU with 24GB VRAM)
 - HuggingFace token secret configured
 
@@ -139,7 +139,7 @@ args:
 Deploy using kubectl:
 
 ```bash
-kubectl apply -f vllm.yaml -n dynamo-cloud
+kubectl apply -f vllm.yaml -n dynamo
 ```
 
 Or use the main deployment script:
@@ -164,10 +164,10 @@ Once deployed, test the vLLM service:
 ```bash
 # Port-forward the frontend via Service (created automatically by deploy script)
 # Port forward via Service (recommended) - enables both API access and metrics collection
-kubectl port-forward service/vllm-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-frontend 8000:8000 -n dynamo
 
 # Alternative: Direct deployment access
-# kubectl port-forward deployment/vllm-frontend 8000:8000 -n dynamo-cloud
+# kubectl port-forward deployment/vllm-frontend 8000:8000 -n dynamo
 
 # Test health endpoint
 curl http://localhost:8000/health
@@ -200,13 +200,13 @@ Check the deployment status:
 
 ```bash
 # View pods
-kubectl get pods -n dynamo-cloud -l app=vllm
+kubectl get pods -n dynamo -l app=vllm
 
 # Check logs
-kubectl logs -n dynamo-cloud -l app=vllm-worker -f
+kubectl logs -n dynamo -l app=vllm-worker -f
 
 # View DynamoGraphDeployment status
-kubectl get dynamographdeployment vllm -n dynamo-cloud -o yaml
+kubectl get dynamographdeployment vllm -n dynamo -o yaml
 ```
 
 ## Cleanup
@@ -214,5 +214,5 @@ kubectl get dynamographdeployment vllm -n dynamo-cloud -o yaml
 Remove the deployment:
 
 ```bash
-kubectl delete dynamographdeployment vllm -n dynamo-cloud
+kubectl delete dynamographdeployment vllm -n dynamo
 ```

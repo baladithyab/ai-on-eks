@@ -17,13 +17,13 @@ For comprehensive documentation on KV Router including architecture, configurati
 
 ```bash
 # Deploy aggregated router
-kubectl apply -f vllm-aggregated-router.yaml -n dynamo-cloud
+kubectl apply -f vllm-aggregated-router.yaml -n dynamo
 
 # Or deploy disaggregated router
-kubectl apply -f vllm-disaggregated-router.yaml -n dynamo-cloud
+kubectl apply -f vllm-disaggregated-router.yaml -n dynamo
 
 # Test the deployment
-kubectl port-forward service/vllm-aggregated-router-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-aggregated-router-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/health
 ```
 

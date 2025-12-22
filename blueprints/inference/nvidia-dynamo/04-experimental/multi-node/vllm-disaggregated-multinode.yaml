@@ -10,7 +10,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
   name: vllm-disagg-multinode
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   backendFramework: vllm
   services:

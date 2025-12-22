@@ -16,7 +16,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoModel
 metadata:
   name: qwen-base-test
-  namespace: dynamo-cloud
+  namespace: dynamo
   labels:
     app: dynamo-model-test
     test-type: base-model

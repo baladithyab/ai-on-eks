@@ -28,7 +28,7 @@ SGLang's RadixAttention provides excellent cache reuse, and when combined with d
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace with secrets configured
+- `dynamo` namespace with secrets configured
 - **Multi-GPU setup**: Minimum 2 GPUs for meaningful disaggregation
 - HuggingFace token secret configured
 - NIXL support for efficient KV cache transfer
@@ -38,7 +38,7 @@ SGLang's RadixAttention provides excellent cache reuse, and when combined with d
 Deploy using kubectl:
 
 ```bash
-kubectl apply -f sglang-disagg.yaml -n dynamo-cloud
+kubectl apply -f sglang-disagg.yaml -n dynamo
 ```
 
 Or use the main deployment script:
@@ -65,10 +65,10 @@ Test SGLang's prefix tree caching:
 ```bash
 # Port forward to frontend
 # Port forward via Service (recommended) - enables both API access and metrics collection
-kubectl port-forward service/sglang-disagg-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/sglang-disagg-frontend 8000:8000 -n dynamo
 
 # Alternative: Direct deployment access
-# kubectl port-forward deployment/sglang-disagg-frontend 8000:8000 -n dynamo-cloud
+# kubectl port-forward deployment/sglang-disagg-frontend 8000:8000 -n dynamo
 
 # Send requests with shared prefixes to trigger RadixAttention
 SYSTEM_PROMPT="You are an expert in artificial intelligence and machine learning."
@@ -157,13 +157,13 @@ Monitor SGLang's cache efficiency:
 
 ```bash
 # Check cache hit rates and prefix tree statistics
-kubectl logs -n dynamo-cloud -l app=sglang-disagg -f | grep -E "(cache|hit|tree|radix)"
+kubectl logs -n dynamo -l app=sglang-disagg -f | grep -E "(cache|hit|tree|radix)"
 
 # Look for prefix tree growth
-kubectl logs -n dynamo-cloud -l app=sglang-disagg-decode -f | grep -E "(prefix|tree|node)"
+kubectl logs -n dynamo -l app=sglang-disagg-decode -f | grep -E "(prefix|tree|node)"
 
 # Monitor memory efficiency
-kubectl top pods -n dynamo-cloud -l app=sglang-disagg --containers
+kubectl top pods -n dynamo -l app=sglang-disagg --containers
 ```
 
 ### 2. Disaggregation Metrics
@@ -171,13 +171,13 @@ Monitor disaggregated execution:
 
 ```bash
 # Check prefill worker activity
-kubectl logs -n dynamo-cloud -l app=sglang-disagg-prefill -f | grep -E "(prefill|NIXL|transfer)"
+kubectl logs -n dynamo -l app=sglang-disagg-prefill -f | grep -E "(prefill|NIXL|transfer)"
 
 # Check decode worker routing decisions
-kubectl logs -n dynamo-cloud -l app=sglang-disagg-decode -f | grep -E "(disagg|routing|local|remote)"
+kubectl logs -n dynamo -l app=sglang-disagg-decode -f | grep -E "(disagg|routing|local|remote)"
 
 # Monitor overall system performance
-kubectl logs -n dynamo-cloud -l app=sglang-disagg-frontend -f | grep -E "(TTFT|ITL|throughput)"
+kubectl logs -n dynamo -l app=sglang-disagg-frontend -f | grep -E "(TTFT|ITL|throughput)"
 ```
 
 ### 3. Worker Communication
@@ -185,10 +185,10 @@ Monitor NIXL transfers between workers:
 
 ```bash
 # Check NIXL transfer logs
-kubectl logs -n dynamo-cloud -l app=sglang-disagg -f | grep -i nixl
+kubectl logs -n dynamo -l app=sglang-disagg -f | grep -i nixl
 
 # Monitor prefill queue status
-kubectl logs -n dynamo-cloud -l app=sglang-disagg -f | grep -E "(queue|pending)"
+kubectl logs -n dynamo -l app=sglang-disagg -f | grep -E "(queue|pending)"
 ```
 
 ## Performance Benefits
@@ -213,11 +213,11 @@ kubectl logs -n dynamo-cloud -l app=sglang-disagg -f | grep -E "(queue|pending)"
 ### Adaptive Scaling
 ```bash
 # Scale prefill workers for high-variability workloads
-kubectl patch dynamographdeployment sglang-disagg -n dynamo-cloud -p \
+kubectl patch dynamographdeployment sglang-disagg -n dynamo -p \
   '{"spec":{"services":{"SGLangPrefillWorker":{"replicas":3}}}}'
 
 # Scale decode workers for high concurrent conversation scenarios
-kubectl patch dynamographdeployment sglang-disagg -n dynamo-cloud -p \
+kubectl patch dynamographdeployment sglang-disagg -n dynamo -p \
   '{"spec":{"services":{"SGLangDecodeWorker":{"replicas":4}}}}'
 ```
 
@@ -226,7 +226,7 @@ Monitor cache effectiveness and adjust based on workload:
 
 ```bash
 # Check cache hit rates to determine optimal worker distribution
-kubectl logs -n dynamo-cloud -l app=sglang-disagg -f | grep -E "hit.rate|cache.efficiency"
+kubectl logs -n dynamo -l app=sglang-disagg -f | grep -E "hit.rate|cache.efficiency"
 ```
 
 ## Troubleshooting
@@ -253,5 +253,5 @@ For production external access, see the main README.md **External Access** secti
 Remove the deployment:
 
 ```bash
-kubectl delete dynamographdeployment sglang-disagg -n dynamo-cloud
+kubectl delete dynamographdeployment sglang-disagg -n dynamo
 ```

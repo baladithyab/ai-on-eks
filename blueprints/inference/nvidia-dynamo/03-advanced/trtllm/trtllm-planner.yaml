@@ -35,7 +35,7 @@
 #    kind: PersistentVolumeClaim
 #    metadata:
 #      name: dynamo-pvc
-#      namespace: dynamo-cloud
+#      namespace: dynamo
 #    spec:
 #      accessModes:
 #        - ReadWriteMany
@@ -57,7 +57,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: trtllm-planner-config
-  namespace: dynamo-cloud
+  namespace: dynamo
 data:
   decode.yaml: |
     # TensorRT-LLM Decode Worker Configuration
@@ -103,7 +103,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
   name: trtllm-planner
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   backendFramework: trtllm
   # PVC for profiling results (must be pre-created)

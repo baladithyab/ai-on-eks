@@ -207,12 +207,12 @@ Worker Pod (TP=4):
 kubectl apply -f ai-on-eks/blueprints/inference/nvidia-dynamo/vllm/vllm-aggregated-gptoss-20b.yaml
 
 # Monitor
-kubectl get dgd vllm-gptoss-20b-agg -n dynamo-cloud
-kubectl get pods -n dynamo-cloud | grep gptoss-20b-agg
-kubectl logs <worker-pod> -n dynamo-cloud --tail=50
+kubectl get dgd vllm-gptoss-20b-agg -n dynamo
+kubectl get pods -n dynamo | grep gptoss-20b-agg
+kubectl logs <worker-pod> -n dynamo --tail=50
 
 # Cleanup
-kubectl delete dgd vllm-gptoss-20b-agg -n dynamo-cloud
+kubectl delete dgd vllm-gptoss-20b-agg -n dynamo
 ```
 
 ## Conclusion

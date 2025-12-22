@@ -168,7 +168,7 @@ sharedMemory:
 
 ```bash
 # Deleted after test
-kubectl delete dgd vllm-gptoss-20b-disagg -n dynamo-cloud
+kubectl delete dgd vllm-gptoss-20b-disagg -n dynamo
 ```
 
 ## Test Timeline Summary

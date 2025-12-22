@@ -126,12 +126,12 @@ chmod +x test-video-kvbm.sh
 ./test-video-kvbm.sh
 
 # Test with custom deployment and namespace
-./test-video-kvbm.sh qwen-vl-video dynamo-cloud
+./test-video-kvbm.sh qwen-vl-video dynamo
 ```
 
 **Parameters:**
 1. Deployment name (default: `qwen-vl-video`)
-2. Namespace (default: `dynamo-cloud`)
+2. Namespace (default: `dynamo`)
 
 **Test Phases:**
 
@@ -197,16 +197,16 @@ chmod +x test-video-kvbm.sh
 
 ```bash
 # Check deployment status
-kubectl get dgd -n dynamo-cloud
+kubectl get dgd -n dynamo
 
 # Check pod status
-kubectl get pods -n dynamo-cloud | grep qwen-vl-video
+kubectl get pods -n dynamo | grep qwen-vl-video
 
 # View logs
-kubectl logs -n dynamo-cloud <pod-name>
+kubectl logs -n dynamo <pod-name>
 
 # Check KVBM configuration
-kubectl get dgd qwen-vl-video -n dynamo-cloud -o yaml | grep -A 10 "DYN_KVBM"
+kubectl get dgd qwen-vl-video -n dynamo -o yaml | grep -A 10 "DYN_KVBM"
 ```
 
 **Sample Output:**
@@ -265,19 +265,19 @@ Before running these scripts, ensure:
 
 1. **Deployment is running:**
    ```bash
-   kubectl get pods -n dynamo-cloud | grep -E "llava|qwen-vl"
+   kubectl get pods -n dynamo | grep -E "llava|qwen-vl"
    ```
 
 2. **Port forwarding is active:**
    ```bash
    # For LLaVA
-   kubectl port-forward -n dynamo-cloud svc/llava-frontend 8000:8000 &
+   kubectl port-forward -n dynamo svc/llava-frontend 8000:8000 &
 
    # For Qwen2.5-VL (Image)
-   kubectl port-forward -n dynamo-cloud svc/qwen-vl-frontend 8000:8000 &
+   kubectl port-forward -n dynamo svc/qwen-vl-frontend 8000:8000 &
 
    # For Qwen2.5-VL (Video)
-   kubectl port-forward -n dynamo-cloud svc/qwen-vl-video-frontend 8000:8000 &
+   kubectl port-forward -n dynamo svc/qwen-vl-video-frontend 8000:8000 &
    ```
 
 3. **jq is installed** (for JSON formatting):
@@ -385,7 +385,7 @@ chmod +x test-*.sh
 ### Connection Refused
 Ensure port forwarding is active:
 ```bash
-kubectl port-forward -n dynamo-cloud svc/llava-frontend 8000:8000
+kubectl port-forward -n dynamo svc/llava-frontend 8000:8000
 ```
 
 ### Model Not Found

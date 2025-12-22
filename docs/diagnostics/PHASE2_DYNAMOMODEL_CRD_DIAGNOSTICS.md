@@ -81,7 +81,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoModel
 metadata:
   name: qwen-base-test
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   modelName: Qwen/Qwen3-0.6B
   baseModelName: Qwen/Qwen3-0.6B
@@ -100,7 +100,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoModel
 metadata:
   name: sql-lora-test
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   modelName: sql-generation-lora
   baseModelName: Qwen/Qwen3-0.6B
@@ -173,7 +173,7 @@ From [`DYNAMO_MODEL_INTEGRATION_DEEP_DIVE.md`](DYNAMO_MODEL_INTEGRATION_DEEP_DIV
 $ kubectl apply -f _internal/test-base-model.yaml
 dynamomodel.nvidia.com/qwen-base-test created
 
-$ kubectl get dm -n dynamo-cloud
+$ kubectl get dm -n dynamo
 NAME             BASEMODEL         TYPE   READY   TOTAL   AGE
 qwen-base-test   Qwen/Qwen3-0.6B   base   0       0       7s
 ```
@@ -184,7 +184,7 @@ qwen-base-test   Qwen/Qwen3-0.6B   base   0       0       7s
 $ kubectl apply -f _internal/test-lora-adapter.yaml
 dynamomodel.nvidia.com/sql-lora-test created
 
-$ kubectl get dm -n dynamo-cloud
+$ kubectl get dm -n dynamo
 NAME             BASEMODEL         TYPE   READY   TOTAL   AGE
 sql-lora-test    Qwen/Qwen3-0.6B   lora   0       0       6s
 ```
@@ -231,20 +231,20 @@ To properly test DynamoModel with actual endpoint discovery:
 kubectl apply -f _internal/test-dgd-with-modelref.yaml
 
 # Step 2: Wait for DGD to become ready
-kubectl wait --for=condition=ready dgd/vllm-with-modelref-test -n dynamo-cloud --timeout=600s
+kubectl wait --for=condition=ready dgd/vllm-with-modelref-test -n dynamo --timeout=600s
 
 # Step 3: Apply DynamoModel for base model
 kubectl apply -f _internal/test-base-model.yaml
 
 # Step 4: Verify endpoints are discovered
-kubectl get dm qwen-base-test -n dynamo-cloud
+kubectl get dm qwen-base-test -n dynamo
 # Should show READY > 0, TOTAL > 0
 
 # Step 5: Apply LoRA adapter
 kubectl apply -f _internal/test-lora-adapter.yaml
 
 # Step 6: Verify LoRA discovers same endpoints
-kubectl get dm sql-lora-test -n dynamo-cloud
+kubectl get dm sql-lora-test -n dynamo
 ```
 
 ### Prerequisites Checklist
@@ -328,7 +328,7 @@ For CI/CD validation, create a combined test:
 kubectl apply -f _internal/test-dgd-with-modelref.yaml
 
 # 2. Wait for ready
-kubectl wait --for=condition=ready dgd/vllm-with-modelref-test -n dynamo-cloud
+kubectl wait --for=condition=ready dgd/vllm-with-modelref-test -n dynamo
 
 # 3. Deploy DynamoModel
 kubectl apply -f _internal/test-base-model.yaml
@@ -337,7 +337,7 @@ kubectl apply -f _internal/test-base-model.yaml
 sleep 30
 
 # 5. Validate endpoints discovered
-ENDPOINTS=$(kubectl get dm qwen-base-test -n dynamo-cloud -o jsonpath='{.status.totalEndpoints}')
+ENDPOINTS=$(kubectl get dm qwen-base-test -n dynamo -o jsonpath='{.status.totalEndpoints}')
 if [ "$ENDPOINTS" -gt 0 ]; then
     echo "✅ DynamoModel discovered $ENDPOINTS endpoints"
 else
@@ -407,10 +407,10 @@ kubectl apply -f lora-model.yaml -n ${NAMESPACE}
 
 ```bash
 # Clean up test DynamoModels
-kubectl delete dm qwen-base-test sql-lora-test -n dynamo-cloud
+kubectl delete dm qwen-base-test sql-lora-test -n dynamo
 
 # Verify cleanup
-kubectl get dm -n dynamo-cloud
+kubectl get dm -n dynamo
 ```
 
 ---

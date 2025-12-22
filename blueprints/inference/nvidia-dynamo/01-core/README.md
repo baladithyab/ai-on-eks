@@ -46,7 +46,7 @@ This tier contains the foundational examples that demonstrate NVIDIA Dynamo's co
 All core examples require:
 - Dynamo platform installed (`cd infra/nvidia-dynamo && ./install.sh`)
 - GPU nodes (except hello-world)
-- `hf-token-secret` and `ngc-secret` in dynamo-cloud namespace
+- `hf-token-secret` and `ngc-secret` in dynamo namespace
 
 ## Quick Start
 

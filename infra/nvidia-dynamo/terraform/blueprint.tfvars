@@ -11,8 +11,8 @@ enable_ai_ml_observability_stack = true
 # - NVIDIA driver, container toolkit, device plugin, and CDI specs
 # The GPU Operator conflicts with Bottlerocket's CDI-based runtime
 enable_nvidia_gpu_operator       = false
-# Dynamo version: Helm charts use 0.7.0, container images use 0.7.0.post1
-dynamo_stack_version             = "v0.7.0"
+# Dynamo version: Helm charts use 0.7.1, container images use 0.7.1
+dynamo_stack_version             = "v0.7.1"
 
 #---------------------------------------------------------------
 # Observability Features

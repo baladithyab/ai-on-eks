@@ -19,10 +19,10 @@ For comprehensive documentation on KVBM including architecture, resource require
 
 ```bash
 # Deploy KVBM example
-kubectl apply -f vllm-aggregated-kvbm.yaml -n dynamo-cloud
+kubectl apply -f vllm-aggregated-kvbm.yaml -n dynamo
 
 # Test the deployment
-kubectl port-forward service/vllm-aggregated-kvbm-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-aggregated-kvbm-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/health
 ```
 

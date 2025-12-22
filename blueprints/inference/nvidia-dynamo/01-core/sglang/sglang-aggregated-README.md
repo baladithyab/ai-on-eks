@@ -33,7 +33,7 @@ SGLang's RadixAttention provides significant performance improvements:
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace with secrets configured
+- `dynamo` namespace with secrets configured
 - G5 GPU nodes available (at least 1 GPU with 24GB VRAM)
 - HuggingFace token with model access permissions
 
@@ -154,13 +154,13 @@ cd blueprints/inference/nvidia-dynamo
 ### Manual Deployment
 ```bash
 # Ensure HuggingFace token secret exists
-kubectl get secret hf-token-secret -n dynamo-cloud
+kubectl get secret hf-token-secret -n dynamo
 
 # Deploy SGLang
-kubectl apply -f sglang/sglang.yaml -n dynamo-cloud
+kubectl apply -f sglang/sglang.yaml -n dynamo
 
 # Monitor deployment
-kubectl get pods -n dynamo-cloud -l app=sglang -w
+kubectl get pods -n dynamo -l app=sglang -w
 ```
 
 ## Model Configuration
@@ -177,10 +177,10 @@ This example uses `deepseek-ai/DeepSeek-R1-Distill-Llama-8B` which demonstrates 
 ```bash
 # Port forward to frontend
 # Port forward via Service (recommended) - enables both API access and metrics collection
-kubectl port-forward service/sglang-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/sglang-frontend 8000:8000 -n dynamo
 
 # Alternative: Direct deployment access
-# kubectl port-forward deployment/sglang-frontend 8000:8000 -n dynamo-cloud
+# kubectl port-forward deployment/sglang-frontend 8000:8000 -n dynamo
 
 # Test health endpoint
 curl http://localhost:8000/health
@@ -233,31 +233,31 @@ done
 ### Pod Status
 ```bash
 # Check all SGLang components
-kubectl get pods -n dynamo-cloud -l app=sglang
+kubectl get pods -n dynamo -l app=sglang
 
 # Check worker specifically
-kubectl get pods -n dynamo-cloud -l componentType=worker,app=sglang
+kubectl get pods -n dynamo -l componentType=worker,app=sglang
 ```
 
 ### Logs and Debugging
 ```bash
 # Frontend logs
-kubectl logs -n dynamo-cloud -l componentType=main,app=sglang -f
+kubectl logs -n dynamo -l componentType=main,app=sglang -f
 
 # Worker logs
-kubectl logs -n dynamo-cloud -l componentType=worker,app=sglang -f
+kubectl logs -n dynamo -l componentType=worker,app=sglang -f
 
 # Check for cache hits in worker logs
-kubectl logs -n dynamo-cloud -l componentType=worker,app=sglang | grep -i "cache\|hit\|radix"
+kubectl logs -n dynamo -l componentType=worker,app=sglang | grep -i "cache\|hit\|radix"
 ```
 
 ### Performance Metrics
 ```bash
 # Check DynamoGraphDeployment status
-kubectl get dynamographdeployment sglang -n dynamo-cloud -o yaml
+kubectl get dynamographdeployment sglang -n dynamo -o yaml
 
 # Monitor resource usage
-kubectl top pods -n dynamo-cloud -l app=sglang
+kubectl top pods -n dynamo -l app=sglang
 ```
 
 ## Advanced Configuration
@@ -309,25 +309,25 @@ readinessProbe:
 kubectl describe node <gpu-node> | grep -i gpu
 
 # Check model download progress
-kubectl logs <sglang-worker-pod> -n dynamo-cloud | grep -i download
+kubectl logs <sglang-worker-pod> -n dynamo | grep -i download
 ```
 
 **Frontend Not Finding Worker:**
 ```bash
 # Verify namespace clearing worked
-kubectl logs <sglang-frontend-pod> -n dynamo-cloud | grep -i "clear_namespace"
+kubectl logs <sglang-frontend-pod> -n dynamo | grep -i "clear_namespace"
 
 # Check worker registration
-kubectl logs <sglang-worker-pod> -n dynamo-cloud | grep -i "register\|ready"
+kubectl logs <sglang-worker-pod> -n dynamo | grep -i "register\|ready"
 ```
 
 **Poor Cache Performance:**
 ```bash
 # Check RadixAttention initialization
-kubectl logs <sglang-worker-pod> -n dynamo-cloud | grep -i "radix\|cache"
+kubectl logs <sglang-worker-pod> -n dynamo | grep -i "radix\|cache"
 
 # Verify page size settings
-kubectl logs <sglang-worker-pod> -n dynamo-cloud | grep -i "page-size"
+kubectl logs <sglang-worker-pod> -n dynamo | grep -i "page-size"
 ```
 
 ### Performance Optimization
@@ -355,10 +355,10 @@ For production external access, see the main README.md **External Access** secti
 
 ```bash
 # Remove SGLang deployment
-kubectl delete dynamographdeployment sglang -n dynamo-cloud
+kubectl delete dynamographdeployment sglang -n dynamo
 
 # Verify cleanup
-kubectl get pods -n dynamo-cloud -l app=sglang
+kubectl get pods -n dynamo -l app=sglang
 ```
 
 ## References

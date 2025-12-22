@@ -32,7 +32,7 @@ This example demonstrates:
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace configured
+- `dynamo` namespace configured
 - CPU nodes available (no GPU requirements)
 
 ## YAML Structure Explained
@@ -138,7 +138,7 @@ nodeSelector:
 Deploy using kubectl:
 
 ```bash
-kubectl apply -f hello-world.yaml -n dynamo-cloud
+kubectl apply -f hello-world.yaml -n dynamo
 ```
 
 Or use the main deployment script:
@@ -153,16 +153,16 @@ cd ..
 ### Basic Deployment Verification
 ```bash
 # Check that pods are created
-kubectl get pods -n dynamo-cloud -l app=hello-world
+kubectl get pods -n dynamo -l app=hello-world
 
 # Monitor pod startup
-kubectl get pods -n dynamo-cloud -l app=hello-world -w
+kubectl get pods -n dynamo -l app=hello-world -w
 ```
 
 ### Service Discovery Testing
 ```bash
 # Check worker registration and service startup
-kubectl logs -l componentType=worker,app=hello-world -n dynamo-cloud
+kubectl logs -l componentType=worker,app=hello-world -n dynamo
 
 # Expected worker output:
 # Service registered: hello_world/backend
@@ -173,7 +173,7 @@ kubectl logs -l componentType=worker,app=hello-world -n dynamo-cloud
 ### Client Communication Testing
 ```bash
 # Check client execution and output
-kubectl logs -l componentType=main,app=hello-world -n dynamo-cloud
+kubectl logs -l componentType=main,app=hello-world -n dynamo
 
 # Expected client output:
 # Connected to hello_world/backend service
@@ -199,19 +199,19 @@ kubectl logs -l componentType=main,app=hello-world -n dynamo-cloud
 ### Exploring Container Structure
 ```bash
 # List available examples in the container
-kubectl exec -it <worker-pod> -n dynamo-cloud -- ls -la /workspace/examples/
+kubectl exec -it <worker-pod> -n dynamo -- ls -la /workspace/examples/
 
 # Examine the hello world source code
-kubectl exec -it <worker-pod> -n dynamo-cloud -- cat /workspace/examples/runtime/hello_world/hello_world.py
+kubectl exec -it <worker-pod> -n dynamo -- cat /workspace/examples/runtime/hello_world/hello_world.py
 
 # Check Dynamo runtime libraries
-kubectl exec -it <worker-pod> -n dynamo-cloud -- find /workspace -name "*.py" | grep dynamo | head -10
+kubectl exec -it <worker-pod> -n dynamo -- find /workspace -name "*.py" | grep dynamo | head -10
 ```
 
 ### Service Discovery Debugging
 ```bash
 # Check etcd for service registration (if accessible)
-kubectl exec -it <worker-pod> -n dynamo-cloud -- python3 -c "
+kubectl exec -it <worker-pod> -n dynamo -- python3 -c "
 import os
 from dynamo.runtime import service
 print('Services registered:', service.list_services())
@@ -223,28 +223,28 @@ print('Services registered:', service.list_services())
 ### Pod Status
 ```bash
 # Check all hello-world components
-kubectl get pods -n dynamo-cloud -l app=hello-world -o wide
+kubectl get pods -n dynamo -l app=hello-world -o wide
 
 # Check resource usage
-kubectl top pods -n dynamo-cloud -l app=hello-world
+kubectl top pods -n dynamo -l app=hello-world
 ```
 
 ### Logs and Events
 ```bash
 # Watch all hello-world logs
-kubectl logs -n dynamo-cloud -l app=hello-world -f --all-containers
+kubectl logs -n dynamo -l app=hello-world -f --all-containers
 
 # Check pod events for any issues
-kubectl get events -n dynamo-cloud --sort-by='.lastTimestamp' | grep hello-world
+kubectl get events -n dynamo --sort-by='.lastTimestamp' | grep hello-world
 ```
 
 ### DynamoGraphDeployment Status
 ```bash
 # Check deployment status
-kubectl get dynamographdeployment hello-world -n dynamo-cloud -o yaml
+kubectl get dynamographdeployment hello-world -n dynamo -o yaml
 
 # Monitor deployment progress
-kubectl describe dynamographdeployment hello-world -n dynamo-cloud
+kubectl describe dynamographdeployment hello-world -n dynamo
 ```
 
 ## Troubleshooting
@@ -254,8 +254,8 @@ kubectl describe dynamographdeployment hello-world -n dynamo-cloud
 **Worker Pod Not Starting:**
 ```bash
 # Check pod events and logs
-kubectl describe pod <worker-pod> -n dynamo-cloud
-kubectl logs <worker-pod> -n dynamo-cloud
+kubectl describe pod <worker-pod> -n dynamo
+kubectl logs <worker-pod> -n dynamo
 
 # Common causes:
 # - Image pull issues
@@ -266,10 +266,10 @@ kubectl logs <worker-pod> -n dynamo-cloud
 **Client Not Connecting to Worker:**
 ```bash
 # Verify worker service registration
-kubectl logs <worker-pod> -n dynamo-cloud | grep -i "service\|register\|endpoint"
+kubectl logs <worker-pod> -n dynamo | grep -i "service\|register\|endpoint"
 
 # Check client discovery attempts
-kubectl logs <frontend-pod> -n dynamo-cloud | grep -i "discover\|connect"
+kubectl logs <frontend-pod> -n dynamo | grep -i "discover\|connect"
 
 # Common causes:
 # - Namespace mismatch between frontend and worker
@@ -283,7 +283,7 @@ kubectl logs <frontend-pod> -n dynamo-cloud | grep -i "discover\|connect"
 kubectl get nodes -l karpenter.sh/nodepool=cpu-karpenter
 
 # Verify CPU node provisioning
-kubectl describe pod <frontend-pod> -n dynamo-cloud | grep -i pending
+kubectl describe pod <frontend-pod> -n dynamo | grep -i pending
 
 # Common causes:
 # - No CPU nodes available
@@ -305,10 +305,10 @@ Create a Service and use AWS Load Balancer Controller:
 
 ```bash
 # Create a Service for the frontend
-kubectl expose deployment hello-world-frontend --port=8000 --target-port=8000 --type=LoadBalancer -n dynamo-cloud
+kubectl expose deployment hello-world-frontend --port=8000 --target-port=8000 --type=LoadBalancer -n dynamo
 
 # Or use AWS Load Balancer Controller with annotations for ALB
-kubectl annotate service hello-world-frontend service.beta.kubernetes.io/aws-load-balancer-type="nlb" -n dynamo-cloud
+kubectl annotate service hello-world-frontend service.beta.kubernetes.io/aws-load-balancer-type="nlb" -n dynamo
 ```
 
 ### Option 2: Ingress with ALB
@@ -343,10 +343,10 @@ spec:
 
 ```bash
 # Remove hello-world deployment
-kubectl delete dynamographdeployment hello-world -n dynamo-cloud
+kubectl delete dynamographdeployment hello-world -n dynamo
 
 # Verify cleanup
-kubectl get pods -n dynamo-cloud -l app=hello-world
+kubectl get pods -n dynamo -l app=hello-world
 
 # Should show no resources found
 ```

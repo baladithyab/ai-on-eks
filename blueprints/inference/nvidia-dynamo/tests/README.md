@@ -293,10 +293,10 @@ pkill -f "port-forward.*dynamo"
 If service endpoint cannot be found:
 ```bash
 # Check DGD status
-kubectl get dgd -n dynamo-cloud
+kubectl get dgd -n dynamo
 
 # Check services
-kubectl get svc -n dynamo-cloud | grep <deployment-name>
+kubectl get svc -n dynamo | grep <deployment-name>
 ```
 
 ### Permission Issues
@@ -304,5 +304,5 @@ kubectl get svc -n dynamo-cloud | grep <deployment-name>
 If getting 403 errors with NGC models:
 ```bash
 # Verify NGC credentials
-kubectl get secret ngc-secret -n dynamo-cloud
+kubectl get secret ngc-secret -n dynamo
 ```

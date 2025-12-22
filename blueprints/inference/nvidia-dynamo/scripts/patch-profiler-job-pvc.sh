@@ -7,7 +7,7 @@
 set -e
 
 DGDR_NAME="${1:-vllm-qwen-coder-32b}"
-NAMESPACE="${2:-dynamo-cloud}"
+NAMESPACE="${2:-dynamo}"
 PVC_NAME="${3:-dynamo-pvc}"
 BACKOFF_LIMIT="${4:-10}"
 

@@ -19,7 +19,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: vllm-qwen-coder-32b
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   model: Qwen/Qwen2.5-Coder-32B-Instruct
   backend: vllm
@@ -60,7 +60,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: qwen-coder-32b-dgd-config
-  namespace: dynamo-cloud
+  namespace: dynamo
 data:
   disagg.yaml: |
     apiVersion: nvidia.com/v1alpha1

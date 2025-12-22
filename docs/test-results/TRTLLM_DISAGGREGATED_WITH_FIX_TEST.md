@@ -21,7 +21,7 @@ TRT-LLM disaggregated deployment works flawlessly with the UCX_TLS fix applied. 
 ### Blueprint Details
 ```yaml
 Name: trtllm-disaggregated-default
-Namespace: dynamo-cloud
+Namespace: dynamo
 Backend: TensorRT-LLM 1.2.0rc3
 Image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1
 ```
@@ -65,20 +65,20 @@ Image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1
 {
   "status": "healthy",
   "endpoints": [
-    "dyn://dynamo-cloud-trtllm-disaggregated-default.prefill.generate",
-    "dyn://dynamo-cloud-trtllm-disaggregated-default.tensorrt_llm.generate"
+    "dyn://dynamo-trtllm-disaggregated-default.prefill.generate",
+    "dyn://dynamo-trtllm-disaggregated-default.tensorrt_llm.generate"
   ],
   "instances": [
     {
       "component": "prefill",
       "endpoint": "generate",
-      "namespace": "dynamo-cloud-trtllm-disaggregated-default",
+      "namespace": "dynamo-trtllm-disaggregated-default",
       "instance_id": 7404651184789919078
     },
     {
       "component": "tensorrt_llm",
       "endpoint": "generate",
-      "namespace": "dynamo-cloud-trtllm-disaggregated-default",
+      "namespace": "dynamo-trtllm-disaggregated-default",
       "instance_id": 7404651184789919076
     }
   ]

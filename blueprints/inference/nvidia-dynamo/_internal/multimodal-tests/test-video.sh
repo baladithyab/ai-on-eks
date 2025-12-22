@@ -140,7 +140,7 @@ echo "- Frames are transferred via NIXL RDMA to VLMWorker"
 echo "- Model context: 8192 tokens max"
 echo ""
 echo "Quick test:"
-echo "  kubectl port-forward svc/llava-video-frontend -n dynamo-cloud 8080:8000 &"
+echo "  kubectl port-forward svc/llava-video-frontend -n dynamo 8080:8000 &"
 echo "  ./test-video.sh 8080 llava-hf/LLaVA-NeXT-Video-7B-hf"
 echo ""
 

@@ -88,7 +88,7 @@ The test script supports:
 
 ```bash
 # Using custom video URLs
-./test-video-kvbm.sh qwen-vl-video dynamo-cloud
+./test-video-kvbm.sh qwen-vl-video dynamo
 
 # Or modify the script to use your videos:
 SHORT_VIDEO="https://your-server.com/short-video.mp4"

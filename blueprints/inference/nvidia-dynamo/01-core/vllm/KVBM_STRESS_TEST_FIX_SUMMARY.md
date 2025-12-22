@@ -82,7 +82,7 @@ The script was hanging after Phase 2 concurrent requests completed. The `timeout
 2. **Stress Test (with overloaded pod)**:
    ```bash
    # While script is running, in another terminal:
-   kubectl exec -n dynamo-cloud <decode-pod> -- stress --cpu 8 --timeout 60s
+   kubectl exec -n dynamo <decode-pod> -- stress --cpu 8 --timeout 60s
    ```
    - Script should handle timeouts gracefully
    - Should skip metrics but complete phases

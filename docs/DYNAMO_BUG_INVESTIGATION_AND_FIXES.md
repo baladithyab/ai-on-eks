@@ -219,7 +219,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: model-precache
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   template:
     spec:
@@ -265,7 +265,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoModel
 metadata:
   name: deepseek-70b
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   modelId: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
   storage:
@@ -306,13 +306,13 @@ decodeWorker:
 
 **Step 1: Pre-download model (10-60 minutes depending on model size)**
 ```bash
-kubectl apply -f model-precache-job.yaml -n dynamo-cloud
-kubectl wait --for=condition=complete job/model-precache -n dynamo-cloud --timeout=3600s
+kubectl apply -f model-precache-job.yaml -n dynamo
+kubectl wait --for=condition=complete job/model-precache -n dynamo --timeout=3600s
 ```
 
 **Step 2: Verify download completion**
 ```bash
-kubectl exec -it deploy/some-pod -n dynamo-cloud -- ls -la /models/hub/models--deepseek-ai--DeepSeek-R1-Distill-Llama-70B/
+kubectl exec -it deploy/some-pod -n dynamo -- ls -la /models/hub/models--deepseek-ai--DeepSeek-R1-Distill-Llama-70B/
 ```
 
 **Step 3: Deploy DGD with offline mode**

@@ -483,7 +483,7 @@ variable "dynamo_enable_kai_scheduler" {
 }
 
 variable "dynamo_operator_namespace_restriction_enabled" {
-  description = "Whether to restrict Dynamo operator to specific namespaces. By default, the operator runs with cluster-wide permissions. Set to true to restrict to the dynamo-cloud namespace only."
+  description = "Whether to restrict Dynamo operator to specific namespaces. By default, the operator runs with cluster-wide permissions. Set to true to restrict to the dynamo namespace only."
   type        = bool
   default     = false
 }

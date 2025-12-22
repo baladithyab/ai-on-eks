@@ -71,7 +71,7 @@ Located in `planner/` subdirectory:
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace with secrets configured
+- `dynamo` namespace with secrets configured
 - G5 GPU nodes available (at least 1-2 GPUs with 24GB VRAM each)
 - HuggingFace token secret configured
 
@@ -108,7 +108,7 @@ cd blueprints/inference/nvidia-dynamo
 ### Basic Health Check
 ```bash
 # Port forward to frontend service
-kubectl port-forward service/vllm-aggregated-default-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-aggregated-default-frontend 8000:8000 -n dynamo
 
 # Test health endpoint
 curl http://localhost:8000/health
@@ -140,19 +140,19 @@ curl http://localhost:8000/v1/models
 ### Pod Status
 ```bash
 # Check deployment status
-kubectl get dynamographdeployment vllm-aggregated-default -n dynamo-cloud
+kubectl get dynamographdeployment vllm-aggregated-default -n dynamo
 
 # Check pods
-kubectl get pods -n dynamo-cloud -l app=vllm-aggregated-default
+kubectl get pods -n dynamo -l app=vllm-aggregated-default
 ```
 
 ### Logs
 ```bash
 # Frontend logs
-kubectl logs -n dynamo-cloud -l componentType=main,app=vllm-aggregated-default -f
+kubectl logs -n dynamo -l componentType=main,app=vllm-aggregated-default -f
 
 # Worker logs
-kubectl logs -n dynamo-cloud -l componentType=worker,app=vllm-aggregated-default -f
+kubectl logs -n dynamo -l componentType=worker,app=vllm-aggregated-default -f
 ```
 
 ## GPU Requirements and Node Selection
@@ -232,9 +232,9 @@ For production external access, see the main README.md **External Access** secti
 
 ```bash
 # Remove deployment
-kubectl delete dynamographdeployment vllm-aggregated-default -n dynamo-cloud
+kubectl delete dynamographdeployment vllm-aggregated-default -n dynamo
 # or
-kubectl delete dynamographdeployment vllm-disaggregated-default -n dynamo-cloud
+kubectl delete dynamographdeployment vllm-disaggregated-default -n dynamo
 ```
 
 ## Troubleshooting
@@ -244,10 +244,10 @@ kubectl delete dynamographdeployment vllm-disaggregated-default -n dynamo-cloud
 **Model Download Issues:**
 ```bash
 # Check HuggingFace token secret
-kubectl get secret hf-token-secret -n dynamo-cloud
+kubectl get secret hf-token-secret -n dynamo
 
 # Check worker logs for download progress
-kubectl logs -n dynamo-cloud -l componentType=worker -f
+kubectl logs -n dynamo -l componentType=worker -f
 ```
 
 **GPU Resource Issues:**
@@ -256,7 +256,7 @@ kubectl logs -n dynamo-cloud -l componentType=worker -f
 kubectl describe nodes -l karpenter.sh/nodepool=g5-gpu-karpenter
 
 # Check resource requests vs limits
-kubectl describe pod <pod-name> -n dynamo-cloud
+kubectl describe pod <pod-name> -n dynamo
 ```
 
 ### DGDR-Specific Issues

@@ -85,7 +85,7 @@ kubectl get crd groves.ai.nvidia.com
 ./deploy.sh vllm-disaggregated-multinode
 
 # 3. Monitor pod placement across nodes
-kubectl get pods -n dynamo-cloud -o wide
+kubectl get pods -n dynamo -o wide
 ```
 
 ### LWS Style
@@ -98,7 +98,7 @@ kubectl get crd leaderworkersets.leaderworkerset.x-k8s.io
 ./deploy.sh llama3-70b-lws
 
 # 3. Verify leader/worker topology
-kubectl get lws -n dynamo-cloud
+kubectl get lws -n dynamo
 ```
 
 ## Known Limitations
@@ -113,10 +113,10 @@ kubectl get lws -n dynamo-cloud
 ### NCCL Communication Errors
 ```bash
 # Check NCCL environment
-kubectl exec -it <pod> -n dynamo-cloud -- env | grep NCCL
+kubectl exec -it <pod> -n dynamo -- env | grep NCCL
 
 # Check network connectivity
-kubectl exec -it <pod> -n dynamo-cloud -- ping <other-node-ip>
+kubectl exec -it <pod> -n dynamo -- ping <other-node-ip>
 ```
 
 ### Pod Scheduling Issues

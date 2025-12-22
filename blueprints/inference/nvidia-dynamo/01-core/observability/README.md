@@ -36,7 +36,7 @@ spec:
     - name: OTEL_EXPORT_ENABLED
       value: "1"
     - name: OTEL_EXPORT_ENDPOINT
-      value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
+      value: "http://tempo.dynamo.svc.cluster.local:4317"
   
   services:
     Frontend:
@@ -94,13 +94,13 @@ All Dynamo deployments automatically expose Prometheus metrics on the `/metrics`
 
 ```bash
 # Deploy with OTEL tracing
-kubectl apply -f vllm-otel-tracing.yaml -n dynamo-cloud
+kubectl apply -f vllm-otel-tracing.yaml -n dynamo
 
 # Wait for pods to be ready
-kubectl wait --for=condition=ready pod -l app=vllm-otel-frontend -n dynamo-cloud --timeout=600s
+kubectl wait --for=condition=ready pod -l app=vllm-otel-frontend -n dynamo --timeout=600s
 
 # Test the deployment
-kubectl port-forward service/vllm-otel-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-otel-frontend 8000:8000 -n dynamo
 
 # Send a request with trace ID
 curl -X POST http://localhost:8000/v1/chat/completions \
@@ -176,7 +176,7 @@ Logs written to stdout in JSONL format
 2. **Add Tempo Data Source** (if not already configured):
    - Navigate to Configuration → Data Sources
    - Add Tempo data source
-   - URL: `http://tempo.dynamo-cloud.svc.cluster.local:3200`
+   - URL: `http://tempo.dynamo.svc.cluster.local:3200`
 
 3. **Explore Traces**:
    - Navigate to Explore → Select Tempo
@@ -192,33 +192,33 @@ Logs written to stdout in JSONL format
 kubectl get pods -n observability -l app.kubernetes.io/name=tempo
 
 # Check OTEL environment variables
-kubectl exec -n dynamo-cloud deployment/vllm-otel-frontend -- env | grep OTEL
+kubectl exec -n dynamo deployment/vllm-otel-frontend -- env | grep OTEL
 
 # Check frontend logs for OTEL errors
-kubectl logs -n dynamo-cloud -l app=vllm-otel-frontend | grep -i otel
+kubectl logs -n dynamo -l app=vllm-otel-frontend | grep -i otel
 ```
 
 ### Audit logs not appearing
 
 ```bash
 # Verify JSONL logging is enabled
-kubectl exec -n dynamo-cloud deployment/vllm-audit-frontend -- env | grep DYN_LOGGING_JSONL
+kubectl exec -n dynamo deployment/vllm-audit-frontend -- env | grep DYN_LOGGING_JSONL
 
 # Check logs are in JSONL format
-kubectl logs -n dynamo-cloud -l app=vllm-audit-frontend | head -5
+kubectl logs -n dynamo -l app=vllm-audit-frontend | head -5
 ```
 
 ### Metrics not being scraped
 
 ```bash
 # Check ServiceMonitor exists
-kubectl get servicemonitor -n dynamo-cloud
+kubectl get servicemonitor -n dynamo
 
 # Check Prometheus targets
 # Access Prometheus UI and check Targets page
 
 # Test metrics endpoint directly
-kubectl port-forward service/vllm-otel-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-otel-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/metrics
 ```
 

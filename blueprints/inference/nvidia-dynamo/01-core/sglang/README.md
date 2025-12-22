@@ -43,7 +43,7 @@ This directory contains SGLang deployment configurations for the NVIDIA Dynamo p
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace with secrets configured
+- `dynamo` namespace with secrets configured
 - G5 GPU nodes available (at least 1-2 GPUs with 24GB VRAM each)
 - HuggingFace token secret configured
 
@@ -100,7 +100,7 @@ cd blueprints/inference/nvidia-dynamo
 ### Basic Health Check
 ```bash
 # Port forward to frontend service
-kubectl port-forward service/sglang-aggregated-default-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/sglang-aggregated-default-frontend 8000:8000 -n dynamo
 
 # Test health endpoint
 curl http://localhost:8000/health
@@ -145,34 +145,34 @@ done
 ### Pod Status
 ```bash
 # Check deployment status
-kubectl get dynamographdeployment sglang-aggregated-default -n dynamo-cloud
+kubectl get dynamographdeployment sglang-aggregated-default -n dynamo
 
 # Check all SGLang pods
-kubectl get pods -n dynamo-cloud -l app=sglang-aggregated-default
+kubectl get pods -n dynamo -l app=sglang-aggregated-default
 ```
 
 ### Logs and RadixAttention Metrics
 ```bash
 # Frontend logs (includes namespace clearing)
-kubectl logs -n dynamo-cloud -l componentType=main,app=sglang-aggregated-default -f
+kubectl logs -n dynamo -l componentType=main,app=sglang-aggregated-default -f
 
 # Worker logs (includes RadixAttention cache activity)
-kubectl logs -n dynamo-cloud -l componentType=worker,app=sglang-aggregated-default -f
+kubectl logs -n dynamo -l componentType=worker,app=sglang-aggregated-default -f
 
 # Check for cache hits and RadixAttention activity
-kubectl logs -n dynamo-cloud -l componentType=worker -f | grep -i "cache\|radix\|hit"
+kubectl logs -n dynamo -l componentType=worker -f | grep -i "cache\|radix\|hit"
 ```
 
 ### Disaggregated Monitoring
 ```bash
 # Check both prefill and decode workers
-kubectl get pods -n dynamo-cloud -l app=sglang-disaggregated-default
+kubectl get pods -n dynamo -l app=sglang-disaggregated-default
 
 # Prefill worker logs
-kubectl logs -n dynamo-cloud -l app=sglang-disaggregated-default | grep prefill
+kubectl logs -n dynamo -l app=sglang-disaggregated-default | grep prefill
 
 # Decode worker logs
-kubectl logs -n dynamo-cloud -l app=sglang-disaggregated-default | grep decode
+kubectl logs -n dynamo -l app=sglang-disaggregated-default | grep decode
 ```
 
 ## GPU Requirements and Node Selection
@@ -234,9 +234,9 @@ For production external access, see the main README.md **External Access** secti
 
 ```bash
 # Remove deployment
-kubectl delete dynamographdeployment sglang-aggregated-default -n dynamo-cloud
+kubectl delete dynamographdeployment sglang-aggregated-default -n dynamo
 # or
-kubectl delete dynamographdeployment sglang-disaggregated-default -n dynamo-cloud
+kubectl delete dynamographdeployment sglang-disaggregated-default -n dynamo
 ```
 
 ## Troubleshooting
@@ -246,22 +246,22 @@ kubectl delete dynamographdeployment sglang-disaggregated-default -n dynamo-clou
 **Namespace Clearing Issues:**
 ```bash
 # Check if namespace clearing completed
-kubectl logs -n dynamo-cloud -l componentType=main -f | grep "clear_namespace"
+kubectl logs -n dynamo -l componentType=main -f | grep "clear_namespace"
 ```
 
 **Worker Registration Issues:**
 ```bash
 # Check worker registration in logs
-kubectl logs -n dynamo-cloud -l componentType=worker -f | grep -i "register\|ready"
+kubectl logs -n dynamo -l componentType=worker -f | grep -i "register\|ready"
 ```
 
 **RadixAttention Performance:**
 ```bash
 # Monitor cache performance
-kubectl logs -n dynamo-cloud -l componentType=worker -f | grep -i "cache\|hit\|miss"
+kubectl logs -n dynamo -l componentType=worker -f | grep -i "cache\|hit\|miss"
 
 # Check page size configuration
-kubectl logs -n dynamo-cloud -l componentType=worker -f | grep -i "page-size"
+kubectl logs -n dynamo -l componentType=worker -f | grep -i "page-size"
 ```
 
 ## References

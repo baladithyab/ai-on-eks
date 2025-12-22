@@ -38,7 +38,7 @@ This tier contains production-ready variants that extend the core examples with 
 All standard examples require:
 - Completed at least one core example successfully
 - GPU nodes with adequate memory
-- `hf-token-secret` and `ngc-secret` in dynamo-cloud namespace
+- `hf-token-secret` and `ngc-secret` in dynamo namespace
 
 ### Additional Requirements by Example
 

@@ -19,7 +19,7 @@ This example demonstrates:
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace with secrets configured
+- `dynamo` namespace with secrets configured
 - **Multi-GPU setup**: Minimum 2 GPUs (1 for prefill, 1 for decode)
 - HuggingFace token secret configured
 - NIXL support for GPU-to-GPU communication
@@ -42,7 +42,7 @@ This example demonstrates:
 Deploy using kubectl:
 
 ```bash
-kubectl apply -f vllm-disagg.yaml -n dynamo-cloud
+kubectl apply -f vllm-disagg.yaml -n dynamo
 ```
 
 Or use the main deployment script:
@@ -67,10 +67,10 @@ Test the disaggregated serving:
 ```bash
 # Port forward to frontend
 # Port forward via Service (recommended) - enables both API access and metrics collection
-kubectl port-forward service/vllm-disagg-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-disagg-frontend 8000:8000 -n dynamo
 
 # Alternative: Direct deployment access
-# kubectl port-forward deployment/vllm-disagg-frontend 8000:8000 -n dynamo-cloud
+# kubectl port-forward deployment/vllm-disagg-frontend 8000:8000 -n dynamo
 
 # Test health endpoint
 curl http://localhost:8000/health
@@ -100,16 +100,16 @@ Monitor the disaggregated architecture:
 
 ```bash
 # Check all pods
-kubectl get pods -n dynamo-cloud -l app=vllm-disagg
+kubectl get pods -n dynamo -l app=vllm-disagg
 
 # Monitor prefill worker logs (look for NIXL transfers)
-kubectl logs -n dynamo-cloud -l app=vllm-disagg-prefill -f | grep -E "(NIXL|transfer|remote)"
+kubectl logs -n dynamo -l app=vllm-disagg-prefill -f | grep -E "(NIXL|transfer|remote)"
 
 # Monitor decode worker logs (look for routing decisions)
-kubectl logs -n dynamo-cloud -l app=vllm-disagg-decode -f | grep -E "(disagg|remote|local)"
+kubectl logs -n dynamo -l app=vllm-disagg-decode -f | grep -E "(disagg|remote|local)"
 
 # Check system resource usage
-kubectl top pods -n dynamo-cloud -l app=vllm-disagg --containers
+kubectl top pods -n dynamo -l app=vllm-disagg --containers
 ```
 
 ## Performance Tuning
@@ -124,11 +124,11 @@ The system uses smart thresholds to decide between local and remote prefill:
 ### Scaling Strategies
 ```bash
 # Scale prefill workers for high input throughput workloads
-kubectl patch dynamographdeployment vllm-disagg -n dynamo-cloud -p \
+kubectl patch dynamographdeployment vllm-disagg -n dynamo -p \
   '{"spec":{"services":{"VllmPrefillWorker":{"replicas":3}}}}'
 
 # Scale decode workers for high concurrent request scenarios
-kubectl patch dynamographdeployment vllm-disagg -n dynamo-cloud -p \
+kubectl patch dynamographdeployment vllm-disagg -n dynamo -p \
   '{"spec":{"services":{"VllmDecodeWorker":{"replicas":4}}}}'
 ```
 
@@ -154,13 +154,13 @@ kubectl patch dynamographdeployment vllm-disagg -n dynamo-cloud -p \
 ### Debug Commands
 ```bash
 # Check NIXL metadata in ETCD
-kubectl exec -n dynamo-cloud deployment/etcd -- etcdctl get --prefix /dynamo/nixl
+kubectl exec -n dynamo deployment/etcd -- etcdctl get --prefix /dynamo/nixl
 
 # Monitor prefill queue
-kubectl logs -n dynamo-cloud -l app=vllm-disagg-prefill -f | grep -i queue
+kubectl logs -n dynamo -l app=vllm-disagg-prefill -f | grep -i queue
 
 # Check disaggregation routing decisions
-kubectl logs -n dynamo-cloud -l app=vllm-disagg-decode -f | grep -i "routing\|disagg"
+kubectl logs -n dynamo -l app=vllm-disagg-decode -f | grep -i "routing\|disagg"
 ```
 
 ## External Access
@@ -175,5 +175,5 @@ For production external access, see the main README.md **External Access** secti
 Remove the deployment:
 
 ```bash
-kubectl delete dynamographdeployment vllm-disagg -n dynamo-cloud
+kubectl delete dynamographdeployment vllm-disagg -n dynamo
 ```

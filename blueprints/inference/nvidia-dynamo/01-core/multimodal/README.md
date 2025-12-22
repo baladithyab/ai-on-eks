@@ -24,13 +24,13 @@ For comprehensive documentation on multimodal deployments, see:
 
 ```bash
 # Deploy LLaVA example
-kubectl apply -f llava-1.5-7b.yaml -n dynamo-cloud
+kubectl apply -f llava-1.5-7b.yaml -n dynamo
 
 # Wait for model download and pods to be ready
-kubectl wait --for=condition=ready pod -l app=llava-frontend -n dynamo-cloud --timeout=600s
+kubectl wait --for=condition=ready pod -l app=llava-frontend -n dynamo --timeout=600s
 
 # Test with an image
-kubectl port-forward service/llava-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/llava-frontend 8000:8000 -n dynamo
 
 # Send image understanding request
 curl -X POST http://localhost:8000/v1/chat/completions \

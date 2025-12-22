@@ -46,7 +46,7 @@
 ## Tier 1 - Core (Golden Path)
 
 **Description**: Essential examples that demonstrate core functionality for each backend  
-**Prerequisites**: GPU nodes, hf-token-secret + ngc-secret in dynamo-cloud  
+**Prerequisites**: GPU nodes, hf-token-secret + ngc-secret in dynamo  
 **Test Start**: 2025-12-16 00:15:30 UTC  
 **Test End**: 2025-12-16 01:31:03 UTC  
 **Total Duration**: ~76 minutes

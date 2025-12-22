@@ -10,7 +10,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: trtllm-multinode-config
-  namespace: dynamo-cloud
+  namespace: dynamo
 data:
   prefill.yaml: |
     # TensorRT-LLM Prefill Worker Configuration
@@ -47,7 +47,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: trtllm-multinode-models
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   accessModes:
     - ReadWriteMany
@@ -60,7 +60,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
   name: trtllm-disagg-multinode
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   backendFramework: trtllm
   pvcs:

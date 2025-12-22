@@ -13,7 +13,7 @@
 # 4. Sets up Dynamo Cloud operator and platform components
 # 5. Verifies deployment and provides access instructions
 #
-# Based on patterns from dynamo-on-eks/dynamo-cloud scripts
+# Based on patterns from dynamo-on-eks/dynamo scripts
 # ============================================================================
 
 set -euo pipefail

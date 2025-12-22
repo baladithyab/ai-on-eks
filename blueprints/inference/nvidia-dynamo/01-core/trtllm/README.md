@@ -42,7 +42,7 @@ This directory contains TensorRT-LLM deployment configurations for the NVIDIA Dy
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace with secrets configured
+- `dynamo` namespace with secrets configured
 - **NGC API Key secret configured** (`ngc-secret`)
 - G5 GPU nodes available (at least 1-2 GPUs with 24GB VRAM each)
 - HuggingFace token secret configured
@@ -146,7 +146,7 @@ kubectl create secret docker-registry ngc-secret \
   --docker-server=nvcr.io \
   --docker-username='$oauthtoken' \
   --docker-password=your-ngc-api-key \
-  -n dynamo-cloud
+  -n dynamo
 ```
 
 ## Testing
@@ -154,7 +154,7 @@ kubectl create secret docker-registry ngc-secret \
 ### Basic Health Check
 ```bash
 # Port forward to frontend service
-kubectl port-forward service/trtllm-aggregated-default-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/trtllm-aggregated-default-frontend 8000:8000 -n dynamo
 
 # Test health endpoint
 curl http://localhost:8000/health
@@ -195,31 +195,31 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 ### Pod Status
 ```bash
 # Check deployment status
-kubectl get dynamographdeployment trtllm-aggregated-default -n dynamo-cloud
+kubectl get dynamographdeployment trtllm-aggregated-default -n dynamo
 
 # Check pods
-kubectl get pods -n dynamo-cloud -l app=trtllm-aggregated-default
+kubectl get pods -n dynamo -l app=trtllm-aggregated-default
 ```
 
 ### Performance Monitoring
 ```bash
 # GPU utilization (should be >80% during inference)
-kubectl exec -it <trtllm-worker-pod> -n dynamo-cloud -- nvidia-smi
+kubectl exec -it <trtllm-worker-pod> -n dynamo -- nvidia-smi
 
 # Worker logs with performance metrics
-kubectl logs -n dynamo-cloud -l componentType=worker -f | grep -i "throughput\|latency\|batch"
+kubectl logs -n dynamo -l componentType=worker -f | grep -i "throughput\|latency\|batch"
 ```
 
 ### Disaggregated Monitoring
 ```bash
 # Check both prefill and decode workers
-kubectl get pods -n dynamo-cloud -l app=trtllm-disaggregated-default
+kubectl get pods -n dynamo -l app=trtllm-disaggregated-default
 
 # Prefill worker logs
-kubectl logs -n dynamo-cloud -l app=trtllm-disaggregated-default | grep prefill
+kubectl logs -n dynamo -l app=trtllm-disaggregated-default | grep prefill
 
 # Decode worker logs
-kubectl logs -n dynamo-cloud -l app=trtllm-disaggregated-default | grep decode
+kubectl logs -n dynamo -l app=trtllm-disaggregated-default | grep decode
 ```
 
 ## GPU Requirements and Node Selection
@@ -271,11 +271,11 @@ For production external access, see the main README.md **External Access** secti
 
 ```bash
 # Remove deployment
-kubectl delete dynamographdeployment trtllm-aggregated-default -n dynamo-cloud
+kubectl delete dynamographdeployment trtllm-aggregated-default -n dynamo
 # or
-kubectl delete dynamographdeployment trtllm-aggregated-high-performance -n dynamo-cloud
+kubectl delete dynamographdeployment trtllm-aggregated-high-performance -n dynamo
 # or
-kubectl delete dynamographdeployment trtllm-disaggregated-default -n dynamo-cloud
+kubectl delete dynamographdeployment trtllm-disaggregated-default -n dynamo
 ```
 
 ## Troubleshooting
@@ -285,37 +285,37 @@ kubectl delete dynamographdeployment trtllm-disaggregated-default -n dynamo-clou
 **NGC Authentication Failures:**
 ```bash
 # Check NGC secret exists
-kubectl get secret ngc-secret -n dynamo-cloud
+kubectl get secret ngc-secret -n dynamo
 
 # Check pod events for ImagePullBackOff
-kubectl describe pod <trtllm-worker-pod> -n dynamo-cloud
+kubectl describe pod <trtllm-worker-pod> -n dynamo
 ```
 
 **Model Loading Issues:**
 ```bash
 # Check HuggingFace token
-kubectl get secret hf-token-secret -n dynamo-cloud
+kubectl get secret hf-token-secret -n dynamo
 
 # Monitor model download progress
-kubectl logs <trtllm-worker-pod> -n dynamo-cloud -f | grep -i "download\|loading"
+kubectl logs <trtllm-worker-pod> -n dynamo -f | grep -i "download\|loading"
 ```
 
 **Performance Issues:**
 ```bash
 # Check GPU memory utilization
-kubectl exec <trtllm-worker-pod> -n dynamo-cloud -- nvidia-smi
+kubectl exec <trtllm-worker-pod> -n dynamo -- nvidia-smi
 
 # Review engine configuration in logs
-kubectl logs <trtllm-worker-pod> -n dynamo-cloud | grep -i "config\|batch\|memory"
+kubectl logs <trtllm-worker-pod> -n dynamo | grep -i "config\|batch\|memory"
 ```
 
 **Disaggregated Communication Issues:**
 ```bash
 # Check cache transceiver status
-kubectl logs -n dynamo-cloud -l componentType=worker -f | grep -i "transceiver\|cache"
+kubectl logs -n dynamo -l componentType=worker -f | grep -i "transceiver\|cache"
 
 # Verify both workers are healthy
-kubectl get pods -n dynamo-cloud -l app=trtllm-disaggregated-default -o wide
+kubectl get pods -n dynamo -l app=trtllm-disaggregated-default -o wide
 ```
 
 ## References

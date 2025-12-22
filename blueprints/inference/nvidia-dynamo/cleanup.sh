@@ -17,7 +17,7 @@
 #   ./cleanup.sh --namespace custom # Clean from custom namespace
 #
 # Safety:
-#   - Does NOT delete the dynamo-cloud namespace
+#   - Does NOT delete the dynamo namespace
 #   - Does NOT delete Dynamo platform (operator, etcd, NATS)
 #   - Does NOT delete shared model cache PVC
 #   - Only removes DynamoGraphDeployment resources and their pods
@@ -40,7 +40,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Default namespace
-NAMESPACE="dynamo-cloud"
+NAMESPACE="dynamo"
 
 # Options
 VERBOSE=false
@@ -258,11 +258,11 @@ NVIDIA Dynamo Cleanup Script
 Usage:
   $0 [deployment-name]  # Clean specific deployment
   $0 --all              # Clean all deployments
-  $0 --namespace <ns>   # Use custom namespace (default: dynamo-cloud)
+  $0 --namespace <ns>   # Use custom namespace (default: dynamo)
 
 Options:
   --all, -a             Clean all DynamoGraphDeployments
-  --namespace <ns>      Use custom namespace (default: dynamo-cloud)
+  --namespace <ns>      Use custom namespace (default: dynamo)
   --verbose, -v         Show detailed output including kubectl commands
   --dry-run, -n         Show what would be deleted without actually deleting
   --force, -f           Skip confirmation prompt
@@ -276,7 +276,7 @@ Examples:
   $0 --force vllm-agg   # Delete without confirmation
 
 Safety:
-  - Does NOT delete dynamo-cloud namespace
+  - Does NOT delete dynamo namespace
   - Does NOT delete Dynamo platform components
   - Does NOT delete shared model cache PVC
   - Only removes DynamoGraphDeployment CRs

@@ -16,7 +16,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: trtllm-online
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   model: Qwen/Qwen3-0.6B
   backend: trtllm

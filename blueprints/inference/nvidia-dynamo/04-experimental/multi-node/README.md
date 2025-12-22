@@ -150,16 +150,16 @@ extraPodSpec:
 # See: https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#platform-level-feature-configuration
 
 # 2. Deploy multi-node example
-kubectl apply -f vllm-disaggregated-multinode.yaml -n dynamo-cloud
+kubectl apply -f vllm-disaggregated-multinode.yaml -n dynamo
 
 # 3. Monitor Dynamo operator coordination
-kubectl logs -n dynamo-cloud -l app.kubernetes.io/name=dynamo-operator -f
+kubectl logs -n dynamo -l app.kubernetes.io/name=dynamo-operator -f
 
 # 4. Wait for all pods to be ready (KAI Scheduler coordinates gang scheduling)
-kubectl wait --for=condition=ready pod -l app=vllm-disagg-multinode-prefill -n dynamo-cloud --timeout=900s
+kubectl wait --for=condition=ready pod -l app=vllm-disagg-multinode-prefill -n dynamo --timeout=900s
 
 # 5. Test the deployment
-kubectl port-forward service/vllm-disagg-multinode-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-disagg-multinode-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/health
 ```
 
@@ -205,13 +205,13 @@ When you add `multinode.nodeCount` to a service in your DGD:
 ### Pods stuck in Pending
 ```bash
 # Check Dynamo operator logs
-kubectl logs -n dynamo-cloud -l app.kubernetes.io/name=dynamo-operator
+kubectl logs -n dynamo -l app.kubernetes.io/name=dynamo-operator
 
 # Check KAI scheduler logs
 kubectl logs -n kube-system -l app=kai-scheduler
 
 # Check if KAI Scheduler is enabled
-helm get values dynamo-platform -n dynamo-cloud | grep kai-scheduler
+helm get values dynamo-platform -n dynamo | grep kai-scheduler
 ```
 
 ### Insufficient GPU capacity
@@ -225,7 +225,7 @@ kubectl get nodepool -o yaml
 
 ### Model fails to load
 - Ensure `tensor-parallel-size` matches `nodeCount × GPUs per node`
-- Check that all pods are on different nodes: `kubectl get pods -n dynamo-cloud -o wide`
+- Check that all pods are on different nodes: `kubectl get pods -n dynamo -o wide`
 - Verify EFA networking is enabled for high-performance inter-node communication
 
 For complete configuration options, troubleshooting, and best practices, see the [full documentation](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#platform-level-feature-configuration).

@@ -55,13 +55,13 @@ This error repeats every 5 seconds because:
 ### 1.3 Infrastructure Status
 
 **Tempo Deployment:**
-- ✅ Running in `dynamo-cloud` namespace (`tempo-0` pod)
-- ✅ Service available: `tempo.dynamo-cloud.svc.cluster.local`
+- ✅ Running in `dynamo` namespace (`tempo-0` pod)
+- ✅ Service available: `tempo.dynamo.svc.cluster.local`
 - ✅ Port 4317 (gRPC OTLP) exposed and accepting connections
 - ✅ Port 3100 (HTTP API) returning `ready`
 
 ```bash
-$ kubectl get svc tempo -n dynamo-cloud
+$ kubectl get svc tempo -n dynamo
 NAME    TYPE        CLUSTER-IP       PORTS
 tempo   ClusterIP   172.20.137.202   3100/TCP,4317/TCP,4318/TCP,...
 ```
@@ -81,12 +81,12 @@ tempo   ClusterIP   172.20.137.202   3100/TCP,4317/TCP,4318/TCP,...
 # BEFORE (wrong)
 envs:
   - name: OTEL_EXPORT_ENDPOINT
-    value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
+    value: "http://tempo.dynamo.svc.cluster.local:4317"
 
 # AFTER (correct)
 envs:
   - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-    value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
+    value: "http://tempo.dynamo.svc.cluster.local:4317"
 ```
 
 ### 1.5 Workaround
@@ -109,7 +109,7 @@ To suppress errors in existing deployment, set `OTEL_EXPORT_ENABLED=0`.
 **Test Performed:**
 ```bash
 $ kubectl apply -f ai-on-eks/blueprints/inference/nvidia-dynamo/01-core/multimodal/llava-1.5-7b.yaml
-$ kubectl get pods -n dynamo-cloud -l nvidia.com/dynamo-graph-deployment-name=llava
+$ kubectl get pods -n dynamo -l nvidia.com/dynamo-graph-deployment-name=llava
 NAME                                  READY   STATUS    RESTARTS   AGE
 llava-encodeworker-58bcfbf5df-fkrn5   1/1     Running   0          6m55s
 llava-frontend-674c546686-9vnnp       1/1     Running   0          6m55s
@@ -119,7 +119,7 @@ llava-vlmworker-7d79cdcfdd-5d2bh      1/1     Running   0          6m54s
 
 **API Validation:**
 ```bash
-$ curl http://llava-frontend.dynamo-cloud.svc.cluster.local:8000/v1/models
+$ curl http://llava-frontend.dynamo.svc.cluster.local:8000/v1/models
 {"object":"list","data":[{"id":"llava-hf/llava-1.5-7b-hf","object":"object","created":1766425764,"owned_by":"nvidia"}]}
 ```
 
@@ -219,7 +219,7 @@ This forces vLLM to bypass GPU detection. However, this may impact performance f
 
 | Priority | Action | Status |
 |----------|--------|--------|
-| ✅ | Tempo OTEL collector | Already deployed in `dynamo-cloud` |
+| ✅ | Tempo OTEL collector | Already deployed in `dynamo` |
 | ✅ | GPU nodes available | Karpenter `g5-nvidia` nodepool working |
 
 ### Upstream Issues to Track
@@ -239,7 +239,7 @@ This forces vLLM to bypass GPU detection. However, this may impact performance f
      value: "1"
 -  - name: OTEL_EXPORT_ENDPOINT
 +  - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-     value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
+     value: "http://tempo.dynamo.svc.cluster.local:4317"
 ```
 
 ---
@@ -273,7 +273,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
   name: otel-test
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   envs:
     - name: DYN_LOGGING_JSONL
@@ -281,12 +281,12 @@ spec:
     - name: OTEL_EXPORT_ENABLED
       value: "1"
     - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-      value: "http://tempo.dynamo-cloud.svc.cluster.local:4317"
+      value: "http://tempo.dynamo.svc.cluster.local:4317"
   ...
 EOF
 
 # Check logs for successful export
-kubectl logs -n dynamo-cloud -l app.kubernetes.io/name=otel-test-frontend | grep -E "OTLP export enabled|trace"
+kubectl logs -n dynamo -l app.kubernetes.io/name=otel-test-frontend | grep -E "OTLP export enabled|trace"
 ```
 
 ### Test Multimodal Inference
@@ -295,10 +295,10 @@ kubectl logs -n dynamo-cloud -l app.kubernetes.io/name=otel-test-frontend | grep
 kubectl apply -f ai-on-eks/blueprints/inference/nvidia-dynamo/01-core/multimodal/llava-1.5-7b.yaml
 
 # Wait for ready
-kubectl wait --for=condition=Ready dgd/llava -n dynamo-cloud --timeout=600s
+kubectl wait --for=condition=Ready dgd/llava -n dynamo --timeout=600s
 
 # Test with base64 image
-curl -X POST http://llava-frontend.dynamo-cloud.svc.cluster.local:8000/v1/chat/completions \
+curl -X POST http://llava-frontend.dynamo.svc.cluster.local:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "llava-hf/llava-1.5-7b-hf",

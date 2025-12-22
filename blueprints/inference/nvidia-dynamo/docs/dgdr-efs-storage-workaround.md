@@ -36,7 +36,7 @@ Since upgrading the operator isn't always feasible, we created a workaround scri
 
 1. An EFS-backed PVC exists in the cluster:
    ```bash
-   kubectl get pvc dynamo-pvc -n dynamo-cloud
+   kubectl get pvc dynamo-pvc -n dynamo
    # Should show: 100Gi, RWX, efs-sc-dynamic
    ```
 
@@ -54,7 +54,7 @@ After applying a DGDR, immediately run the patch script:
 kubectl apply -f vllm/planner/vllm-dgdr-qwen-coder-32b.yaml
 
 # Patch the profiler job to use EFS
-./scripts/patch-profiler-job-pvc.sh vllm-qwen-coder-32b dynamo-cloud dynamo-pvc
+./scripts/patch-profiler-job-pvc.sh vllm-qwen-coder-32b dynamo dynamo-pvc
 ```
 
 ### How It Works
@@ -71,7 +71,7 @@ kubectl apply -f vllm/planner/vllm-dgdr-qwen-coder-32b.yaml
 After patching, verify the job uses the PVC:
 
 ```bash
-kubectl get job profile-vllm-qwen-coder-32b -n dynamo-cloud \
+kubectl get job profile-vllm-qwen-coder-32b -n dynamo \
   -o jsonpath='{.spec.template.spec.volumes[0]}' | jq .
 ```
 
@@ -87,7 +87,7 @@ Expected output:
 
 Verify inside the pod:
 ```bash
-kubectl exec -n dynamo-cloud <profiler-pod> -c profiler -- df -h /data
+kubectl exec -n dynamo <profiler-pod> -c profiler -- df -h /data
 # Should show EFS mount: 127.0.0.1:/ with 8.0E capacity
 ```
 

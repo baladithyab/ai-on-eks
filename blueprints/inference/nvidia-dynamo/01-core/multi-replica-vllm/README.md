@@ -21,7 +21,7 @@ This example demonstrates:
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster
-- `dynamo-cloud` namespace with secrets configured
+- `dynamo` namespace with secrets configured
 - **Multi-GPU setup**: Minimum 2 GPUs for disaggregated serving
 - HuggingFace token secret configured
 - NIXL support for efficient KV cache transfer
@@ -31,7 +31,7 @@ This example demonstrates:
 Deploy using kubectl:
 
 ```bash
-kubectl apply -f multi-replica-vllm.yaml -n dynamo-cloud
+kubectl apply -f multi-replica-vllm.yaml -n dynamo
 ```
 
 Or use the main deployment script:
@@ -76,10 +76,10 @@ Once deployed, test the multi-replica vLLM service:
 ```bash
 # Port forward to the frontend service (with KV routing)
 # Port forward via Service (recommended) - enables both API access and metrics collection
-kubectl port-forward service/multi-replica-vllm-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/multi-replica-vllm-frontend 8000:8000 -n dynamo
 
 # Alternative: Direct deployment access
-# kubectl port-forward deployment/multi-replica-vllm-frontend 8000:8000 -n dynamo-cloud
+# kubectl port-forward deployment/multi-replica-vllm-frontend 8000:8000 -n dynamo
 
 # Test health endpoint
 curl http://localhost:8000/health
@@ -118,19 +118,19 @@ Monitor the multi-replica deployment:
 
 ```bash
 # View all pods
-kubectl get pods -n dynamo-cloud -l app=multi-replica-vllm
+kubectl get pods -n dynamo -l app=multi-replica-vllm
 
 # Check prefill worker logs
-kubectl logs -n dynamo-cloud -l app=multi-replica-vllm-prefill -f
+kubectl logs -n dynamo -l app=multi-replica-vllm-prefill -f
 
 # Check decode worker logs
-kubectl logs -n dynamo-cloud -l app=multi-replica-vllm-decode -f
+kubectl logs -n dynamo -l app=multi-replica-vllm-decode -f
 
 # Check frontend logs for routing decisions (with DYN_LOG=debug)
-kubectl logs -n dynamo-cloud -l app=multi-replica-vllm-frontend -f | grep -i "routing\|overlap"
+kubectl logs -n dynamo -l app=multi-replica-vllm-frontend -f | grep -i "routing\|overlap"
 
 # Monitor NIXL transfers
-kubectl logs -n dynamo-cloud -l app=multi-replica-vllm -f | grep -i "nixl\|transfer"
+kubectl logs -n dynamo -l app=multi-replica-vllm -f | grep -i "nixl\|transfer"
 ```
 
 ## Performance Benefits
@@ -148,10 +148,10 @@ Scale workers independently based on workload:
 
 ```bash
 # Scale prefill workers for high input throughput
-kubectl patch dynamographdeployment multi-replica-vllm -n dynamo-cloud -p '{"spec":{"services":{"PrefillWorker":{"replicas":3}}}}'
+kubectl patch dynamographdeployment multi-replica-vllm -n dynamo -p '{"spec":{"services":{"PrefillWorker":{"replicas":3}}}}'
 
 # Scale decode workers for more concurrent generations
-kubectl patch dynamographdeployment multi-replica-vllm -n dynamo-cloud -p '{"spec":{"services":{"DecodeWorker":{"replicas":4}}}}'
+kubectl patch dynamographdeployment multi-replica-vllm -n dynamo -p '{"spec":{"services":{"DecodeWorker":{"replicas":4}}}}'
 ```
 
 ## Troubleshooting
@@ -201,5 +201,5 @@ For production external access, see the main README.md **External Access** secti
 Remove the deployment:
 
 ```bash
-kubectl delete dynamographdeployment multi-replica-vllm -n dynamo-cloud
+kubectl delete dynamographdeployment multi-replica-vllm -n dynamo
 ```

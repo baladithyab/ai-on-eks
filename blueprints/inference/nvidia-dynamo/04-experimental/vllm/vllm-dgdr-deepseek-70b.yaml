@@ -19,7 +19,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: vllm-deepseek-70b
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   model: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
   backend: vllm
@@ -59,7 +59,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: deepseek-70b-dgd-config
-  namespace: dynamo-cloud
+  namespace: dynamo
 data:
   disagg.yaml: |
     apiVersion: nvidia.com/v1alpha1

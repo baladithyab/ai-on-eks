@@ -147,8 +147,8 @@ The installation script performs the following:
 1. **Copies Base Infrastructure**: Integrates with the ai-on-eks base infrastructure modules
 2. **Provisions AWS Resources**: Creates VPC, EKS cluster, and supporting infrastructure via Terraform
 3. **Deploys Dynamo CRDs**: Installs Custom Resource Definitions via ArgoCD
-4. **Deploys Dynamo Platform**: Installs operator and platform components via ArgoCD (creates dynamo-cloud namespace)
-5. **Creates Secrets in dynamo-cloud namespace** (managed in `nvidia-dynamo-secrets.tf`):
+4. **Deploys Dynamo Platform**: Installs operator and platform components via ArgoCD (creates dynamo namespace)
+5. **Creates Secrets in dynamo namespace** (managed in `nvidia-dynamo-secrets.tf`):
    - `ngc-secret`: NGC container image pull authentication
    - `hf-token-secret`: HuggingFace model downloads
 
@@ -175,7 +175,7 @@ kubectl get nodes
 Next, verify all Dynamo platform pods are running:
 
 ```bash
-kubectl get pods -n dynamo-cloud
+kubectl get pods -n dynamo
 ```
 
 Expected output should show pods for:
@@ -259,7 +259,7 @@ For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](
 | `dynamo_stack_version` | string | `"v0.7.0.post1"` | Dynamo platform version to deploy |
 | `dynamo_enable_grove` | bool | `false` | Enable Grove for multi-node inference coordination |
 | `dynamo_enable_kai_scheduler` | bool | `false` | Enable Kai Scheduler for intelligent resource allocation |
-| `dynamo_operator_namespace_restriction_enabled` | bool | `false` | Restrict operator to dynamo-cloud namespace only |
+| `dynamo_operator_namespace_restriction_enabled` | bool | `false` | Restrict operator to dynamo namespace only |
 | `dynamo_model_express_url` | string | `""` | URL for existing Model Express server (optional) |
 
 #### dynamo_stack_version
@@ -370,7 +370,7 @@ dynamo_enable_kai_scheduler = true
 **Default**: `false`
 **Example**: `true`
 
-Restricts the Dynamo operator to only monitor and manage resources in the `dynamo-cloud` namespace. By default, the operator runs with cluster-wide permissions and can manage DynamoGraphDeployments in any namespace.
+Restricts the Dynamo operator to only monitor and manage resources in the `dynamo` namespace. By default, the operator runs with cluster-wide permissions and can manage DynamoGraphDeployments in any namespace.
 
 **When to Enable:**
 - Multi-tenant clusters where Dynamo should only manage resources in a specific namespace
@@ -383,8 +383,8 @@ Restricts the Dynamo operator to only monitor and manage resources in the `dynam
 - Automatically discovers and injects image pull secrets across namespaces
 
 **Restricted Behavior (true):**
-- Operator only monitors the `dynamo-cloud` namespace
-- DynamoGraphDeployments must be deployed in `dynamo-cloud` namespace
+- Operator only monitors the `dynamo` namespace
+- DynamoGraphDeployments must be deployed in `dynamo` namespace
 - Image pull secrets must be manually replicated to other namespaces if needed
 
 **Example:**
@@ -395,7 +395,7 @@ dynamo_operator_namespace_restriction_enabled = true
 **Namespace Strategy Options:**
 
 *Single Namespace (Recommended for most users):*
-- Deploy all DGDs to `dynamo-cloud` namespace
+- Deploy all DGDs to `dynamo` namespace
 - Use `dynamoNamespace` field for logical grouping
 - Secrets managed by Terraform (NGC + HuggingFace)
 - Works with both cluster-wide and restricted operators
@@ -482,7 +482,7 @@ dynamo_stack_version             = "v0.7.0.post1"
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
 huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
 
-# Restrict operator to dynamo-cloud namespace
+# Restrict operator to dynamo namespace
 dynamo_operator_namespace_restriction_enabled = true
 ```
 
@@ -524,7 +524,7 @@ The deployment automatically creates:
 
 3. **HuggingFace Model Download Failures**:
    - Verify your HuggingFace token has read permissions
-   - Check the secret exists: `kubectl get secret -n dynamo-cloud hf-token-secret`
+   - Check the secret exists: `kubectl get secret -n dynamo hf-token-secret`
    - Ensure the token is valid: [HF Tokens](https://huggingface.co/settings/tokens)
 
 4. **GPU Nodes Not Available**: Check Karpenter logs and instance availability in your region
@@ -538,22 +538,22 @@ The deployment automatically creates:
 ```bash
 # Check cluster status
 kubectl get nodes
-kubectl get pods -n dynamo-cloud
+kubectl get pods -n dynamo
 
 # View ArgoCD logs
 kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server
 
 # Check Dynamo operator logs
-kubectl logs -n dynamo-cloud -l app=dynamo-operator
+kubectl logs -n dynamo -l app=dynamo-operator
 
 # Verify all secrets are created
 kubectl get secret -n argocd nvidia-dynamo-repo
-kubectl get secret -n dynamo-cloud ngc-secret
-kubectl get secret -n dynamo-cloud hf-token-secret
+kubectl get secret -n dynamo ngc-secret
+kubectl get secret -n dynamo hf-token-secret
 
 # Inspect secret contents (base64 encoded)
-kubectl get secret -n dynamo-cloud hf-token-secret -o yaml
-kubectl get secret -n dynamo-cloud ngc-secret -o yaml
+kubectl get secret -n dynamo hf-token-secret -o yaml
+kubectl get secret -n dynamo ngc-secret -o yaml
 ```
 
 ## Next Steps

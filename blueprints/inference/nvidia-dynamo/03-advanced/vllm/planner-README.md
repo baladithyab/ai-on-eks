@@ -43,7 +43,7 @@ Profiling results are stored on `dynamo-pvc` (backed by EFS) at `/data/`:
 To download profiling results for analysis:
 ```bash
 python3 -m deploy.utils.download_pvc_results \
-  --namespace dynamo-cloud \
+  --namespace dynamo \
   --output-dir ./profiling_data \
   --folder /data
 ```
@@ -114,21 +114,21 @@ These GPUs require online profiling with AIPerf:
 
 ```bash
 # Deploy Qwen2.5-Coder-32B DGDR (will start profiling)
-kubectl apply -f vllm-dgdr-qwen-coder-32b.yaml -n dynamo-cloud
+kubectl apply -f vllm-dgdr-qwen-coder-32b.yaml -n dynamo
 
 # Monitor profiling progress
-kubectl get dgdr -n dynamo-cloud -w
-kubectl get pods -n dynamo-cloud | grep profile
+kubectl get dgdr -n dynamo -w
+kubectl get pods -n dynamo | grep profile
 
 # Watch profiler logs
-kubectl logs -n dynamo-cloud -l nvidia.com/component=profiler -f
+kubectl logs -n dynamo -l nvidia.com/component=profiler -f
 ```
 
 ### Check DGDR Status
 
 ```bash
 # View DGDR status
-kubectl describe dgdr vllm-qwen-coder-32b -n dynamo-cloud
+kubectl describe dgdr vllm-qwen-coder-32b -n dynamo
 
 # Status progression:
 # Pending -> Profiling -> Deploying -> Ready
@@ -143,7 +143,7 @@ apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: my-model
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   model: org/model-name           # HuggingFace model ID
   backend: vllm                   # vllm, sglang, or trtllm
@@ -183,7 +183,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: my-model-config
-  namespace: dynamo-cloud
+  namespace: dynamo
 data:
   disagg.yaml: |
     pvcs:
@@ -255,10 +255,10 @@ For gated models, ensure HF token is configured:
 
 ```bash
 # Check HF token secret exists
-kubectl get secret hf-token-secret -n dynamo-cloud
+kubectl get secret hf-token-secret -n dynamo
 
 # Create if needed
-kubectl create secret generic hf-token-secret -n dynamo-cloud \
+kubectl create secret generic hf-token-secret -n dynamo \
   --from-literal=HF_TOKEN=hf_your_token_here
 ```
 

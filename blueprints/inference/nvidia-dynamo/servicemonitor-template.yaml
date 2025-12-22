@@ -3,7 +3,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: EXAMPLE_NAME-frontend
-  namespace: dynamo-cloud
+  namespace: dynamo
   labels:
     nvidia.com/dynamo-component: Frontend
     nvidia.com/dynamo-namespace: EXAMPLE_NAME
@@ -24,7 +24,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: EXAMPLE_NAME-frontend-metrics
-  namespace: dynamo-cloud
+  namespace: dynamo
   labels:
     # Required label for Prometheus to discover this ServiceMonitor
     release: kube-prometheus-stack
@@ -44,4 +44,4 @@ spec:
     honorLabels: true
   namespaceSelector:
     matchNames:
-    - dynamo-cloud
+    - dynamo
