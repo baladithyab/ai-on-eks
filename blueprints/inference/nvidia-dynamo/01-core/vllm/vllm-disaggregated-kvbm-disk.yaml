@@ -1,0 +1,168 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Disaggregated with KVBM CPU and Disk Offloading
+# Extends KV cache capacity using CPU memory and disk storage
+# Disk offload filtering enabled by default to extend SSD lifespan
+# Requires: EBS volumes or local NVMe storage for disk cache
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-disaggregated-kvbm-disk
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.frontend
+          args:
+            - --http-port
+            - "8000"
+          resources:
+            requests:
+              cpu: "4"
+              memory: "8Gi"
+            limits:
+              cpu: "8"
+              memory: "16Gi"
+
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "16"
+          memory: "200Gi"
+        limits:
+          gpu: "1"
+          memory: "250Gi"
+      envs:
+        # Disable shared memory transport to avoid broadcast deadlock
+        - name: UCX_TLS
+          value: "^mm"
+        # CPU cache size in GB (required for disaggregated decode)
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "100"
+        # Disk cache size in GB (optional, enables disk offloading)
+        - name: DYN_KVBM_DISK_CACHE_GB
+          value: "500"
+        # Enable KVBM metrics (optional)
+        - name: DYN_KVBM_METRICS
+          value: "true"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+            - --gpu-memory-utilization
+            - "0.3"
+            - --disable-log-requests
+            - --max-model-len
+            - "32000"
+            - --enforce-eager
+            - --connector
+            - kvbm
+            - nixl
+          # Volume mount for disk cache (optional, for persistent disk offloading)
+          volumeMounts:
+            - name: kvbm-disk-cache
+              mountPath: /tmp/kvbm-cache
+        # Volume for disk cache storage
+        volumes:
+          - name: kvbm-disk-cache
+            emptyDir:
+              sizeLimit: 550Gi
+              # For production, use a PersistentVolumeClaim instead:
+              # persistentVolumeClaim:
+              #   claimName: kvbm-disk-cache-pvc
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "16"
+          memory: "200Gi"
+        limits:
+          gpu: "1"
+          memory: "250Gi"
+      envs:
+        # Disable shared memory transport to avoid broadcast deadlock
+        - name: UCX_TLS
+          value: "^mm"
+        # CPU cache size in GB (required)
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "100"
+        # Disk cache size in GB (optional, enables disk offloading)
+        - name: DYN_KVBM_DISK_CACHE_GB
+          value: "200"
+        # Disable disk offload filtering to offload all blocks (optional)
+        # Default: false (filtering enabled to extend SSD lifespan)
+        # - name: DYN_KVBM_DISABLE_DISK_OFFLOAD_FILTER
+        #   value: "false"
+        # Enable KVBM metrics (optional)
+        - name: DYN_KVBM_METRICS
+          value: "true"
+        # KVBM metrics port (optional, default: 6880)
+        # - name: DYN_KVBM_METRICS_PORT
+        #   value: "6880"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+            - --is-prefill-worker
+            - --gpu-memory-utilization
+            - "0.3"
+            - --disable-log-requests
+            - --max-model-len
+            - "32000"
+            - --enforce-eager
+            - --connector
+            - kvbm
+            - nixl
+          # Volume mount for disk cache (optional, for persistent disk offloading)
+          volumeMounts:
+            - name: kvbm-disk-cache
+              mountPath: /tmp/kvbm-cache
+        # Volume for disk cache storage
+        volumes:
+          - name: kvbm-disk-cache
+            emptyDir:
+              sizeLimit: 250Gi
+              # For production, use a PersistentVolumeClaim instead:
+              # persistentVolumeClaim:
+              #   claimName: kvbm-disk-cache-pvc
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+

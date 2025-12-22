@@ -1,98 +1,258 @@
-# NVIDIA Dynamo v0.5.0 Inference Examples
+# NVIDIA Dynamo v0.7.0 Inference Examples
 
-This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.5.0 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
+This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.7.0 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
+
+## 🆕 What's New in v0.7.0
+
+**Infrastructure Modernization:**
+- ✅ **NATS Removal Path**: HTTP/TCP transport alternatives via `DYN_REQUEST_PLANE` env var
+- ✅ **ETCD Removal Path**: Kubernetes-native service discovery via EndpointSlices
+- ✅ Filesystem-backed KeyValueStore for non-distributed deployments
+- ✅ Operator `--discovery-backend` flag for etcd/kubernetes selection
+
+**Modular KV Block Manager:**
+- ✅ **Standalone KVBM wheel**: Decoupled from serving stack, pip-installable
+- ✅ Supports TensorRT-LLM and vLLM (SGLang planned)
+- ✅ Can integrate with Triton and other frameworks
+- ✅ Multi-tier caching (GPU→CPU→Disk) enhanced
+
+**Production-Grade Serving:**
+- ✅ AIConfigurator → Planner → Grove pipeline hardened
+- ✅ Finer-grained fault tolerance and health checks
+- ✅ Operator/CRD lifecycle automation
+- ✅ New `DynamoModel` CRD for model lifecycle management
+
+**Performance & Framework Updates:**
+- ✅ **CUDA 13.0 support**: Next-gen GPU architectures
+- ✅ **TensorRT-LLM 1.2.0rc2**: CUDA graphs, improved ARM64 support
+- ✅ **SGLang 0.5.3.post4**: Performance improvements and bug fixes
+- ✅ SGLang warmup optimization for reduced cold start latency
+
+**Multimodal Enhancements:**
+- ✅ Base64 and HTTP image URL support in vLLM workers
+- ✅ Image decoder in frontend for preprocessing
+- ✅ Media URL passthrough in OpenAI preprocessor
+
+**OpenAI API Compatibility:**
+- ✅ `skip_special_tokens` parameter in completions endpoints
+- ✅ Batch completions: Arrays of prompts with multiple completions
+- ✅ Proper rejection of unsupported parameters (400 Bad Request)
+
+**Bug Fixes:**
+- Fixed KVBM GPU memory leak in long-running deployments
+- Fixed streaming responses sending multiple finish reasons
+- Fixed multi-turn `should_add_generation_prompt` bug
+- Fixed vLLM data parallel port conflicts in multinode deployments
 
 ## Quick Start
 
-### 1. Deploy Infrastructure
+### 1. Configure Secrets
 ```bash
-# Deploy Dynamo platform via ArgoCD
+# Edit Terraform configuration to add your API tokens
 cd infra/nvidia-dynamo
+nano terraform/blueprint.tfvars
+
+# Add your tokens:
+# ngc_api_key       = "YOUR_NGC_API_KEY"
+# huggingface_token = "YOUR_HUGGINGFACE_TOKEN"
+```
+
+### 2. Deploy Infrastructure
+```bash
+# Deploy Dynamo platform via Terraform and ArgoCD
 ./install.sh
 ```
 
-### 2. Deploy Examples
+### 3. Deploy Examples
 ```bash
-# Deploy any example (HF token handled automatically)
-cd blueprints/inference/nvidia-dynamo
-./deploy.sh vllm           # or any other example
+# Deploy any example (secrets already configured via Terraform)
+cd ../../blueprints/inference/nvidia-dynamo
+./deploy.sh vllm-aggregated-default   # Core vLLM example
+
+# List all available examples with tiers + backends
+./deploy.sh --list
 ```
 
-### 3. Test Deployment
+### 4. Test Deployment
 ```bash
 # Port forward and test API
-kubectl port-forward svc/vllm-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward svc/vllm-agg-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/v1/models
 ```
 
-### 4. Cleanup
+### 5. Cleanup
 ```bash
 # Remove all deployments and infrastructure
 cd infra/nvidia-dynamo
 ./cleanup.sh
 ```
 
+## Showcase Catalog
+
+> **📘 See [catalog/README.md](catalog/README.md) for the full catalog of tiered examples.**
+
+Examples are organized by tier:
+- **Core**: Essential, multi-backend examples for getting started
+- **Standard**: Production-quality advanced patterns
+- **Advanced**: Specialized use-cases (DGDR, profiling, large models)
+- **Experimental**: Early features and internal test manifests
+
+**List all examples:**
+```bash
+./deploy.sh --list
+```
+
+**Quick Reference:**
+```bash
+cd blueprints/inference/nvidia-dynamo
+./deploy.sh vllm-aggregated-default    # Deploy using stable catalog id
+./test.sh vllm-aggregated-default      # Test
+./cleanup.sh vllm-aggregated-default   # Cleanup
+```
+
+**Core Showcase Examples (backend-diverse):**
+| ID | Backend | Description |
+|----|---------|-------------|
+| `vllm-aggregated-default` | vLLM | Standard aggregated inference |
+| `sglang-aggregated-default` | SGLang | RadixAttention caching |
+| `trtllm-aggregated-default` | TRT-LLM | TensorRT-optimized inference |
+| `vllm-disaggregated-default` | vLLM | Prefill/decode separation |
+| `vllm-router` | vLLM | KV-aware routing |
+| `multi-replica-vllm` | vLLM | Multi-replica HA |
+
+**Common Patterns (backwards-compatible aliases):**
+- `vllm` → `vllm-aggregated-default`
+- `sglang` → `sglang-aggregated-default`
+- `trtllm` → `trtllm-aggregated-default`
+
 ## Prerequisites
 
 - **EKS Cluster**: Kubernetes 1.28+ with GPU nodes (G5 instances recommended)
 - **Karpenter**: For automatic GPU node provisioning
 - **ArgoCD**: Deployed via the installation script
-- **HuggingFace Token**: For model downloads (set `HF_TOKEN` environment variable or enter interactively)
+- **NGC API Key**: Required for accessing NVIDIA container images ([Get NGC API Key](https://ngc.nvidia.com/setup/api-key))
+- **HuggingFace Token**: Required for model downloads ([Get HF Token](https://huggingface.co/settings/tokens))
+
+:::warning Important
+Both NGC API key and HuggingFace token are **required** and must be configured in `infra/nvidia-dynamo/terraform/blueprint.tfvars` before deployment. Secrets are now managed by Terraform (not shell scripts).
+:::
+
+## 📋 Comprehensive Testing Results
+
+![Test Status](https://img.shields.io/badge/Tests-7%2F7%20Passed-brightgreen) ![Platform](https://img.shields.io/badge/Platform-Production%20Ready-success) ![Version](https://img.shields.io/badge/Dynamo-v0.7.0.post1-blue)
+
+**See [DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md](../../../../DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md) for detailed testing results.**
+
+### Test Summary (December 2025)
+
+| Tier | Blueprints Tested | Pass Rate | Key Validations |
+|------|-------------------|-----------|-----------------|
+| **Tier 1** | hello-world, vllm-aggregated | 2/2 (100%) | Basic deployment, model loading |
+| **Tier 2** | vllm-disaggregated, vllm-router, vllm-dgdr | 3/3 (100%) | Disaggregated serving, KV routing, DGDR |
+| **Tier 3** | sglang-aggregated, trtllm-aggregated | 2/2 (100%) | Alternative backends |
+
+### Testing Documentation
+- 📊 **Comprehensive Report**: [DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md](../../../../DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md)
+- 📝 **Tier 1 Details**: [docs/TIER1_VLLM_AGGREGATED_TEST_RESULTS.md](../../../../docs/TIER1_VLLM_AGGREGATED_TEST_RESULTS.md)
+- 📝 **Tier 2 Details**: [docs/TIER2_VLLM_ADVANCED_TEST_RESULTS.md](../../../../docs/TIER2_VLLM_ADVANCED_TEST_RESULTS.md)
+- 📝 **Tier 3 Details**: [docs/TIER3_ALTERNATIVE_BACKEND_TEST_RESULTS.md](../../../../docs/TIER3_ALTERNATIVE_BACKEND_TEST_RESULTS.md)
+- 🔍 **Quality Audit**: [DYNAMO_BLUEPRINT_QUALITY_AUDIT.md](../../../../DYNAMO_BLUEPRINT_QUALITY_AUDIT.md)
+- 📋 **Testing Plan**: [BLUEPRINT_TESTING_PLAN.md](../../../../BLUEPRINT_TESTING_PLAN.md)
+
+### Validated Features
+- ✅ Multi-backend support (vLLM, SGLang, TensorRT-LLM)
+- ✅ Disaggregated serving (prefill/decode separation)
+- ✅ KV-aware intelligent routing
+- ✅ SLA-driven deployment planning (DGDR)
+- ✅ Karpenter auto-scaling with A10G GPUs
+- ✅ Clean resource lifecycle management
 
 ## Available Examples
 
-### Basic Examples (Production Ready)
-| Example | Description | Models | Features |
-|---------|-------------|--------|---------|
-| **[hello-world](hello-world/)** | CPU-only testing example | N/A | Basic connectivity test |
-| **[vllm](vllm/)** | vLLM aggregated serving | Qwen3-0.6B | OpenAI API, G5 GPU |
-| **[sglang](sglang/)** | SGLang with advanced caching | DeepSeek-R1-Distill-Llama-8B | RadixAttention, Multi-model |
-| **[trtllm](trtllm/)** | TensorRT-LLM optimized | DeepSeek-R1-Distill-Llama-8B | Maximum performance |
-| **[multi-replica-vllm](multi-replica-vllm/)** | Multi-replica HA deployment | Multiple models | KV routing, load balancing |
+> **📘 Full catalog with tiers + backends: [catalog/README.md](catalog/README.md)**
 
-### Advanced Examples (Beta)
-| Example | Description | Use Case |
-|---------|-------------|----------|
-| **[vllm-disagg](vllm-disagg/)** | Separate prefill/decode workers | High throughput scenarios |
-| **[sglang-disagg](sglang-disagg/)** | Disaggregated with RadixAttention | Memory optimization |
-| **[trtllm-disagg](trtllm-disagg/)** | TRT-LLM disaggregated | Ultra-high performance |
-| **[kv-routing](kv-routing/)** | KV-aware intelligent routing | Cache optimization |
-| **[sla-planner](sla-planner/)** | SLA-based autoscaling | Predictive scaling |
+### Core Tier (Production Ready, Backend-Diverse)
+| Catalog ID | Backend | Description | Models | KVBM | Test Status |
+|------------|---------|-------------|--------|------|-------------|
+| **`vllm-aggregated-default`** | vLLM | Aggregated serving | Qwen3-0.6B | ❌ | ✅ Fully Working |
+| **`sglang-aggregated-default`** | SGLang | RadixAttention caching | DeepSeek-R1-Distill-Llama-8B | ❌ | ✅ Fully Working |
+| **`trtllm-aggregated-default`** | TRT-LLM | TensorRT-optimized | Qwen3-0.6B | ❌ | ✅ Fully Working |
+| **`vllm-disaggregated-default`** | vLLM | Prefill/decode separation | Qwen3-0.6B | ✅ CPU+GPU | ✅ Fully Working |
+| **`vllm-router`** | vLLM | KV-aware routing | Qwen3-0.6B | ❌ | ✅ Fully Working |
+| **`multi-replica-vllm`** | vLLM | Multi-replica HA | Qwen3-0.6B | ❌ | ✅ Fully Working |
+
+### Standard Tier (Advanced Production Patterns)
+| Catalog ID | Backend | Description | KVBM | Test Status | Notes |
+|------------|---------|-------------|------|-------------|-------|
+| **`vllm-disaggregated-kvbm-disk`** | vLLM | Multi-tier GPU→CPU→Disk caching | ✅ CPU+GPU+Disk | ✅ Fully Working | **New in v0.6.1** |
+| **`trtllm-disaggregated-default`** | TRT-LLM | TRT-LLM disaggregated | ❌ | ✅ Fully Working | Fixed case sensitivity bug |
+| **`llava-1.5-7b`** | vLLM | Vision-language (LLaVA) | ❌ | ✅ Fully Working | Multimodal |
+| **`llava-next-video-7b`** | vLLM | Video-language model | ❌ | ✅ Fully Working | Multimodal |
+| **`vllm-full-observability`** | vLLM | Full metrics + tracing | ❌ | ✅ Fully Working | Observability |
+
+### Advanced Tier (DGDR, Multi-node, Specialized)
+| Catalog ID | Backend | Description | Test Status | Notes |
+|------------|---------|-------------|-------------|-------|
+| **`trtllm-dgdr-online`** | TRT-LLM | DGDR online planning | ✅ Fully Working | SLA-driven |
+| **`lws-multinode`** | vLLM | LeaderWorkerSet tensor parallel | 📝 Documentation | LWS + Volcano install required |
+| **`multi-node`** | vLLM | Grove-based multi-node | ⚠️ Experimental | Grove alpha, stability issues |
+
+### Experimental Tier (Early Features)
+| Catalog ID | Backend | Description | Test Status | Notes |
+|------------|---------|-------------|-------------|-------|
+| **`sglang-disaggregated-default`** | SGLang | Disaggregated with RadixAttention | ⚠️ Known Issue | Use aggregated instead |
+
+### Model Management
+| Resource | Description | Notes |
+|----------|-------------|-------|
+| **[model-management](model-management/)** | DynamoModel CRD examples | Base models and LoRA adapters |
+
+> **Note:** Internal test manifests are in [`model-management/_internal/`](model-management/_internal/).
 
 ## Deployment Guide
 
-### Automated Deployment
+### Automated Deployment (Using Catalog)
 ```bash
-# Interactive menu (recommended)
-./deploy.sh
+# List all available examples with tiers + backends
+./deploy.sh --list
 
-# Direct deployment with automatic HF token handling
-export HF_TOKEN="your-token-here"  # Optional: set token in environment
-./deploy.sh vllm           # Deploy vLLM with Qwen3-0.6B
-./deploy.sh sglang         # Deploy SGLang with DeepSeek model
-./deploy.sh trtllm         # Deploy TensorRT-LLM optimized
+# Deploy using stable catalog ID (recommended)
+./deploy.sh vllm-aggregated-default      # Core vLLM aggregated
+./deploy.sh sglang-aggregated-default    # Core SGLang
+./deploy.sh trtllm-aggregated-default    # Core TRT-LLM
+
+# Interactive menu (if no argument)
+./deploy.sh
+```
+
+**Backwards-Compatible Aliases:**
+```bash
+# These short names still work (resolved via catalog)
+./deploy.sh vllm           # → vllm-aggregated-default
+./deploy.sh sglang         # → sglang-aggregated-default
+./deploy.sh trtllm         # → trtllm-aggregated-default
 ```
 
 ### Manual Deployment
 ```bash
 # Create HuggingFace secret (for GPU examples)
 kubectl create secret generic hf-token-secret \
-  --from-literal=HF_TOKEN="your-token" -n dynamo-cloud
+  --from-literal=HF_TOKEN="your-token" -n dynamo
 
 # Deploy specific example
-kubectl apply -f vllm/vllm.yaml -n dynamo-cloud
+kubectl apply -f vllm/vllm-aggregated-default.yaml -n dynamo
 
 # Monitor deployment
-kubectl get pods -n dynamo-cloud -l app=vllm -w
+kubectl get pods -n dynamo -l app=vllm-agg -w
 ```
 
 ### Testing Deployments
 ```bash
 # Port forward via Service (recommended) - enables both API and metrics access
-kubectl port-forward service/vllm-frontend 8000:8000 -n dynamo-cloud
+kubectl port-forward service/vllm-frontend 8000:8000 -n dynamo
 
 # Alternative: Direct deployment port-forward
-# kubectl port-forward deployment/vllm-frontend 8000:8000 -n dynamo-cloud
+# kubectl port-forward deployment/vllm-frontend 8000:8000 -n dynamo
 
 # Test health, models, and metrics
 curl http://localhost:8000/health
@@ -109,9 +269,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 ### NGC Container Images
 All examples use official NVIDIA NGC prebuilt containers with full source code:
-- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0`
-- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.5.0`
-- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.5.0`
+- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1`
+- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1`
+- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.0.post1`
 
 **Key Features:**
 - ✅ **Full Source Included**: All Python code available at `/workspace/`
@@ -177,7 +337,27 @@ args: ["--router-mode kv --kv-overlap-score-weight 1.0"]
 Dynamo supports mixing different inference backends:
 - **Cross-Discovery**: SGLang frontend can serve vLLM models
 - **Model Aggregation**: Single API serving multiple backends
-- **Namespace Isolation**: Use `dynamoNamespace` for logical separation
+- **Namespace Isolation**: Use `dynamoNamespace` for logical separation (⚠️ deprecated in v0.7.0+)
+
+### Multi-Node Inference Options
+
+For large models requiring multiple GPUs across nodes, Dynamo provides two orchestration approaches:
+
+| Approach | Status | Use Case | Documentation |
+|----------|--------|----------|---------------|
+| **Grove** | ⚠️ Alpha (v0.1.0-alpha.3) | Built-in orchestration | Disabled by default due to stability issues |
+| **LeaderWorkerSet (LWS)** | ✅ Stable | Kubernetes-native | [lws-multinode/README.md](lws-multinode/README.md) |
+
+**Recommendation**: Use LeaderWorkerSet for production multi-node deployments until Grove stabilizes. See [lws-multinode/](lws-multinode/) for setup instructions.
+
+### Model Management (DynamoModel CRD)
+
+The `DynamoModel` CRD provides lifecycle management for models and adapters:
+- **Base Models**: Register and track model versions
+- **LoRA Adapters**: Extend base models with fine-tuned adapters
+- **Version Tracking**: Maintain model metadata and provenance
+
+See [model-management/](model-management/) for examples and [DynamoModel Documentation](../../infra/nvidia-dynamo/README.md#dynamomodel-crd) for details.
 
 ## Understanding Example Structure
 
@@ -204,7 +384,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -222,7 +402,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           args: ["python3", "-m", "dynamo.vllm", "--model", "Qwen/Qwen3-0.6B"]
 ```
 
@@ -434,11 +614,11 @@ extraPodSpec:
 #### **Step 3: Study Existing Code**
 ```bash
 # Explore container contents
-kubectl exec -it vllm-frontend-xxx -n dynamo-cloud -- ls -la /workspace/
-kubectl exec -it vllm-frontend-xxx -n dynamo-cloud -- find /workspace/ -name "*.py" | head -20
+kubectl exec -it vllm-frontend-xxx -n dynamo -- ls -la /workspace/
+kubectl exec -it vllm-frontend-xxx -n dynamo -- find /workspace/ -name "*.py" | head -20
 
 # Check backend-specific implementations
-kubectl exec -it vllm-worker-xxx -n dynamo-cloud -- ls -la /workspace/components/backends/
+kubectl exec -it vllm-worker-xxx -n dynamo -- ls -la /workspace/components/backends/
 ```
 
 #### **Step 4: Create Custom YAML Template**
@@ -461,7 +641,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter  # CPU-only frontend
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -483,7 +663,7 @@ spec:
           operator: Exists
           effect: NoSchedule
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.vllm", "--model", "your-model-here"]
 ```
@@ -705,7 +885,7 @@ envs:
 Workers expose Prometheus-compatible metrics:
 ```bash
 # Check worker metrics
-kubectl port-forward vllm-worker-xxx 9090:9090 -n dynamo-cloud
+kubectl port-forward vllm-worker-xxx 9090:9090 -n dynamo
 curl http://localhost:9090/metrics
 ```
 
@@ -722,14 +902,14 @@ The most efficient approach uses the existing Service with AWS Load Balancer Con
 kubectl annotate service ${EXAMPLE}-frontend \
   service.beta.kubernetes.io/aws-load-balancer-type="nlb" \
   service.beta.kubernetes.io/aws-load-balancer-target-type="ip" \
-  -n dynamo-cloud
+  -n dynamo
 
 # Option B: Application Load Balancer (ALB) - More Features
 kubectl annotate service ${EXAMPLE}-frontend \
   service.beta.kubernetes.io/aws-load-balancer-type="external" \
   service.beta.kubernetes.io/aws-load-balancer-target-type="ip" \
   service.beta.kubernetes.io/aws-load-balancer-scheme="internet-facing" \
-  -n dynamo-cloud
+  -n dynamo
 ```
 
 **Key Benefits:**
@@ -747,7 +927,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: ${EXAMPLE}-ingress
-  namespace: dynamo-cloud
+  namespace: dynamo
   annotations:
     kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
@@ -821,10 +1001,10 @@ EXAMPLE="vllm"  # or sglang, trtllm, etc.
 kubectl annotate service ${EXAMPLE}-frontend \
   service.beta.kubernetes.io/aws-load-balancer-type="nlb" \
   service.beta.kubernetes.io/aws-load-balancer-target-type="ip" \
-  -n dynamo-cloud
+  -n dynamo
 
 # Get external endpoint
-kubectl get service ${EXAMPLE}-frontend -n dynamo-cloud
+kubectl get service ${EXAMPLE}-frontend -n dynamo
 ```
 
 ### Security Considerations
@@ -842,7 +1022,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: ${EXAMPLE}-frontend-netpol
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   podSelector:
     matchLabels:
@@ -874,16 +1054,96 @@ The Service created by the deploy script enables both API access and Prometheus 
 
 ```bash
 # Check service endpoints
-kubectl get endpoints ${EXAMPLE}-frontend -n dynamo-cloud
+kubectl get endpoints ${EXAMPLE}-frontend -n dynamo
 
 # Verify load balancer health checks
-kubectl describe service ${EXAMPLE}-frontend -n dynamo-cloud
+kubectl describe service ${EXAMPLE}-frontend -n dynamo
 
 # Monitor via ServiceMonitor (automatically created)
 curl http://<load-balancer-url>/metrics
 ```
 
 ## Known Issues and Workarounds
+
+### SGLang Disaggregated NIXL Issue (v0.6.0)
+
+**Issue**: SGLang disaggregated serving with NIXL backend fails inference requests despite successful deployment.
+
+**Symptoms**:
+- All pods deploy successfully and become Ready (frontend, prefill worker, decode worker)
+- Health checks pass and show both prefill and backend endpoints available
+- Model listing works correctly via `/v1/models`
+- Chat completion requests fail with "Stream ended before generation completed" error or timeout
+
+**Root Cause**:
+SGLang-specific bug in disaggregated implementation with NIXL backend. This is **NOT a NIXL issue** - comprehensive testing proves NIXL works correctly:
+- ✅ vLLM disaggregated with NIXL: Fully functional
+- ✅ TensorRT-LLM disaggregated with DEFAULT (UCX): Fully functional
+- ❌ SGLang disaggregated with NIXL: Fails inference
+
+**Evidence from Testing**:
+All three engines successfully initialize NIXL with UCX backend, but only SGLang fails during inference. This isolates the issue to SGLang's NIXL implementation, not the NIXL communication layer itself.
+
+**Workaround**:
+Use **SGLang Aggregated** deployment instead, which is fully functional and production-ready:
+```bash
+./deploy.sh sglang-aggregated-default
+```
+
+**Alternative Backends**:
+SGLang disaggregated supports these transfer backends:
+- `nixl` - ❌ Fails in v0.6.0
+- `mooncake` - Default when flag omitted (not tested)
+- `ascend` - For Ascend NPUs
+- `fake` - For testing only
+
+**Status**:
+- ⚠️ **Not documented** as a known issue in v0.6.0 release notes
+- 🐛 **Recommended**: Report to NVIDIA with comprehensive test results
+- ✅ **Production Alternative**: Use SGLang Aggregated (fully working)
+
+**See Also**: [TESTING_RESULTS.md](TESTING_RESULTS.md) for comprehensive NIXL backend testing across all three inference engines.
+
+---
+
+### TensorRT-LLM Disaggregated Case Sensitivity Bug (Fixed)
+
+**Issue**: TensorRT-LLM disaggregated workers crash with validation error in v0.6.0 manifest.
+
+**Error Message**:
+```
+pydantic_core._pydantic_core.ValidationError: cache_transceiver_config.backend
+Input should be 'DEFAULT', 'UCX', 'NIXL' or 'MPI' [type=literal_error, input_value='default']
+```
+
+**Root Cause**:
+Configuration bug in v0.6.0 manifest - `backend: default` (lowercase) should be `backend: DEFAULT` (uppercase).
+
+**Fix Applied**:
+Modified `blueprints/inference/nvidia-dynamo/trtllm/trtllm-disaggregated-default.yaml`:
+- Line 32 (decode worker): Changed `backend: default` to `backend: DEFAULT`
+- Line 53 (prefill worker): Changed `backend: default` to `backend: DEFAULT`
+
+**Status**:
+- ✅ **Fixed** in this repository
+- ✅ **Fully functional** after fix
+- 📝 **Recommended**: NVIDIA should update official manifests
+
+---
+
+### `dynamoNamespace` Field Deprecation Notice
+
+**Status**: ⚠️ Deprecated in v0.7.0+
+
+The `dynamoNamespace` field in DynamoGraphDeployment specs is officially deprecated. From the CRD schema:
+
+> *"DynamoNamespace is deprecated and will be removed in a future version. The DGD Kubernetes namespace and DynamoGraphDeployment name are used to construct the Dynamo namespace for each component."*
+
+**Impact**: The field still works but generates warnings. All 103 usages in existing blueprints will be removed in a future update.
+
+**Migration**: No action required - the system auto-derives namespace from `{k8s-namespace}/{dgd-name}`.
+
+---
 
 ### Dynamo Namespace Collision Issue
 
@@ -931,8 +1191,8 @@ envs:
 **Verification**:
 ```bash
 # Check namespace isolation is working
-kubectl port-forward svc/vllm-frontend 8001:8000 -n dynamo-cloud &
-kubectl port-forward svc/sglang-frontend 8002:8000 -n dynamo-cloud &
+kubectl port-forward svc/vllm-frontend 8001:8000 -n dynamo &
+kubectl port-forward svc/sglang-frontend 8002:8000 -n dynamo &
 
 # vllm should only show Qwen model
 curl http://localhost:8001/health | jq '.instances[].namespace' | sort -u
@@ -979,7 +1239,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: ${EXAMPLE}-frontend
-  namespace: dynamo-cloud
+  namespace: dynamo
   labels:
     app: ${EXAMPLE}-frontend
 spec:
@@ -999,7 +1259,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: ${EXAMPLE}-frontend-monitor
-  namespace: dynamo-cloud
+  namespace: dynamo
 spec:
   selector:
     matchLabels:
@@ -1012,23 +1272,96 @@ spec:
 
 ## Testing Deployments
 
-### test.sh Capabilities
+### test.sh - Modular Test Router
 
-The `test.sh` script provides interactive testing of deployed examples:
+The `test.sh` script provides a modular approach to testing with support for both general tests (any deployment) and targeted tests (specific features).
 
+#### Basic Usage
 ```bash
-./test.sh                    # Interactive menu to select deployment
-./test.sh vllm              # Test specific deployment
-./test.sh sglang --verbose  # Test with detailed output
+./test.sh <example-id>                    # Runs general tests only
+./test.sh <example-id> --multimodal       # Adds multimodal tests
+./test.sh <example-id> --kv-routing       # Adds KV routing tests
+./test.sh <example-id> --otel             # Adds OTEL tracing tests
+./test.sh <example-id> --performance      # Adds performance benchmarks
+./test.sh <example-id> --full             # Runs all applicable tests
 ```
 
-**Current Features**:
-- 🔍 **Deployment Detection**: Automatically finds available DynamoGraphDeployments
-- 🌐 **Port Forwarding**: Sets up kubectl port-forward to frontend service
-- 🏥 **Health Checking**: Verifies /health endpoint responds correctly
-- 📋 **Model Listing**: Shows available models via /v1/models endpoint
-- 💬 **Chat Testing**: Sends test chat completion request
-- 📊 **Metrics Access**: Displays metrics endpoint for monitoring integration
+#### Examples by Deployment Type
+```bash
+# Standard aggregated deployment (general tests)
+./test.sh vllm-aggregated-default
+
+# Vision-language model (general + multimodal)
+./test.sh qwen2.5-vl-7b --multimodal
+
+# Router deployment (general + KV routing)
+./test.sh vllm-router --kv-routing
+
+# OTEL-enabled deployment (general + observability)
+./test.sh vllm-otel-tracing --otel
+
+# Full test suite for feature-rich deployment
+./test.sh vllm-disaggregated-default --full
+```
+
+### Test Categories
+
+| Category | Tests | When to Use |
+|----------|-------|-------------|
+| **General** | Health check, model list, chat completion | Every deployment |
+| **Multimodal** | Image/video understanding | VLM deployments (LLaVA, Qwen-VL) |
+| **KV Routing** | Cache metrics, routing validation | Router deployments |
+| **Observability** | OTEL trace generation/query | OTEL-enabled deployments |
+| **Performance** | TTFT, throughput benchmarks | Performance validation |
+
+### Test Organization
+
+Tests are organized in the `tests/` directory:
+
+```
+tests/
+├── README.md                         # Full test documentation
+├── lib/
+│   └── test-lib.sh                   # Shared test library
+├── general/
+│   └── basic-inference.sh            # General tests (health, models, chat)
+└── targeted/
+    ├── multimodal-tests/
+    │   ├── test-image.sh             # Image understanding tests
+    │   └── test-video.sh             # Video understanding tests
+    ├── kv-routing-tests/
+    │   └── test-kv-routing.sh        # KV cache routing tests
+    ├── observability-tests/
+    │   └── test-otel.sh              # OTEL tracing tests
+    └── performance-tests/
+        └── test-performance.sh       # Throughput and latency benchmarks
+```
+
+### Running Individual Tests
+
+Each test script can be run directly:
+
+```bash
+# General tests
+./tests/general/basic-inference.sh <deployment-name>
+
+# Targeted tests
+./tests/targeted/multimodal-tests/test-image.sh <deployment-name>
+./tests/targeted/kv-routing-tests/test-kv-routing.sh <deployment-name>
+./tests/targeted/observability-tests/test-otel.sh <deployment-name>
+./tests/targeted/performance-tests/test-performance.sh <deployment-name>
+```
+
+**See [tests/README.md](tests/README.md) for comprehensive test documentation.**
+
+### Test Script Features
+
+- 🔍 **Auto-Detection**: Detects deployment features (multimodal, router, OTEL)
+- 🌐 **Port Forwarding**: Automatic kubectl port-forward setup
+- 🏥 **Health Checking**: Validates /health and /v1/models endpoints
+- 💬 **Chat Testing**: OpenAI-compatible chat completion tests
+- 📊 **Performance Metrics**: TTFT, tokens/second, requests/second
+- 🎯 **Modular Design**: Reusable test library for custom tests
 
 
 
@@ -1039,9 +1372,9 @@ The `test.sh` script provides interactive testing of deployed examples:
 **1. Pod Stuck in Pending - Node Selection Issues**
 ```bash
 # Check pod events and node availability
-kubectl describe pod <pod-name> -n dynamo-cloud
+kubectl describe pod <pod-name> -n dynamo
 kubectl get nodes -l karpenter.sh/nodepool=g5-gpu-karpenter
-kubectl get events -n dynamo-cloud --sort-by='.lastTimestamp' | grep -i pending
+kubectl get events -n dynamo --sort-by='.lastTimestamp' | grep -i pending
 ```
 
 **Possible Solutions:**
@@ -1125,8 +1458,8 @@ extraPodSpec:
 **4. Model Download Failures**
 ```bash
 # Check HuggingFace token secret and network access
-kubectl get secret hf-token-secret -n dynamo-cloud -o yaml
-kubectl logs <worker-pod> -n dynamo-cloud | grep -i "download\|token\|auth"
+kubectl get secret hf-token-secret -n dynamo -o yaml
+kubectl logs <worker-pod> -n dynamo | grep -i "download\|token\|auth"
 ```
 
 **Possible Solutions:**
@@ -1137,8 +1470,8 @@ kubectl logs <worker-pod> -n dynamo-cloud | grep -i "download\|token\|auth"
 **5. Frontend Not Finding Workers**
 ```bash
 # Check service discovery and namespace configuration
-kubectl logs <frontend-pod> -n dynamo-cloud | grep -i discover
-kubectl get pods -n dynamo-cloud -l componentType=worker
+kubectl logs <frontend-pod> -n dynamo | grep -i discover
+kubectl get pods -n dynamo -l componentType=worker
 etcdctl get --prefix /dynamo/ --keys-only  # If etcd is accessible
 ```
 
@@ -1150,8 +1483,8 @@ etcdctl get --prefix /dynamo/ --keys-only  # If etcd is accessible
 **6. API 503 Errors**
 ```bash
 # Check worker readiness and health
-kubectl get pods -n dynamo-cloud -l componentType=worker
-kubectl logs <worker-pod> -n dynamo-cloud --tail=100 | grep -i "ready\|health\|error"
+kubectl get pods -n dynamo -l componentType=worker
+kubectl logs <worker-pod> -n dynamo --tail=100 | grep -i "ready\|health\|error"
 ```
 
 **Possible Solutions:**
@@ -1174,13 +1507,13 @@ readinessProbe:
 ### Cleanup and Reset
 ```bash
 # Remove specific deployment
-kubectl delete dynamographdeployment <name> -n dynamo-cloud
+kubectl delete dynamographdeployment <name> -n dynamo
 
 # Full cleanup (removes all infrastructure)
 cd infra/nvidia-dynamo && ./cleanup.sh
 
 # Reset just the examples (keep platform)
-kubectl delete dynamographdeployment --all -n dynamo-cloud
+kubectl delete dynamographdeployment --all -n dynamo
 ```
 
 ## Documentation and Resources
@@ -1194,7 +1527,7 @@ kubectl delete dynamographdeployment --all -n dynamo-cloud
 ### Additional Examples
 Explore the `/workspace/` directory in containers for more examples:
 ```bash
-kubectl exec -it <pod-name> -n dynamo-cloud -- find /workspace/examples -type f -name "*.py"
+kubectl exec -it <pod-name> -n dynamo -- find /workspace/examples -type f -name "*.py"
 ```
 
 ---

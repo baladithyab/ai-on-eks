@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# TRT-LLM DynamoGraphDeploymentRequest (DGDR) - AI Configurator
+#
+# This DGDR uses AI Configurator for fast profiling (20-30 seconds):
+# 1. Uses simulation-based profiling (no actual GPU runs)
+# 2. Quickly finds optimal configuration
+# 3. Auto-creates a DynamoGraphDeployment with best settings
+#
+# Note: AI Configurator is only available for TRT-LLM backend
+# Supported systems in v0.7.0: h100_sxm, h200_sxm
+# A10G (g5 instances) requires online profiling - use trtllm-dgdr-online.yaml
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: trtllm-aic
+  namespace: dynamo
+spec:
+  model: Qwen/Qwen3-32B
+  backend: trtllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1"
+    config:
+      # Sweep/profiling configuration
+      sweep:
+        # AI Configurator mode (fast simulation-based profiling)
+        use_ai_configurator: true
+        aic_system: h100_sxm       # H100 SXM GPU (p5 instances)
+        aic_model_name: QWEN3_32B  # Must match model above
+        aic_backend_version: "0.20.0"
+
+      # SLA targets for profiling
+      sla:
+        isl: 3000      # Input sequence length
+        osl: 150       # Output sequence length
+        ttft: 500.0    # Time To First Token (ms)
+        itl: 30.0      # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1"
+
+  # Auto-deploy after profiling
+  autoApply: true
+

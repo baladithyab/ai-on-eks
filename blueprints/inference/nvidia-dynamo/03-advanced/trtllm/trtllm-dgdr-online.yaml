@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# TRT-LLM DynamoGraphDeploymentRequest (DGDR) - Online Profiling
+#
+# This DGDR automates the profiling and deployment workflow:
+# 1. Runs AIPerf profiling to measure actual performance (2-4 hours)
+# 2. Finds optimal configuration for SLA targets
+# 3. Auto-creates a DynamoGraphDeployment with best settings
+#
+# Prerequisites:
+# - kube-prometheus-stack installed
+# - Image pull secrets for NGC images
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: trtllm-online
+  namespace: dynamo
+spec:
+  model: Qwen/Qwen3-0.6B
+  backend: trtllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1"
+    config:
+      # Sweep/profiling configuration
+      sweep:
+        # Online profiling mode (AIPerf - actual GPU measurements)
+        use_ai_configurator: false
+
+      # SLA targets for profiling
+      sla:
+        isl: 3000      # Input sequence length
+        osl: 150       # Output sequence length
+        ttft: 200.0    # Time To First Token (ms)
+        itl: 20.0      # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1"
+
+  # Auto-deploy after profiling
+  autoApply: true
+

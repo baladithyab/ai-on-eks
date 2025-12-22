@@ -74,7 +74,7 @@ For example, set your `export AWS_DEFAULT_REGION="<REGION>"` to the desired regi
 **Step2**: Run the installation script.
 
 ```bash
-cd ai-on-eks/infra/jark-stack && chmod +x install.sh
+cd ai-on-eks/infra/jark-stack/terraform && chmod +x install.sh
 ```
 
 ```bash

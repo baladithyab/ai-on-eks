@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Test: DynamoGraphDeployment with modelRef for DynamoModel Integration
+#
+# This example demonstrates how to configure a DGD with modelRef to enable
+# DynamoModel service discovery integration.
+#
+# Key Integration Point:
+# - modelRef.name must match the baseModelName in DynamoModel
+# - When modelRef is set, the operator creates a headless service with
+#   nvidia.com/dynamo-base-model-hash label for discovery
+#
+# Prerequisites:
+# - DynamoModel CRD installed
+# - hf-token-secret created
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-with-modelref-test
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.frontend
+          args:
+            - --http-port
+            - "8000"
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      
+      # modelRef on worker component is key for endpoint discovery
+      modelRef:
+        name: Qwen/Qwen3-0.6B
+      
+      resources:
+        requests:
+          cpu: "4"
+          memory: "16Gi"
+        limits:
+          gpu: "1"
+          memory: "32Gi"
+      envs:
+        - name: HF_HOME
+          value: "/models"
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+            - --served-model-name
+            - Qwen/Qwen3-0.6B
+            - --gpu-memory-utilization
+            - "0.8"
+            - --disable-log-requests
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 10
+            failureThreshold: 60
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

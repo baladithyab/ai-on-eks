@@ -1,0 +1,153 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM DGDR - DeepSeek-R1-Distill-Llama-70B Online Profiling with EFS Cache
+#
+# This profiles and auto-deploys DeepSeek-R1-Distill-Llama-70B:
+# - EFS-backed model cache (dynamo-shared-models PVC)
+# - Dense 70B architecture (Llama-3.3 variant, vLLM-compatible)
+# - Requires 8 GPUs per worker for TP=8
+#
+# Expected profiling time: 3-5 hours (large model)
+#
+# Prerequisites:
+# - dynamo-shared-models PVC created (EFS-backed)
+# - g6e.48xlarge or similar with 8x GPUs per node
+# - ~140GB disk space for model download
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-deepseek-70b
+  namespace: dynamo
+spec:
+  model: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1"
+    # Reference ConfigMap with EFS cache configuration
+    configMapRef:
+      name: deepseek-70b-dgd-config
+      key: disagg.yaml
+    config:
+      deployment:
+        # Extended timeout for 70B model loading
+        timeout: 3600  # 60 minutes
+      hardware:
+        # 70B dense model needs 8 GPUs for TP=8
+        min_num_gpus_per_engine: 8
+        max_num_gpus_per_engine: 8
+        num_gpus_per_node: 8
+      sweep:
+        # Online profiling (AIPerf benchmarks) - required for L40S
+        use_ai_configurator: false
+      sla:
+        # Reasoning-optimized SLA targets for large model
+        isl: 4096      # Input sequence length
+        osl: 1024      # Output sequence length (longer for reasoning)
+        ttft: 500.0    # Time To First Token (ms) - higher for large model
+        itl: 40.0      # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1"
+
+  autoApply: true
+---
+# ConfigMap with full DGD base config for DeepSeek-R1-Distill-Llama-70B with EFS cache
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deepseek-70b-dgd-config
+  namespace: dynamo
+data:
+  disagg.yaml: |
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeployment
+    metadata:
+      name: vllm-deepseek-70b-disagg
+    spec:
+      pvcs:
+        - name: dynamo-shared-models
+          create: false
+      envs:
+        - name: HF_HOME
+          value: "/models"
+        - name: HF_HUB_OFFLINE
+          value: "1"
+      services:
+        Frontend:
+          componentType: frontend
+          replicas: 1
+          envFromSecret: hf-token-secret
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+        VllmDecodeWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: decode
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            limits:
+              gpu: "8"
+          sharedMemory:
+            size: 40Gi
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+                - --max-model-len
+                - "8192"
+                - --gpu-memory-utilization
+                - "0.90"
+                - --enforce-eager
+                - --tensor-parallel-size
+                - "8"
+                - --trust-remote-code
+        VllmPrefillWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: prefill
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            limits:
+              gpu: "8"
+          sharedMemory:
+            size: 40Gi
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+                - --is-prefill-worker
+                - --max-model-len
+                - "8192"
+                - --gpu-memory-utilization
+                - "0.90"
+                - --enforce-eager
+                - --tensor-parallel-size
+                - "8"
+                - --trust-remote-code

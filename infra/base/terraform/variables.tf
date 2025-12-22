@@ -151,6 +151,25 @@ variable "enable_ai_ml_observability_stack" {
   type        = bool
   default     = false
 }
+
+variable "enable_tempo_stack" {
+  description = "Enable Grafana Tempo for OpenTelemetry distributed tracing"
+  type        = bool
+  default     = false
+}
+
+variable "enable_dynamo_model_express" {
+  description = "Enable Model Express for managed model caching and distribution. When disabled, shared EFS HuggingFace cache PVC is created instead (recommended for most use cases)."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_shared_cache_size" {
+  description = "Size of shared EFS PVC for HuggingFace model cache (used when enable_dynamo_model_express = false). Ignored if Model Express is enabled."
+  type        = string
+  default     = "200Gi"
+}
+
 variable "enable_argo_workflows" {
   description = "Enable Argo Workflows addon"
   type        = bool
@@ -202,9 +221,35 @@ variable "enable_kuberay_operator" {
   default     = false
 }
 variable "huggingface_token" {
-  description = "Hugging Face Secret Token"
+  description = <<-EOF
+    HuggingFace API Token for model downloads.
+    
+    REQUIRED for NVIDIA Dynamo deployments (enable_dynamo_stack = true).
+    Get a token from: https://huggingface.co/settings/tokens
+    
+    Token must have read access to gated models like Llama-3, DeepSeek, etc.
+    Set in blueprint.tfvars: huggingface_token = "hf_your_token_here"
+  EOF
   type        = string
   default     = "DUMMY_TOKEN_REPLACE_ME"
+  sensitive   = true
+}
+
+variable "ngc_api_key" {
+  description = <<-EOF
+    NVIDIA NGC API Key for container image pulls and Helm chart access.
+    
+    REQUIRED for NVIDIA Dynamo deployments (enable_dynamo_stack = true).
+    Get an API key from: https://ngc.nvidia.com/setup/api-key
+    
+    Key is used for:
+    - Pulling Dynamo runtime containers from nvcr.io
+    - Accessing Dynamo Helm charts from NGC
+    
+    Set in blueprint.tfvars: ngc_api_key = "your_ngc_key_here"
+  EOF
+  type        = string
+  default     = "DUMMY_NGC_KEY_REPLACE_ME"
   sensitive   = true
 }
 variable "enable_rayserve_ha_elastic_cache_redis" {
@@ -415,9 +460,38 @@ variable "enable_dynamo_stack" {
 }
 
 variable "dynamo_stack_version" {
-  description = "NVIDIA Dynamo Stack version"
+  description = "NVIDIA Dynamo Stack version for platform Helm charts. Note: Container images may use different versions (e.g., 0.7.0.post1)"
   type        = string
-  default     = "v0.4.0"
+  default     = "v0.7.0"
+}
+
+# NVIDIA Dynamo Platform-Level Features
+# Note: These are platform-wide settings configured in the dynamo-platform Helm chart.
+# Per-workload features (KV Router, SLA Planner, KVBM, OTEL tracing, audit logging, gRPC)
+# are configured in individual DynamoGraphDeployment CRs when deploying inference workloads.
+
+variable "dynamo_enable_grove" {
+  description = "Enable Grove for multi-node inference coordination. If enabled, the Grove operator will be deployed cluster-wide. Required for multi-node deployments."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_enable_kai_scheduler" {
+  description = "Enable Kai Scheduler via Dynamo platform Helm chart (v0.9.4). Provides GPU-aware scheduling with queue management."
+  type        = bool
+  default     = true
+}
+
+variable "dynamo_operator_namespace_restriction_enabled" {
+  description = "Whether to restrict Dynamo operator to specific namespaces. By default, the operator runs with cluster-wide permissions. Set to true to restrict to the dynamo namespace only."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_model_express_url" {
+  description = "URL for an existing Model Express server (optional). Leave empty to not use Model Express. Format: http://hostname:port"
+  type        = string
+  default     = ""
 }
 
 # Enable SOCI snapshotter parallel pull/unpack mode

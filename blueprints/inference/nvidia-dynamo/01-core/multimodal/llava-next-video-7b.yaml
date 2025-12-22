@@ -1,0 +1,157 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# LLaVA-NeXT-Video 7B Video Processing Deployment with KVBM Long-Context Caching
+#
+# This is the recommended model for video understanding with NVIDIA Dynamo as it's
+# natively supported by the video_encode_worker.py pipeline.
+#
+# Architecture (from dynamo/examples/multimodal):
+#   HTTP → Processor → VideoEncodeWorker → VLMWorker (prefill+decode)
+#                   ↓                    ↓
+#              video_url             frames via RDMA
+#
+# Key Features:
+# - Native video understanding via raw frame processing
+# - KVBM three-tier caching: GPU → CPU (100GB) → Disk (200GB)
+# - Dynamic frame sampling (8 frames default)
+# - Extended context for video sequences
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: llava-video
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+
+    VideoEncodeWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "32Gi"
+        limits:
+          gpu: "1"
+          memory: "48Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 180
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 components/video_encode_worker.py --model llava-hf/LLaVA-NeXT-Video-7B-hf --num-frames-to-sample 8
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VLMWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "16"
+          memory: "150Gi"
+        limits:
+          gpu: "1"
+          memory: "200Gi"
+      envs:
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "100"
+        - name: DYN_KVBM_DISK_CACHE_GB
+          value: "200"
+        - name: DYN_KVBM_METRICS
+          value: "true"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 180
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 components/worker.py --model llava-hf/LLaVA-NeXT-Video-7B-hf --worker-type prefill --max-model-len 8192 --gpu-memory-utilization 0.85
+          volumeMounts:
+            - name: kvbm-disk-cache
+              mountPath: /tmp/kvbm-cache
+        volumes:
+          - name: kvbm-disk-cache
+            emptyDir:
+              sizeLimit: 250Gi
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    Processor:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "16Gi"
+        limits:
+          gpu: "1"
+          memory: "24Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 180
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - 'python3 components/processor.py --model llava-hf/LLaVA-NeXT-Video-7B-hf --prompt-template "USER: <video>\n<prompt> ASSISTANT:"'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+

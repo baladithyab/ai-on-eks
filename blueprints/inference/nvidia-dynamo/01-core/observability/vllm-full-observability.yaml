@@ -1,0 +1,132 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Disaggregated with Full Observability Stack
+# Combines: OTEL distributed tracing + Audit logging + Prometheus metrics
+# Provides complete observability for production deployments
+# Requires: Tempo instance deployed in observability namespace
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-full-obs
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  # Common environment variables for all services
+  envs:
+    # Enable JSONL logging (required for OTEL tracing and audit logging)
+    - name: DYN_LOGGING_JSONL
+      value: "true"
+    # Enable OTEL trace export to Tempo
+    - name: OTEL_EXPORT_ENABLED
+      value: "1"
+    # Tempo endpoint (adjust if Tempo is in different namespace/cluster)
+    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+      value: "http://tempo.dynamo.svc.cluster.local:4317"
+    # Optional: Set log level for detailed debugging
+    # - name: DYN_LOG
+    #   value: "info,dynamo_runtime::system_status_server:trace"
+
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.frontend
+          args:
+            - --http-port
+            - "8000"
+          env:
+            # Service name for identifying frontend in traces
+            - name: OTEL_SERVICE_NAME
+              value: "dynamo-frontend"
+          resources:
+            requests:
+              cpu: "4"
+              memory: "8Gi"
+            limits:
+              cpu: "8"
+              memory: "16Gi"
+
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "8"
+          memory: "32Gi"
+        limits:
+          gpu: "1"
+          memory: "32Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+            - --gpu-memory-utilization
+            - "0.9"
+            - --disable-log-requests
+            - --max-model-len
+            - "8192"
+            - --enforce-eager
+          env:
+            # Service name for identifying decode worker in traces
+            - name: OTEL_SERVICE_NAME
+              value: "dynamo-worker-decode"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "8"
+          memory: "32Gi"
+        limits:
+          gpu: "1"
+          memory: "32Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+            - --is-prefill-worker
+            - --gpu-memory-utilization
+            - "0.9"
+            - --disable-log-requests
+            - --max-model-len
+            - "8192"
+            - --enforce-eager
+          env:
+            # Service name for identifying prefill worker in traces
+            - name: OTEL_SERVICE_NAME
+              value: "dynamo-worker-prefill"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+

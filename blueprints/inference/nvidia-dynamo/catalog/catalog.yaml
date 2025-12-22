@@ -1,0 +1,372 @@
+# NVIDIA Dynamo example catalog (single source of truth)
+#
+# This file is intentionally simple YAML so it can be parsed reliably from bash
+# without external dependencies.
+#
+# Fields:
+# - id: stable example ID used by ./deploy.sh ./test.sh ./cleanup.sh
+# - path: YAML path relative to ai-on-eks/blueprints/inference/nvidia-dynamo/
+# - backend: vllm | sglang | trtllm | demo | infra
+# - tier: core | standard | advanced | experimental
+# - prereqs: short prerequisites string
+# - notes: short notes string
+#
+# Physical Layout (tier-based):
+#   01-core/       - Golden path examples, all backends
+#   02-standard/   - Production variants
+#   03-advanced/   - Large models, DGDR profiling
+#   04-experimental/ - Multi-node, specialized
+#   _internal/     - Test manifests (not deployed via catalog)
+
+entries:
+  # ---------------------------------------------------------------------------
+  # CORE (golden path) - 01-core/
+  # ---------------------------------------------------------------------------
+  - id: hello-world
+    path: 01-core/hello-world/hello-world.yaml
+    backend: demo
+    tier: core
+    prereqs: "Dynamo platform installed; no GPU required"
+    notes: "Smoke test for platform wiring (no OpenAI HTTP API)"
+
+  - id: vllm-aggregated-default
+    path: 01-core/vllm/vllm-aggregated-default.yaml
+    backend: vllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Baseline aggregated serving (vLLM)"
+
+  - id: sglang-aggregated-default
+    path: 01-core/sglang/sglang-aggregated-default.yaml
+    backend: sglang
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Backend diversity: minimal SGLang 'first success'"
+
+  - id: trtllm-aggregated-default
+    path: 01-core/trtllm/trtllm-aggregated-default.yaml
+    backend: trtllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Backend diversity: minimal TensorRT-LLM 'first success'"
+
+  - id: vllm-disaggregated-default
+    path: 01-core/vllm/vllm-disaggregated-default.yaml
+    backend: vllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Baseline disaggregated prefill/decode"
+
+  - id: vllm-router
+    path: 01-core/vllm/vllm-router.yaml
+    backend: vllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "KV-aware routing (router-mode=kv)"
+
+  - id: vllm-disaggregated-kvbm-disk
+    path: 01-core/vllm/vllm-disaggregated-kvbm-disk.yaml
+    backend: vllm
+    tier: core
+    prereqs: "GPU nodes; enough RAM + ephemeral disk; hf-token-secret + ngc-secret"
+    notes: "KVBM multi-tier KV cache (GPU→CPU→Disk)"
+
+  - id: multi-replica-vllm
+    path: 01-core/multi-replica-vllm/multi-replica-vllm.yaml
+    backend: vllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Multi-replica HA pattern + KV routing"
+
+  - id: vllm-full-observability
+    path: 01-core/observability/vllm-full-observability.yaml
+    backend: vllm
+    tier: core
+    prereqs: "GPU nodes; Tempo/OTEL stack (observability namespace)"
+    notes: "All-in-one: metrics + logs + tracing + audit"
+
+  - id: llava-1.5-7b
+    path: 01-core/multimodal/llava-1.5-7b.yaml
+    backend: vllm
+    tier: core
+    prereqs: "3 GPUs total (Encode+VLM+Processor); hf-token-secret + ngc-secret"
+    notes: "Multimodal image understanding (LLaVA 1.5)"
+
+  - id: llava-next-video-7b
+    path: 01-core/multimodal/llava-next-video-7b.yaml
+    backend: vllm
+    tier: core
+    prereqs: "3 GPUs total; large CPU+RAM; hf-token-secret + ngc-secret"
+    notes: "Multimodal video pipeline + KVBM long-context caching"
+
+  # Infra (showcase, not deploy.sh-first by default)
+  - id: base-model
+    path: 01-core/model-management/base-model.yaml
+    backend: N/A  # Reference CRD only
+    tier: documentation  # CHANGE FROM: core
+    category: model-management
+    prereqs: "Requires serving DGD with modelRef"
+    notes: "Reference CRD - does not create deployment"
+
+  - id: lora-adapter
+    path: 01-core/model-management/lora-adapter.yaml
+    backend: N/A  # Reference CRD only
+    tier: documentation  # CHANGE FROM: core
+    category: model-management
+    prereqs: "Requires serving DGD with modelRef + base model"
+    notes: "Reference CRD - does not create deployment"
+
+  # Backwards-compatible aliases (keep existing docs/workflows working)
+  - id: vllm
+    path: 01-core/vllm/vllm-aggregated-default.yaml
+    backend: vllm
+    tier: core
+    prereqs: "Alias for vllm-aggregated-default"
+    notes: "Compatibility ID (use vllm-aggregated-default in docs)"
+
+  - id: sglang
+    path: 01-core/sglang/sglang-aggregated-default.yaml
+    backend: sglang
+    tier: core
+    prereqs: "Alias for sglang-aggregated-default"
+    notes: "Compatibility ID (use sglang-aggregated-default in docs)"
+
+  - id: trtllm
+    path: 01-core/trtllm/trtllm-aggregated-default.yaml
+    backend: trtllm
+    tier: core
+    prereqs: "Alias for trtllm-aggregated-default"
+    notes: "Compatibility ID (use trtllm-aggregated-default in docs)"
+
+  # ---------------------------------------------------------------------------
+  # STANDARD (common variants) - 02-standard/
+  # ---------------------------------------------------------------------------
+  - id: sglang-disaggregated-default
+    path: 02-standard/sglang/sglang-disaggregated-default.yaml
+    backend: sglang
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "SGLang disaggregated prefill/decode"
+
+  - id: trtllm-disaggregated-default
+    path: 02-standard/trtllm/trtllm-disaggregated-default.yaml
+    backend: trtllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "TensorRT-LLM disaggregated prefill/decode"
+
+  - id: sglang-router
+    path: 02-standard/sglang/sglang-router.yaml
+    backend: sglang
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "KV-aware routing (SGLang)"
+
+  - id: trtllm-router
+    path: 02-standard/trtllm/trtllm-router.yaml
+    backend: trtllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "KV-aware routing (TensorRT-LLM)"
+
+  - id: vllm-aggregated-kvbm
+    path: 02-standard/vllm/vllm-aggregated-kvbm.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; extra CPU RAM; hf-token-secret + ngc-secret"
+    notes: "KVBM (aggregated)"
+
+  - id: vllm-aggregated-router
+    path: 02-standard/vllm/vllm-aggregated-router.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "vLLM aggregated + router variant"
+
+  - id: vllm-disaggregated-router
+    path: 02-standard/vllm/vllm-disaggregated-router.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "vLLM disaggregated + router variant"
+
+  - id: vllm-otel-tracing
+    path: 02-standard/observability/vllm-otel-tracing.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; Tempo/OTEL stack"
+    notes: "Tracing-only variant"
+
+  - id: vllm-audit-logging
+    path: 02-standard/observability/vllm-audit-logging.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes"
+    notes: "Audit-logging-only variant"
+
+  - id: qwen2.5-vl-7b
+    path: 02-standard/multimodal/qwen2.5-vl-7b.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "3 GPUs total; high memory; hf-token-secret + ngc-secret"
+    notes: "Multimodal image (Qwen2.5-VL)"
+
+  - id: trtllm-aggregated-high-performance
+    path: 02-standard/trtllm/trtllm-aggregated-high-performance.yaml
+    backend: trtllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "Aggressive TRT-LLM tuning"
+
+  # ---------------------------------------------------------------------------
+  # ADVANCED (profiling/planner + large models) - 03-advanced/
+  # ---------------------------------------------------------------------------
+  - id: vllm-disaggregated-planner
+    path: 03-advanced/vllm/vllm-disaggregated-planner.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Planner + profiling artifacts; GPU nodes"
+    notes: "SLA planner (note: manifest metadata.name may differ)"
+
+  - id: sglang-planner
+    path: 03-advanced/sglang/sglang-planner.yaml
+    backend: sglang
+    tier: advanced
+    prereqs: "Planner + profiling artifacts; GPU nodes"
+    notes: "SGLang SLA planner"
+
+  - id: trtllm-planner
+    path: 03-advanced/trtllm/trtllm-planner.yaml
+    backend: trtllm
+    tier: advanced
+    prereqs: "Planner + profiling artifacts; GPU nodes"
+    notes: "TensorRT-LLM SLA planner"
+
+  - id: vllm-dgdr-online
+    path: 03-advanced/vllm/vllm-dgdr-online.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Prometheus stack; hours of profiling; GPU nodes"
+    notes: "DGDR online profiling (AIPerf)"
+
+  - id: sglang-dgdr-online
+    path: 03-advanced/sglang/sglang-dgdr-online.yaml
+    backend: sglang
+    tier: advanced
+    prereqs: "Prometheus stack; hours of profiling; GPU nodes"
+    notes: "DGDR online profiling (SGLang)"
+
+  - id: trtllm-dgdr-online
+    path: 03-advanced/trtllm/trtllm-dgdr-online.yaml
+    backend: trtllm
+    tier: advanced
+    prereqs: "Prometheus stack; hours of profiling; GPU nodes"
+    notes: "DGDR online profiling (TensorRT-LLM)"
+
+  - id: vllm-dgdr-deepseek-32b
+    path: 03-advanced/vllm/vllm-dgdr-deepseek-32b.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Prometheus stack; 2-4h profiling; multi-GPU"
+    notes: "DGDR (32B class)"
+
+  - id: vllm-dgdr-qwen-coder-32b
+    path: 03-advanced/vllm/vllm-dgdr-qwen-coder-32b.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Prometheus stack; 2-4h profiling; multi-GPU"
+    notes: "DGDR (32B class)"
+
+  - id: trtllm-dgdr-aic
+    path: 03-advanced/trtllm/trtllm-dgdr-aic.yaml
+    backend: trtllm
+    tier: advanced
+    prereqs: "AIC-capable hardware (H100/H200); Prometheus"
+    notes: "DGDR with AI Configurator (fast simulation)"
+
+  - id: sglang-disaggregated-2gpu
+    path: 03-advanced/sglang/sglang-disaggregated-2gpu.yaml
+    backend: sglang
+    tier: advanced
+    prereqs: "4+ GPUs total; hf-token-secret + ngc-secret"
+    notes: "TP tuning example"
+
+  - id: vllm-aggregated-gptoss-20b
+    path: 03-advanced/vllm/vllm-aggregated-gptoss-20b.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Multi-GPU; large model download"
+    notes: "Aggregated large model"
+
+  - id: vllm-disaggregated-gptoss-20b
+    path: 03-advanced/vllm/vllm-disaggregated-gptoss-20b.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Multi-GPU; large model download"
+    notes: "Disaggregated large model"
+
+  - id: vllm-disaggregated-gptoss-120b
+    path: 03-advanced/vllm/vllm-disaggregated-gptoss-120b.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Many GPUs; long warmup"
+    notes: "Very large model"
+
+  - id: vllm-disaggregated-70b
+    path: 03-advanced/vllm/vllm-disaggregated-70b.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Many GPUs; large storage"
+    notes: "70B disaggregated"
+
+  - id: vllm-disaggregated-deepseek-70b
+    path: 03-advanced/vllm/vllm-disaggregated-deepseek-70b.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Many GPUs; large storage"
+    notes: "70B disaggregated (DeepSeek distilled)"
+
+  # ---------------------------------------------------------------------------
+  # EXPERIMENTAL (multi-node + heavy DGDR) - 04-experimental/
+  # ---------------------------------------------------------------------------
+  - id: vllm-dgdr-deepseek-70b
+    path: 04-experimental/vllm/vllm-dgdr-deepseek-70b.yaml
+    backend: vllm
+    tier: experimental
+    prereqs: "Prometheus; very long profiling; many GPUs"
+    notes: "DGDR 70B (experimental/unstable)"
+
+  - id: vllm-dgdr-deepseek-70b-g6
+    path: 04-experimental/vllm/vllm-dgdr-deepseek-70b-g6.yaml
+    backend: vllm
+    tier: experimental
+    prereqs: "Prometheus; very long profiling; many GPUs; GPU type-specific"
+    notes: "DGDR 70B variant (g6 tuning)"
+
+  - id: vllm-disaggregated-multinode
+    path: 04-experimental/multi-node/vllm-disaggregated-multinode.yaml
+    backend: vllm
+    tier: experimental
+    prereqs: "Multi-node orchestration (Grove/KAI or LWS/Volcano)"
+    notes: "Multi-node tensor parallel (Grove-style)"
+
+  - id: sglang-disaggregated-multinode
+    path: 04-experimental/multi-node/sglang-disaggregated-multinode.yaml
+    backend: sglang
+    tier: experimental
+    prereqs: "Multi-node orchestration (Grove/KAI or LWS/Volcano)"
+    notes: "Multi-node tensor parallel (Grove-style)"
+
+  - id: trtllm-disaggregated-multinode
+    path: 04-experimental/multi-node/trtllm-disaggregated-multinode.yaml
+    backend: trtllm
+    tier: experimental
+    prereqs: "Multi-node orchestration (Grove/KAI or LWS/Volcano)"
+    notes: "Multi-node tensor parallel (Grove-style)"
+
+  - id: llama3-70b-lws
+    path: 04-experimental/lws-multinode/llama3-70b-lws.yaml
+    backend: vllm
+    tier: experimental
+    prereqs: "LeaderWorkerSet + Volcano; multi-node GPUs"
+    notes: "LWS multi-node alternative"

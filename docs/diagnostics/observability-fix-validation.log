@@ -1,0 +1,17 @@
+Validation Log - Observability Fix
+Timestamp: 2025-12-22T18:40:20Z
+Blueprint: vllm-full-observability (DGD: vllm-full-obs)
+
+DGD Status: successful
+
+Pod Status:
+NAME                                               READY   STATUS    RESTARTS   AGE
+vllm-full-obs-frontend-7bdd7969c6-brk8l            1/1     Running   0          5m52s
+vllm-full-obs-vllmdecodeworker-6759756db7-78m9c    1/1     Running   0          5m52s
+vllm-full-obs-vllmprefillworker-7c844749fb-mj6n9   1/1     Running   0          5m52s
+
+Log Verification:
+- Searched for "BatchSpanProcessor.ExportError": NOT FOUND (PASS)
+- Found confirmation: "OpenTelemetry OTLP export enabled"
+
+Verdict: PASS
