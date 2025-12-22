@@ -193,6 +193,10 @@ manifest_get_meta_field() {
         v=$0
         sub("^[[:space:]]*" field ":[[:space:]]*", "", v)
         gsub(/\"/, "", v)
+        # Strip inline comments (e.g., "dynamo-cloud  # comment")
+        sub(/[[:space:]]*#.*$/, "", v)
+        # Trim trailing whitespace
+        sub(/[[:space:]]+$/, "", v)
         print v
         exit 0
       }

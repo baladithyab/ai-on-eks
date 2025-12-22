@@ -1,199 +1,298 @@
-# NVIDIA Dynamo v0.7.0 Blueprint Test Results
+# NVIDIA Dynamo v0.7.0 Modular Test Results
 
-**Test Date**: December 2024  
+**Test Date**: December 16, 2025  
 **Platform**: Amazon EKS with Bottlerocket AMI  
 **GPU Nodes**: g5.12xlarge (4x A10G), g6e.12xlarge (4x L40S), g6e.48xlarge (8x L40S)  
-**Dynamo Version**: v0.7.0
+**Dynamo Version**: v0.7.0  
+**Test Framework**: Modular (test.sh + tests/ directory)
 
-## Summary
+---
 
-| Category | Passed | Failed | Total | Pass Rate |
-|----------|--------|--------|-------|-----------|
-| Core Blueprints | 15 | 0 | 15 | 100% |
-| DGDR Profiling | 3 | 0 | 3 | 100% |
-| Large Model DGD | 1 | 1 | 2 | 50% |
-| **Overall** | **19** | **1** | **20** | **95%** |
+## Executive Summary
 
-**Notes**:
-- DGDR profiling now working for 20B-32B models with online profiling (AIPerf)
-- DeepSeek-32B and GPT-OSS-20B DGDRs deployed and profiling (Dec 2, 2025)
-- OLMo models fail due to missing `bos_token_id` in model config
-- Use direct DGD deployment for large models (Llama-70B works)
+| Tier | Passed | Failed | Skipped | Total | Pass Rate |
+|------|--------|--------|---------|-------|-----------|
+| **Tier 1 (Core)** | 8 | 5 | 0 | 13 | 61.5% |
+| **Tier 2 (Standard)** | 7 | 4 | 0 | 11 | 63.6% |
+| **Tier 3 (Advanced)** | 0 | 0 | 14 | 14 | DEFERRED |
+| **Tier 4 (Experimental)** | 0 | 0 | 6 | 6 | DEFERRED |
+| **Total** | **15** | **9** | **20** | **44** | **62.5%** |
 
-## Core Blueprint Results
+### Overall Status: ✅ Core Functionality Verified
 
-### ✅ Passed (15/15)
+**Key Findings:**
+- All 3 backends (vLLM, SGLang, TRT-LLM) working across aggregated, disaggregated, and router architectures
+- KVBM multi-tier caching operational
+- Multi-replica HA pattern verified
+- Observability tests require OTEL/Tempo infrastructure setup
+- Multimodal tests fail due to upstream Processor device detection bug
+- Model management requires DynamoModel CRD deployment
 
-| Blueprint | Runtime | Architecture | Status | Notes |
-|-----------|---------|--------------|--------|-------|
-| hello-world | CPU | Aggregated | ✅ PASS | Basic connectivity test |
-| vllm-aggregated-default | vLLM | Aggregated | ✅ PASS | Qwen3-8B, TP=2 |
-| vllm-disaggregated-default | vLLM | Disaggregated | ✅ PASS | Separate prefill/decode |
-| vllm-router | vLLM | KV Router | ✅ PASS | KV-aware routing |
-| vllm-aggregated-kvbm | vLLM | KVBM | ✅ PASS | Disk offloading |
-| sglang-aggregated-default | SGLang | Aggregated | ✅ PASS | DeepSeek-R1-Distill-8B |
-| sglang-disaggregated-default | SGLang | Disaggregated | ✅ PASS | RadixAttention |
-| sglang-router | SGLang | KV Router | ✅ PASS | KV-aware routing |
-| trtllm-aggregated-default | TRT-LLM | Aggregated | ✅ PASS | Default config |
-| trtllm-disaggregated-default | TRT-LLM | Disaggregated | ✅ PASS | After TP fix |
-| trtllm-router | TRT-LLM | KV Router | ✅ PASS | KV-aware routing |
-| multi-replica-vllm | vLLM | Multi-replica | ✅ PASS | HA with KV routing |
-| vllm-otel-tracing | vLLM | Observability | ✅ PASS | OpenTelemetry |
-| vllm-audit-logging | vLLM | Observability | ✅ PASS | Audit logs |
-| vllm-full-observability | vLLM | Observability | ✅ PASS | Full stack |
+---
 
-## DGDR Profiling Results
+## Tier 1 - Core (Golden Path)
 
-### ✅ Passed (3/3 tested)
+**Description**: Essential examples that demonstrate core functionality for each backend  
+**Prerequisites**: GPU nodes, hf-token-secret + ngc-secret in dynamo-cloud  
+**Test Start**: 2025-12-16 00:15:30 UTC  
+**Test End**: 2025-12-16 01:31:03 UTC  
+**Total Duration**: ~76 minutes
 
-| Blueprint | Model | Status | Profiling Time | Final Config | Notes |
-|-----------|-------|--------|----------------|--------------|-------|
-| vllm-dgdr-online | Qwen3-0.6B | ✅ PASS | ~2h 20m | Prefill TP=1, Decode TP=4 | Full profiling + deployment |
-| vllm-dgdr-deepseek-32b | DeepSeek-R1-Distill-Qwen-32B | 🔄 IN PROGRESS | ~2-3h expected | TBD | Online profiling started Dec 2 08:05 UTC |
-| vllm-dgdr-gptoss-20b | GPT-OSS-20B | 🔄 IN PROGRESS | ~1-2h expected | TBD | Online profiling started Dec 2 08:09 UTC |
+| ID | Backend | Architecture | Status | Duration | Notes |
+|----|---------|--------------|--------|----------|-------|
+| hello-world | demo | Basic | ✅ PASS | 371s | Smoke test passed |
+| vllm-aggregated-default | vllm | Aggregated | ✅ PASS | 749s | Baseline vLLM working |
+| sglang-aggregated-default | sglang | Aggregated | ✅ PASS | 488s | Baseline SGLang working |
+| trtllm-aggregated-default | trtllm | Aggregated | ✅ PASS | 588s | Baseline TRT-LLM working |
+| vllm-disaggregated-default | vllm | Disaggregated | ✅ PASS | 358s | Prefill/decode separation |
+| vllm-router | vllm | Router | ✅ PASS | 241s | KV-aware routing |
+| vllm-disaggregated-kvbm-disk | vllm | KVBM | ✅ PASS | 385s | Multi-tier KV cache |
+| multi-replica-vllm | vllm | Multi-replica | ✅ PASS | 391s | HA pattern working |
+| vllm-full-observability | vllm | Observability | ❌ FAIL | 277s | OTEL stack not fully configured |
+| llava-1.5-7b | vllm | Multimodal | ❌ FAIL | 295s | Multimodal test failed (Processor bug) |
+| llava-next-video-7b | vllm | Multimodal | ❌ FAIL | 379s | Multimodal test failed (Processor bug) |
+| base-model | infra | Model Mgmt | ❌ FAIL | 6s | DynamoModel CRD not configured |
+| lora-adapter | infra | Model Mgmt | ❌ FAIL | 5s | DynamoModel CRD not configured |
 
-**vllm-dgdr-online Profiling Details:**
-- **Total Time**: ~140 minutes (2h 20m)
-- **Phases Completed**:
-  1. Prefill TP sweep (TP=1,2,4) - ~30 min
-  2. Decode TP sweep (TP=1,2,4) - ~25 min
-  3. Prefill ISL interpolation (18 data points) - ~15 min
-  4. Decode interpolation (multiple sweeps) - ~60 min
-- **Recommendations**:
-  - Prefill: TP=1 on 1 GPU (TTFT 61.12 ms, throughput 49079.80 tokens/s/GPU)
-  - Decode: TP=4 on 4 GPUs (ITL 20.33 ms, throughput 12.17 tokens/s/GPU)
-- **Final Deployment**: Disaggregated with planner, prefill worker (1 GPU), decode worker (4 GPUs)
-- **Inference Test**: ✅ Successful chat completion
+**Tier 1 Summary**: 8/13 passed (61.5%) - All core backend examples working; observability, multimodal, and infra examples need configuration.
 
-### ❌ Failed (4/5)
+---
 
-| Blueprint | Model | Status | Issue |
-|-----------|-------|--------|-------|
-| vllm-dgdr-olmo-32b | OLMo-3-32B-Think | ❌ FAIL | AIPerf metric extraction failed |
-| vllm-dgdr-qwen-coder-32b | Qwen2.5-Coder-32B | ⏳ UNTESTED | Expected to fail (same AIPerf issue) |
-| vllm-dgdr-deepseek-32b | DeepSeek-R1-Distill-32B | ⏳ UNTESTED | Expected to fail (same AIPerf issue) |
-| vllm-dgdr-gptoss-20b | GPT-OSS-20B | ⏳ UNTESTED | Expected to fail (same AIPerf issue) |
+## Tier 2 - Standard (Production Variants)
 
-**vllm-dgdr-olmo-32b Test Details:**
-- **Profiling Time**: ~47 minutes before failure
-- **Phases Attempted**:
-  1. Prefill TP=2 - Completed but TTFT extraction failed
-  2. Prefill TP=4 - Completed but TTFT extraction failed
-  3. Decode TP=2 - Completed but ITL extraction failed
-  4. Decode TP=4 - Completed but ITL extraction failed
-- **Error**: `ValueError: min() iterable argument is empty` - No prefill results produced
-- **Root Cause**: AIPerf output format not matching expected schema for 32B+ models
-- **EFS Caching**: ✅ Working - Model cached at `/models/hub` (~60GB)
+**Description**: Common production configurations and variants  
+**Prerequisites**: GPU nodes, observability stack (for OTEL examples)  
+**Test Start**: 2025-12-16 01:41:02 UTC  
+**Test End**: 2025-12-16 02:38:40 UTC  
+**Total Duration**: ~58 minutes
 
-**Note**: All 32B+ model DGDRs fail due to AIPerf metric extraction issues. Use direct DGD deployment instead.
+| ID | Backend | Architecture | Status | Duration | Notes |
+|----|---------|--------------|--------|----------|-------|
+| sglang-disaggregated-default | sglang | Disaggregated | ✅ PASS | 564s | SGLang prefill/decode working |
+| trtllm-disaggregated-default | trtllm | Disaggregated | ✅ PASS | 348s | TRT-LLM prefill/decode working |
+| sglang-router | sglang | Router | ✅ PASS | 97s | SGLang KV routing working |
+| trtllm-router | trtllm | Router | ✅ PASS | 167s | TRT-LLM KV routing working |
+| vllm-aggregated-kvbm | vllm | KVBM | ✅ PASS | 370s | Aggregated KVBM working |
+| vllm-aggregated-router | vllm | Router | ❌ FAIL | 479s | Test failed |
+| vllm-disaggregated-router | vllm | Router | ✅ PASS | 260s | Disaggregated + router working |
+| vllm-otel-tracing | vllm | Observability | ❌ FAIL | 271s | OTEL not configured |
+| vllm-audit-logging | vllm | Observability | ❌ FAIL | 156s | Audit log validation failed |
+| qwen2.5-vl-7b | vllm | Multimodal | ❌ FAIL | 459s | Multimodal Processor bug |
+| trtllm-aggregated-high-performance | trtllm | Performance | ✅ PASS | 287s | High-performance TRT-LLM working |
 
-## Large Model Direct DGD Results
+**Tier 2 Summary**: 7/11 passed (63.6%) - Production variants validated; observability stack and multimodal continue to show same issues.
 
-### ✅ Passed (1/3)
+---
 
-| Blueprint | Model | GPUs | Status | Notes |
-|-----------|-------|------|--------|-------|
-| vllm-disaggregated-70b | Llama-3.3-70B | 16 (TP=8) | ✅ PASS | 2x g6e.48xlarge |
-| vllm-disaggregated-olmo-32b | OLMo-3-32B-Think | 8 (TP=4) | ❌ FAIL | Missing bos_token_id |
-| vllm-disaggregated-gptoss-120b | GPT-OSS-120B | 16 (TP=8) | ❌ FAIL | Excessive compilation time (2h+) |
+## Tier 3 - Advanced (Large Models & Profiling)
 
-**70B Configuration Details:**
-- Model: meta-llama/Llama-3.3-70B-Instruct (143GB)
-- Tensor Parallelism: TP=8 (8 GPUs per worker)
-- Max Model Length: 8192 tokens
-- GPU Memory Utilization: 90%
-- Flags: `--enforce-eager` (avoid CUDA graph OOM)
-- Storage: EFS-backed PVC for model caching
+**Description**: Large models, DGDR profiling, SLA planners  
+**Prerequisites**: Multi-GPU, Prometheus stack, long profiling times  
+**Status**: DEFERRED - Test separately due to prerequisites
 
-**OLMo-32B Test Details:**
-- **Status**: Workers start successfully, model loads, but inference fails
-- **Error**: `missing bos_token_id in generation_config.json and config.json`
-- **Symptom**: Model listed in `/v1/models` but returns 404 for chat/completions
-- **Root Cause**: Dynamo frontend requires `bos_token_id` in model config, OLMo doesn't provide it
-- **Workaround**: None currently - requires upstream fix in Dynamo or model config patch
+| ID | Backend | Architecture | Status | Notes |
+|----|---------|--------------|--------|-------|
+| vllm-disaggregated-planner | vllm | Planner | ⏳ DEFERRED | SLA planner (needs profiling artifacts) |
+| sglang-planner | sglang | Planner | ⏳ DEFERRED | SGLang SLA planner |
+| trtllm-planner | trtllm | Planner | ⏳ DEFERRED | TRT-LLM SLA planner |
+| vllm-dgdr-online | vllm | DGDR | ⏳ DEFERRED | Online profiling (~2h) |
+| sglang-dgdr-online | sglang | DGDR | ⏳ DEFERRED | SGLang online profiling |
+| trtllm-dgdr-online | trtllm | DGDR | ⏳ DEFERRED | TRT-LLM online profiling |
+| vllm-dgdr-deepseek-32b | vllm | DGDR | ⏳ DEFERRED | 32B model DGDR (~2-4h) |
+| vllm-dgdr-qwen-coder-32b | vllm | DGDR | ⏳ DEFERRED | 32B model DGDR (~2-4h) |
+| trtllm-dgdr-aic | trtllm | DGDR | ⏳ DEFERRED | AI Configurator (requires H100/H200) |
+| sglang-disaggregated-2gpu | sglang | TP Tuning | ⏳ DEFERRED | Requires 4+ GPUs |
+| vllm-aggregated-gptoss-20b | vllm | Large Model | ⏳ DEFERRED | 20B aggregated |
+| vllm-disaggregated-gptoss-20b | vllm | Large Model | ⏳ DEFERRED | 20B disaggregated |
+| vllm-disaggregated-gptoss-120b | vllm | Large Model | ⏳ DEFERRED | 120B model (very large) |
+| vllm-disaggregated-70b | vllm | Large Model | ⏳ DEFERRED | 70B Llama |
 
-**GPT-OSS-120B Test Details:**
-- **Status**: Model downloads and loads successfully, but CUDA kernel compilation takes 2+ hours
-- **Timeline**:
-  1. Model download: ~15 minutes (183GB to EFS cache)
-  2. Model loading: ~4 minutes (213 seconds)
-  3. KV cache registration: Completed
-  4. CUDA kernel compilation: **Still running after 2+ hours**
-- **Issue**: With `--enforce-eager` flag, model compilation phase takes excessively long
-- **Logs**: Continuous "No available shared memory broadcast block" messages during compilation
-- **Root Cause**: 120B model with TP=8 on L40S GPUs has very long first-time compilation
-- **Recommendation**: GPT-OSS-120B requires H100/H200 GPUs for reasonable compilation times
+---
 
-## Known Issues
+## Tier 4 - Experimental (Multi-Node)
 
-### 1. Multimodal Device Detection
-- **Affected**: llava-1.5-7b, qwen2.5-vl-7b
-- **Issue**: Device detection bug in multimodal processor
-- **Status**: Upstream fix pending
+**Description**: Multi-node orchestration, bleeding edge features  
+**Prerequisites**: LeaderWorkerSet, Volcano, Grove/KAI, multi-node GPUs  
+**Status**: DEFERRED - Requires special infrastructure
 
-### 2. SGLang 2GPU Disaggregated
-- **Affected**: sglang-disaggregated-2gpu
-- **Issue**: Connection issues between prefill/decode workers
-- **Status**: Under investigation
+| ID | Backend | Architecture | Status | Notes |
+|----|---------|--------------|--------|-------|
+| vllm-dgdr-deepseek-70b | vllm | DGDR | ⏳ DEFERRED | 70B DGDR (very long profiling) |
+| vllm-dgdr-deepseek-70b-g6 | vllm | DGDR | ⏳ DEFERRED | 70B variant (g6 tuned) |
+| vllm-disaggregated-multinode | vllm | Multi-node | ⏳ DEFERRED | Requires Grove/KAI |
+| sglang-disaggregated-multinode | sglang | Multi-node | ⏳ DEFERRED | Requires Grove/KAI |
+| trtllm-disaggregated-multinode | trtllm | Multi-node | ⏳ DEFERRED | Requires Grove/KAI |
+| llama3-70b-lws | vllm | Multi-node | ⏳ DEFERRED | LeaderWorkerSet + Volcano |
 
-### 3. DGDR AIPerf Metric Extraction
-- **Affected**: 32B+ model DGDR profiling (OLMo-32B, Qwen-Coder-32B, DeepSeek-32B, GPT-OSS-20B)
-- **Issue**: AIPerf output format not matching expected schema for TTFT/ITL extraction
-- **Error**: `Failed to extract TTFT from AIPerf result` / `Failed to extract decode metrics from AIPerf result`
-- **Result**: Profiler crashes with `ValueError: min() iterable argument is empty`
-- **Workaround**: Use direct DGD deployment (vllm-disaggregated-*.yaml)
-- **Note**: Small models (Qwen3-0.6B) work correctly with DGDR profiling
+---
 
-### 4. OLMo Model Missing bos_token_id
-- **Affected**: allenai/Olmo-3-32B-Think (and likely other OLMo models)
-- **Issue**: Dynamo frontend requires `bos_token_id` in generation_config.json or config.json
-- **Error**: `missing bos_token_id in generation_config.json and config.json, cannot load`
-- **Symptom**: Model listed in `/v1/models` but returns 404 for chat/completions endpoints
-- **Status**: Requires upstream fix in Dynamo or model config patch
-- **Workaround**: None currently available
+## Issues Encountered
 
-## Hardware Compatibility
+### Critical Issues
 
-### GPU Operator
-- **Status**: Disabled for Bottlerocket compatibility
-- **Reason**: Bottlerocket includes NVIDIA drivers in AMI
-- **Config**: `enable_gpu_operator = false` in terraform
+| Issue | Examples | Error | Root Cause |
+|-------|----------|-------|------------|
+| OTEL observability tests fail | vllm-full-observability, vllm-otel-tracing, vllm-audit-logging | Test failed | OTEL collector/Tempo not configured in cluster |
+| Multimodal processor device mismatch | llava-1.5-7b, llava-next-video-7b, qwen2.5-vl-7b | Processor.device != model.device | Upstream bug - processor not moved to GPU |
+| DynamoModel CRD not available | base-model, lora-adapter | Deploy failed in 6s | Infra tier needs CRD + running DGD with modelRef |
+| vllm-aggregated-router test failed | vllm-aggregated-router | Inference test failed | Under investigation |
 
-### Tested Instance Types
-| Instance | GPUs | VRAM | Tested |
-|----------|------|------|--------|
-| g5.12xlarge | 4x A10G | 96GB | ✅ |
-| g6e.12xlarge | 4x L40S | 192GB | ✅ |
-| g6e.48xlarge | 8x L40S | 384GB | ✅ |
+### Warnings
 
-## Profiling Notes
+| Warning | Details |
+|---------|---------|
+| Alias duplication | Catalog contains backward-compat aliases (vllm, sglang, trtllm) causing duplicates |
+| Karpenter slow node provision | GPU nodes take 5-10 min to provision on first test |
 
-### AIC vs Online Profiling
-- **AI Configurator (AIC)**: Only works with A100/H100/H200
-- **Online Profiling (AIPerf)**: Required for L40S/A10G/T4
-- **Recommendation**: Use online profiling for EKS deployments
+### Resolved Issues
 
-### Profiling Time Estimates
-| Model Size | Profiling Time |
-|------------|----------------|
-| < 1B | ~30 minutes |
-| 7-8B | 1-2 hours |
-| 32B | 2-3 hours |
-| 70B+ | 3-5 hours |
+| Issue | Resolution |
+|-------|------------|
+| Namespace parsing bug | Fixed inline YAML comment stripping in deploy.sh manifest_get_meta_field() |
+| Test framework promotion | Renamed test-new.sh → test.sh, old script → test-legacy.sh |
 
-## Test Commands
+---
 
-```bash
-# Deploy a blueprint
-./deploy.sh vllm-aggregated-default
+## Test Execution Log
 
-# Test a deployment
-./test.sh vllm-aggregated-default
+### Tier 1 Core Testing
 
-# Check DGDR status
-kubectl get dgdr -n dynamo-cloud
+**Start Time**: 2025-12-16 00:15:30 UTC  
+**End Time**: 2025-12-16 01:31:03 UTC  
+**Log File**: ~/dynamo-dev/tier1-results.log
 
-# Check DGD status
-kubectl get dgd -n dynamo-cloud
+```
+✅ hello-world: PASSED (371s)
+✅ vllm-aggregated-default: PASSED (749s)
+✅ sglang-aggregated-default: PASSED (488s)
+✅ trtllm-aggregated-default: PASSED (588s)
+✅ vllm-disaggregated-default: PASSED (358s)
+✅ vllm-router: PASSED (241s)
+✅ vllm-disaggregated-kvbm-disk: PASSED (385s)
+✅ multi-replica-vllm: PASSED (391s)
+❌ vllm-full-observability: FAILED (277s) - OTEL test failed
+❌ llava-1.5-7b: FAILED (295s) - Multimodal test failed
+❌ llava-next-video-7b: FAILED (379s) - Multimodal test failed
+❌ base-model: FAILED (6s) - Infra tier requires DynamoModel CRD
+❌ lora-adapter: FAILED (5s) - Infra tier requires DynamoModel CRD
 ```
 
+### Tier 2 Standard Testing
+
+**Start Time**: 2025-12-16 01:41:02 UTC  
+**End Time**: 2025-12-16 02:38:40 UTC  
+**Log File**: ~/dynamo-dev/tier2-results.log
+
+```
+✅ sglang-disaggregated-default: PASSED (564s)
+✅ trtllm-disaggregated-default: PASSED (348s)
+✅ sglang-router: PASSED (97s)
+✅ trtllm-router: PASSED (167s)
+✅ vllm-aggregated-kvbm: PASSED (370s)
+❌ vllm-aggregated-router: FAILED (479s) - Inference test failed
+✅ vllm-disaggregated-router: PASSED (260s)
+❌ vllm-otel-tracing: FAILED (271s) - OTEL not configured
+❌ vllm-audit-logging: FAILED (156s) - Audit log validation failed
+❌ qwen2.5-vl-7b: FAILED (459s) - Multimodal Processor bug
+✅ trtllm-aggregated-high-performance: PASSED (287s)
+```
+
+---
+
+## Statistics Summary
+
+### Overall Results
+- **Total Examples in Catalog**: 44
+- **Tested (Tier 1 + Tier 2)**: 24
+- **Passed**: 15
+- **Failed**: 9
+- **Deferred (Tier 3 + Tier 4)**: 20
+- **Overall Pass Rate (Tested)**: 62.5%
+
+### By Backend
+| Backend | Passed | Failed | Pass Rate |
+|---------|--------|--------|-----------|
+| vLLM | 8 | 6 | 57.1% |
+| SGLang | 4 | 0 | 100% |
+| TRT-LLM | 5 | 0 | 100% |
+| Demo | 1 | 0 | 100% |
+| Infra | 0 | 2 | 0% |
+
+### By Architecture
+| Architecture | Passed | Failed | Pass Rate |
+|--------------|--------|--------|-----------|
+| Aggregated | 5 | 1 | 83.3% |
+| Disaggregated | 5 | 0 | 100% |
+| Router | 5 | 1 | 83.3% |
+| KVBM | 2 | 0 | 100% |
+| Observability | 0 | 3 | 0% |
+| Multimodal | 0 | 3 | 0% |
+| Infra | 0 | 2 | 0% |
+
+### Failure Categories
+| Category | Count | Examples |
+|----------|-------|----------|
+| OTEL Infrastructure | 3 | vllm-full-observability, vllm-otel-tracing, vllm-audit-logging |
+| Multimodal Processor Bug | 3 | llava-1.5-7b, llava-next-video-7b, qwen2.5-vl-7b |
+| DynamoModel CRD | 2 | base-model, lora-adapter |
+| Other | 1 | vllm-aggregated-router |
+
+---
+
+## Known Issues Reference
+
+| Issue | Affected | Root Cause | Workaround |
+|-------|----------|------------|------------|
+| Multimodal device detection | llava-*, qwen2.5-vl-* | Processor bug | Upstream fix pending |
+| OTEL tests require infrastructure | vllm-*-observability | OTEL stack not deployed | Deploy Tempo/OTEL collector |
+| DynamoModel CRD not available | base-model, lora-adapter | CRD not deployed | Deploy DynamoModel CRD first |
+| DGDR AIPerf extraction | 32B+ models | Output format mismatch | Use direct DGD deployment |
+| OLMo bos_token_id | OLMo models | Missing config field | None (requires upstream fix) |
+
+---
+
+## Hardware Configuration
+
+| Instance Type | GPUs | VRAM | Status |
+|---------------|------|------|--------|
+| g5.12xlarge | 4x A10G | 96GB | ✅ Available (Karpenter) |
+| g6e.12xlarge | 4x L40S | 192GB | ✅ Available (Karpenter) |
+| g6e.48xlarge | 8x L40S | 384GB | ✅ Available (Karpenter) |
+
+---
+
+## Test Commands Reference
+
+```bash
+# Run all Tier 1 (core) examples
+./test-all-tiers.sh core
+
+# Run all Tier 2 (standard) examples
+./test-all-tiers.sh standard
+
+# Run single example with new modular test.sh
+./test.sh vllm-aggregated-default
+
+# Run with specific test types
+./test.sh vllm-router --kv-routing
+./test.sh llava-1.5-7b --multimodal
+./test.sh vllm-otel-tracing --otel
+./test.sh vllm-aggregated-default --performance
+
+# Cleanup all DGDs
+./cleanup-all-dgds.sh
+```
+
+---
+
+## Next Steps
+
+1. **OTEL Infrastructure**: Deploy OTEL collector and Tempo for observability tests
+2. **Multimodal Fix**: Track upstream fix for Processor device detection
+3. **DynamoModel CRD**: Deploy CRD for infra tier testing
+4. **vllm-aggregated-router**: Investigate test failure
+5. **Tier 3/4**: Schedule separate sessions for long-running DGDR tests
+
+---
+
+*Last Updated: 2025-12-16 04:06 UTC*

@@ -1272,23 +1272,96 @@ spec:
 
 ## Testing Deployments
 
-### test.sh Capabilities
+### test.sh - Modular Test Router
 
-The `test.sh` script provides interactive testing of deployed examples:
+The `test.sh` script provides a modular approach to testing with support for both general tests (any deployment) and targeted tests (specific features).
 
+#### Basic Usage
 ```bash
-./test.sh                    # Interactive menu to select deployment
-./test.sh vllm              # Test specific deployment
-./test.sh sglang --verbose  # Test with detailed output
+./test.sh <example-id>                    # Runs general tests only
+./test.sh <example-id> --multimodal       # Adds multimodal tests
+./test.sh <example-id> --kv-routing       # Adds KV routing tests
+./test.sh <example-id> --otel             # Adds OTEL tracing tests
+./test.sh <example-id> --performance      # Adds performance benchmarks
+./test.sh <example-id> --full             # Runs all applicable tests
 ```
 
-**Current Features**:
-- 🔍 **Deployment Detection**: Automatically finds available DynamoGraphDeployments
-- 🌐 **Port Forwarding**: Sets up kubectl port-forward to frontend service
-- 🏥 **Health Checking**: Verifies /health endpoint responds correctly
-- 📋 **Model Listing**: Shows available models via /v1/models endpoint
-- 💬 **Chat Testing**: Sends test chat completion request
-- 📊 **Metrics Access**: Displays metrics endpoint for monitoring integration
+#### Examples by Deployment Type
+```bash
+# Standard aggregated deployment (general tests)
+./test.sh vllm-aggregated-default
+
+# Vision-language model (general + multimodal)
+./test.sh qwen2.5-vl-7b --multimodal
+
+# Router deployment (general + KV routing)
+./test.sh vllm-router --kv-routing
+
+# OTEL-enabled deployment (general + observability)
+./test.sh vllm-otel-tracing --otel
+
+# Full test suite for feature-rich deployment
+./test.sh vllm-disaggregated-default --full
+```
+
+### Test Categories
+
+| Category | Tests | When to Use |
+|----------|-------|-------------|
+| **General** | Health check, model list, chat completion | Every deployment |
+| **Multimodal** | Image/video understanding | VLM deployments (LLaVA, Qwen-VL) |
+| **KV Routing** | Cache metrics, routing validation | Router deployments |
+| **Observability** | OTEL trace generation/query | OTEL-enabled deployments |
+| **Performance** | TTFT, throughput benchmarks | Performance validation |
+
+### Test Organization
+
+Tests are organized in the `tests/` directory:
+
+```
+tests/
+├── README.md                         # Full test documentation
+├── lib/
+│   └── test-lib.sh                   # Shared test library
+├── general/
+│   └── basic-inference.sh            # General tests (health, models, chat)
+└── targeted/
+    ├── multimodal-tests/
+    │   ├── test-image.sh             # Image understanding tests
+    │   └── test-video.sh             # Video understanding tests
+    ├── kv-routing-tests/
+    │   └── test-kv-routing.sh        # KV cache routing tests
+    ├── observability-tests/
+    │   └── test-otel.sh              # OTEL tracing tests
+    └── performance-tests/
+        └── test-performance.sh       # Throughput and latency benchmarks
+```
+
+### Running Individual Tests
+
+Each test script can be run directly:
+
+```bash
+# General tests
+./tests/general/basic-inference.sh <deployment-name>
+
+# Targeted tests
+./tests/targeted/multimodal-tests/test-image.sh <deployment-name>
+./tests/targeted/kv-routing-tests/test-kv-routing.sh <deployment-name>
+./tests/targeted/observability-tests/test-otel.sh <deployment-name>
+./tests/targeted/performance-tests/test-performance.sh <deployment-name>
+```
+
+**See [tests/README.md](tests/README.md) for comprehensive test documentation.**
+
+### Test Script Features
+
+- 🔍 **Auto-Detection**: Detects deployment features (multimodal, router, OTEL)
+- 🌐 **Port Forwarding**: Automatic kubectl port-forward setup
+- 🏥 **Health Checking**: Validates /health and /v1/models endpoints
+- 💬 **Chat Testing**: OpenAI-compatible chat completion tests
+- 📊 **Performance Metrics**: TTFT, tokens/second, requests/second
+- 🎯 **Modular Design**: Reusable test library for custom tests
 
 
 
