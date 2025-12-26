@@ -1,15 +1,51 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# SGLang Aggregated Deployment for DeepSeek R1-Distill-Llama-8B
+#
+# DeepSeek's R1-Distill models are distilled versions of their flagship reasoning models,
+# offering exceptional performance at smaller sizes. This 8B variant provides strong
+# reasoning capabilities while being deployable on a single GPU.
+#
+# Hardware Requirements:
+# - 1x g5.2xlarge (1x A10G, 24GB VRAM) or similar
+# - ~16GB VRAM for 8B model weights
+# - Single GPU deployment
+#
+# Features:
+# - EFS-backed model cache for fast restarts
+# - SGLang backend for optimized inference
+# - Reasoning-focused model architecture
+# - Single GPU, cost-effective deployment
+#
+# Use cases:
+# - Reasoning and mathematical problem solving
+# - Code generation and analysis
+# - Cost-effective development and testing
+# - Edge/resource-constrained deployments
 
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: sglang-aggregated-default
+  name: sglang-deepseek-r1-8b
   namespace: dynamo
 spec:
   backendFramework: sglang
+  
+  # Use shared HF cache from EFS
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+
+  # Set HF_HOME for model caching
+  envs:
+    - name: HF_HOME
+      value: "/models"
+
   services:
     Frontend:
+      componentType: frontend
+      replicas: 1
       livenessProbe:
         httpGet:
           path: /health
@@ -28,15 +64,16 @@ spec:
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
-      componentType: frontend
-      replicas: 1
       resources:
         requests:
-          cpu: "5"
-          memory: "10Gi"
+          cpu: "2"
+          memory: "4Gi"
         limits:
-          cpu: "5"
-          memory: "10Gi"
+          cpu: "2"
+          memory: "4Gi"
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
       extraPodSpec:
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1
@@ -44,8 +81,11 @@ spec:
           command: ["sh", "-c"]
           args:
             - "python3 -m dynamo.frontend --http-port=8000"
+
     SGLangWorker:
       envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
       livenessProbe:
         exec:
           command:
@@ -65,17 +105,18 @@ spec:
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
-      componentType: worker
-      replicas: 1
       resources:
         requests:
           cpu: "10"
-          memory: "20Gi"
+          memory: "24Gi"
           gpu: "1"
         limits:
           cpu: "10"
-          memory: "20Gi"
+          memory: "24Gi"
           gpu: "1"
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
       extraPodSpec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
@@ -86,4 +127,4 @@ spec:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.sglang --model-path Qwen/Qwen3-0.6B --served-model-name Qwen/Qwen3-0.6B --page-size 16 --tp 1 --trust-remote-code --skip-tokenizer-init"
+            - "python3 -m dynamo.sglang --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-8B --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-8B --page-size 16 --tp 1 --trust-remote-code --skip-tokenizer-init 2>&1 | tee /tmp/sglang.log"

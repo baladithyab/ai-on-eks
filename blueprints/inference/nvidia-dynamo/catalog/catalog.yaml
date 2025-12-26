@@ -370,3 +370,59 @@ entries:
     tier: experimental
     prereqs: "LeaderWorkerSet + Volcano; multi-node GPUs"
     notes: "LWS multi-node alternative"
+
+  # ---------------------------------------------------------------------------
+  # MODEL SHOWCASE - 05-model-showcase/
+  # This tier focuses on model families rather than Dynamo features
+  # ---------------------------------------------------------------------------
+  
+  # GPT-OSS (NVIDIA)
+  - id: showcase-gptoss-20b
+    path: 05-model-showcase/gpt-oss/vllm-aggregated-gptoss-20b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: GPT-OSS
+    prereqs: "4x GPUs (g6e.12xlarge); EFS shared cache; hf-token-secret"
+    notes: "NVIDIA GPT-OSS 20B with reasoning and tool calling support"
+
+  - id: showcase-gptoss-120b
+    path: 05-model-showcase/gpt-oss/vllm-disaggregated-gptoss-120b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: GPT-OSS
+    prereqs: "8x GPUs (p5.48xlarge); EFS shared cache; hf-token-secret"
+    notes: "NVIDIA GPT-OSS 120B large-scale production model"
+
+  # DeepSeek (Community)
+  - id: showcase-deepseek-r1-8b
+    path: 05-model-showcase/deepseek/sglang-deepseek-r1-distill-8b.yaml
+    backend: sglang
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "1x GPU (g5.2xlarge); EFS shared cache; hf-token-secret"
+    notes: "DeepSeek R1-Distill 8B reasoning specialist (single GPU)"
+
+  - id: showcase-deepseek-32b
+    path: 05-model-showcase/deepseek/vllm-dgdr-deepseek-32b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "2x GPUs; Prometheus for DGDR; EFS shared cache"
+    notes: "DeepSeek R1-Distill 32B with DGDR profiling"
+
+  - id: showcase-deepseek-70b
+    path: 05-model-showcase/deepseek/vllm-disaggregated-deepseek-70b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "8x GPUs (p5.48xlarge); EFS shared cache; hf-token-secret"
+    notes: "DeepSeek R1-Distill 70B full reasoning capability"
+
+  # Llama Family (Meta)
+  - id: showcase-llama-3.3-70b
+    path: 05-model-showcase/llama-family/vllm-llama-3.3-70b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: Llama
+    prereqs: "8x GPUs (p5.48xlarge); Meta license accepted; EFS shared cache"
+    notes: "Meta Llama 3.3-70B flagship instruction model"

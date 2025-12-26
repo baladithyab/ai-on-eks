@@ -10,6 +10,27 @@ This tier contains the foundational examples that demonstrate NVIDIA Dynamo's co
 | 3 | Backend coverage (vLLM, SGLang, TRT-LLM) |
 | ✅ | Production-ready patterns |
 
+## Model Standardization
+
+All Core tier blueprints use **`Qwen/Qwen3-0.6B`** as the standard model. This intentional choice provides:
+
+| Benefit | Description |
+|---------|-------------|
+| **Fast deployment** | ~2-3 minutes to download and initialize |
+| **Minimal resources** | Single GPU, ~2GB VRAM |
+| **Backend compatibility** | Works with vLLM, SGLang, and TRT-LLM |
+| **Focus on features** | Test Dynamo functionality, not model performance |
+
+### Exceptions
+- **Multimodal blueprints** use LLaVA models (required for image/video understanding)
+- **model-management/** uses various models to demonstrate CRD registration patterns
+
+### For Production Models
+For different model families or production-scale deployments, see:
+- **02-standard/**: `Qwen3-8B` benchmarks
+- **03-advanced/**: Large model examples (70B+)
+- **05-model-showcase/**: GPT-OSS, DeepSeek, Llama model families
+
 ## What's Here
 
 ### hello-world/
@@ -72,3 +93,4 @@ After completing core examples:
 - **02-standard/** - Production variants and additional backends
 - **03-advanced/** - Large models and DGDR profiling
 - **04-experimental/** - Multi-node deployments
+- **05-model-showcase/** - GPT-OSS, DeepSeek, and Llama model families
