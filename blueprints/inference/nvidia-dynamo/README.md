@@ -137,35 +137,243 @@ cd blueprints/inference/nvidia-dynamo
 Both NGC API key and HuggingFace token are **required** and must be configured in `infra/nvidia-dynamo/terraform/blueprint.tfvars` before deployment. Secrets are now managed by Terraform (not shell scripts).
 :::
 
-## 📋 Comprehensive Testing Results
+## Cluster Resource Requirements
 
-![Test Status](https://img.shields.io/badge/Tests-7%2F7%20Passed-brightgreen) ![Platform](https://img.shields.io/badge/Platform-Production%20Ready-success) ![Version](https://img.shields.io/badge/Dynamo-v0.7.0.post1-blue)
+### Minimum Requirements by Tier
 
-**See [DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md](../../../../DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md) for detailed testing results.**
+Choose your cluster configuration based on which blueprint tier you plan to test.
 
-### Test Summary (December 2025)
+#### Tier 1: Core Examples (`01-core/`)
 
-| Tier | Blueprints Tested | Pass Rate | Key Validations |
-|------|-------------------|-----------|-----------------|
-| **Tier 1** | hello-world, vllm-aggregated | 2/2 (100%) | Basic deployment, model loading |
-| **Tier 2** | vllm-disaggregated, vllm-router, vllm-dgdr | 3/3 (100%) | Disaggregated serving, KV routing, DGDR |
-| **Tier 3** | sglang-aggregated, trtllm-aggregated | 2/2 (100%) | Alternative backends |
+**Minimum Cluster Configuration:**
 
-### Testing Documentation
-- 📊 **Comprehensive Report**: [DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md](../../../../DYNAMO_V0.7.0_COMPREHENSIVE_TEST_RESULTS.md)
-- 📝 **Tier 1 Details**: [docs/TIER1_VLLM_AGGREGATED_TEST_RESULTS.md](../../../../docs/TIER1_VLLM_AGGREGATED_TEST_RESULTS.md)
-- 📝 **Tier 2 Details**: [docs/TIER2_VLLM_ADVANCED_TEST_RESULTS.md](../../../../docs/TIER2_VLLM_ADVANCED_TEST_RESULTS.md)
-- 📝 **Tier 3 Details**: [docs/TIER3_ALTERNATIVE_BACKEND_TEST_RESULTS.md](../../../../docs/TIER3_ALTERNATIVE_BACKEND_TEST_RESULTS.md)
-- 🔍 **Quality Audit**: [DYNAMO_BLUEPRINT_QUALITY_AUDIT.md](../../../../DYNAMO_BLUEPRINT_QUALITY_AUDIT.md)
-- 📋 **Testing Plan**: [BLUEPRINT_TESTING_PLAN.md](../../../../BLUEPRINT_TESTING_PLAN.md)
+| Resource | Specification | Notes |
+|----------|---------------|-------|
+| **Nodes** | 2x g5.2xlarge (or equivalent) | 1x NVIDIA A10G GPU per node |
+| **Total GPUs** | 2 | Minimum for basic testing |
+| **Total RAM** | 64 GB | 32 GB per node |
+| **Total vCPUs** | 16 | 8 vCPUs per node |
+| **Storage** | 100 GB EFS | For model caching |
 
-### Validated Features
-- ✅ Multi-backend support (vLLM, SGLang, TensorRT-LLM)
-- ✅ Disaggregated serving (prefill/decode separation)
-- ✅ KV-aware intelligent routing
-- ✅ SLA-driven deployment planning (DGDR)
-- ✅ Karpenter auto-scaling with A10G GPUs
-- ✅ Clean resource lifecycle management
+**Recommended for Testing:**
+- Add 1x additional CPU node for overhead (scheduler, operator, observability stack)
+- Total: **3 nodes** (2 GPU + 1 CPU)
+
+**Testable Examples:**
+- `hello-world` (CPU-only sanity check)
+- `vllm-aggregated-default` (Qwen3-0.6B)
+- `sglang-aggregated-default` (DeepSeek-R1-Distill-Llama-8B)
+- `trtllm-aggregated-default` (Qwen3-0.6B)
+
+---
+
+#### Tier 2: Standard Examples (`02-standard/`)
+
+**Minimum Cluster Configuration:**
+
+| Resource | Specification | Notes |
+|----------|---------------|-------|
+| **Nodes** | 4x g5.2xlarge (or equivalent) | 1x NVIDIA A10G GPU per node |
+| **Total GPUs** | 4 | Required for multi-replica and disaggregated |
+| **Total RAM** | 128 GB | 32 GB per node |
+| **Total vCPUs** | 32 | 8 vCPUs per node |
+| **Storage** | 200 GB EFS | Larger models + cache |
+
+**Rationale:**
+- Multi-replica deployments require multiple worker nodes
+- Disaggregated serving (prefill/decode) needs separate GPU workers
+- Multimodal examples may need additional memory
+- Observability stack (Tempo, Prometheus) requires CPU/memory overhead
+
+**Recommended for Testing:**
+- **5-6 nodes** for comfortable testing of all standard examples
+- Allows concurrent testing without resource contention
+
+**Testable Examples:**
+- `vllm-disaggregated-default` (prefill/decode separation)
+- `vllm-router` (KV-aware routing)
+- `multi-replica-vllm` (HA scaling)
+- `llava-1.5-7b` / `llava-next-video-7b` (multimodal)
+- `vllm-full-observability` (metrics + tracing)
+
+---
+
+#### Tier 3: Advanced Examples (`03-advanced/`)
+
+**Specialized Hardware Required:**
+
+| Example Type | Instance Recommendation | GPU Type | Tensor Parallelism |
+|--------------|------------------------|----------|-------------------|
+| **Large Models (70B+)** | 8x p4d.24xlarge | 8x A100 (40GB) | TP=8 |
+| **DGDR Profiling** | 4x g5.12xlarge+ | 4x A10G | TP=4 |
+| **Router at Scale** | 6x g6e.4xlarge | 6x L40S | Varied |
+
+**Minimum for Advanced Testing:**
+
+| Resource | Specification | Notes |
+|----------|---------------|-------|
+| **Option A** | 1x p4d.24xlarge | 8x A100 GPUs for single large model |
+| **Option B** | 1x p5.48xlarge | 8x H100 GPUs, highest performance |
+| **Storage** | 500 GB+ EFS | Large model weights (70B+ requires ~140GB) |
+| **Network** | EFA-enabled | Enhanced networking for multi-node |
+
+**Testable Examples:**
+- `trtllm-dgdr-online` (SLA-driven deployment planning)
+- `lws-multinode` (LeaderWorkerSet tensor parallel)
+- Large model deployments (70B+ parameters)
+
+---
+
+### GPU Instance Type Compatibility Matrix
+
+| Instance Type | GPU | VRAM | $/hr (On-Demand) | Best For |
+|---------------|-----|------|------------------|----------|
+| **g5.xlarge** | 1x A10G | 24 GB | ~$1.01 | Single small models (<10B) |
+| **g5.2xlarge** | 1x A10G | 24 GB | ~$1.21 | ✅ **Core/Standard testing** |
+| **g5.4xlarge** | 1x A10G | 24 GB | ~$1.62 | Higher CPU for preprocessing |
+| **g5.12xlarge** | 4x A10G | 96 GB | ~$5.67 | Multi-GPU, medium models |
+| **g5.24xlarge** | 4x A10G | 96 GB | ~$8.14 | High memory + multi-GPU |
+| **g6e.xlarge** | 1x L40S | 48 GB | ~$1.29 | Single medium models, efficient |
+| **g6e.4xlarge** | 1x L40S | 48 GB | ~$2.25 | Higher VRAM for larger models |
+| **g6.12xlarge** | 4x L4 | 96 GB | ~$5.67 | Cost-effective multi-GPU |
+| **p4d.24xlarge** | 8x A100 | 320 GB | ~$32.77 | Large models, production |
+| **p5.48xlarge** | 8x H100 | 640 GB | ~$98.32 | Largest models, best performance |
+
+**Recommendations:**
+- **Development/Testing**: g5.2xlarge (best cost-performance ratio)
+- **Production Small Models (<10B)**: g5.xlarge or g6e.xlarge
+- **Production Medium Models (10-30B)**: g5.12xlarge or g6e.4xlarge with TP
+- **Production Large Models (30-70B+)**: p4d.24xlarge or p5.48xlarge
+
+---
+
+### Cost Optimization Strategies
+
+#### 1. Start Small and Scale Up
+```bash
+# Begin validation with minimal cluster
+# Core tier: 2x g5.2xlarge (~$2.42/hr)
+# Add nodes only when testing standard/advanced
+```
+
+#### 2. Use Spot Instances (50-70% Cost Reduction)
+```yaml
+# Karpenter NodePool with spot
+spec:
+  template:
+    spec:
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]  # Prefer spot, fallback to on-demand
+```
+
+**Spot Availability Tips:**
+- g5 instances have good spot availability
+- Configure multiple AZs for better spot capacity
+- Set up interruption handling for graceful shutdown
+
+#### 3. Enable Karpenter Auto-Scaling
+```yaml
+# Only provision nodes when workloads are scheduled
+# Nodes automatically terminate when idle
+spec:
+  limits:
+    cpu: 1000       # Cluster-wide limits
+    memory: 1000Gi
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s  # Cleanup idle nodes quickly
+```
+
+#### 4. Model Caching with EFS
+```yaml
+# Cache models to EFS to avoid repeated downloads
+# Saves time AND reduces HuggingFace API costs
+spec:
+  extraPodSpec:
+    mainContainer:
+      volumeMounts:
+      - name: model-cache
+        mountPath: /root/.cache/huggingface
+    volumes:
+    - name: model-cache
+      persistentVolumeClaim:
+        claimName: model-cache-pvc
+```
+
+**EFS Cost Comparison:**
+- Without caching: Download ~5-50GB per deployment (network + time)
+- With caching: First download only, subsequent deployments instant
+
+#### 5. Tier-Based Testing Strategy
+```bash
+# Test incrementally: Core → Standard → Advanced
+# This allows catching issues early with minimal cost
+
+# Day 1: Core validation (~$5-10)
+TIER=core ./scripts/run-all-tests.sh
+
+# Day 2: Standard validation (~$20-40)
+TIER=standard ./scripts/run-all-tests.sh
+
+# Day 3+: Advanced (on-demand)
+TIER=advanced ./scripts/run-all-tests.sh
+```
+
+#### 6. Time-Based Testing
+```bash
+# Run intensive tests during off-peak hours
+# Some regions have better spot pricing at night
+
+# Schedule test runs during US night (better pricing)
+# Use CI/CD scheduled triggers
+```
+
+---
+
+### Resource Monitoring Commands
+
+```bash
+# Check node resources and availability
+kubectl get nodes
+kubectl describe nodes | grep -A 5 "Allocated resources"
+
+# Check GPU allocation across cluster
+kubectl get nodes -o custom-columns=\
+NAME:.metadata.name,\
+GPUs:.status.allocatable.'nvidia\.com/gpu',\
+TYPE:.metadata.labels.'node\.kubernetes\.io/instance-type'
+
+# Check EFS usage (requires EFS CSI driver)
+df -h | grep efs
+
+# Monitor cluster capacity in real-time
+kubectl top nodes
+
+# Check Karpenter provisioning status
+kubectl get nodeclaims
+kubectl get nodepool -o yaml | grep -A 10 "status:"
+
+# GPU utilization per pod (requires nvidia-dcgm)
+kubectl exec -it <gpu-pod> -- nvidia-smi
+
+# Cost estimation (requires Kubecost or similar)
+kubectl cost namespace dynamo --show-all-resources
+```
+
+---
+
+### Quick Sizing Reference
+
+| Deployment Type | Min GPUs | Min RAM | Min Storage | Est. Cost/Day |
+|----------------|----------|---------|-------------|---------------|
+| **Hello World** | 0 (CPU) | 4 GB | 10 GB | ~$1 |
+| **Small Model (0.6-3B)** | 1 | 24 GB | 50 GB | ~$25 |
+| **Medium Model (7-8B)** | 1-2 | 48 GB | 100 GB | ~$50 |
+| **Large Model (70B)** | 8 | 320 GB | 500 GB | ~$800 |
+| **Full Core Tier Test** | 2 | 64 GB | 100 GB | ~$60 |
+| **Full Standard Tier Test** | 4 | 128 GB | 200 GB | ~$150 |
 
 ## Available Examples
 
@@ -1137,7 +1345,7 @@ Modified `blueprints/inference/nvidia-dynamo/trtllm/trtllm-disaggregated-default
 
 The `dynamoNamespace` field in DynamoGraphDeployment specs is officially deprecated. From the CRD schema:
 
-> *"DynamoNamespace is deprecated and will be removed in a future version. The DGD Kubernetes namespace and DynamoGraphDeployment name are used to construct the Dynamo namespace for each component."*
+> *"dynamoNamespace is deprecated and will be removed in a future version. The DGD Kubernetes namespace and DynamoGraphDeployment name are used to construct the Dynamo namespace for each component."*
 
 **Impact**: The field still works but generates warnings. All 103 usages in existing blueprints will be removed in a future update.
 

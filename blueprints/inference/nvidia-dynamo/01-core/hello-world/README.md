@@ -29,6 +29,55 @@ This example demonstrates:
 - **Clear Logs**: Easy to understand output for debugging
 - **Foundation**: Base pattern for more complex examples
 
+## Testing Note
+
+> **Important:** The `hello-world` example does **NOT** expose the standard OpenAI-compatible API endpoint. It is designed for **internal testing only** and validates basic deployment functionality.
+
+### Manual Validation
+
+To verify the deployment:
+
+```bash
+# Check DGD status
+kubectl get dgd -n dynamo-cloud hello-world
+
+# Check pod status
+kubectl get pods -n dynamo-cloud -l nvidia.com/dynamo-graph-deployment-name=hello-world
+
+# Check logs for successful initialization
+kubectl logs -n dynamo-cloud -l nvidia.com/dynamo-graph-deployment-name=hello-world
+```
+
+### Expected Behavior
+
+| Component | Expected Status | Validation |
+|-----------|-----------------|------------|
+| **DGD Status** | `Running` | `kubectl get dgd -n dynamo-cloud hello-world` |
+| **Pod Status** | 1/1 Ready | `kubectl get pods -n dynamo-cloud -l nvidia.com/dynamo-graph-deployment-name=hello-world` |
+| **Logs** | Service registered, no errors | Check logs show `Service registered` and `Serving endpoint` |
+
+### Why No API Endpoint?
+
+Unlike the vLLM and SGLang examples that expose HTTP endpoints at `:8000/v1/*` for OpenAI-compatible inference, hello-world is a **minimal example** focused on:
+
+- ✅ Validating basic Dynamo operator functionality
+- ✅ Confirming container runtime environment
+- ✅ Testing CPU resource allocation and node selection
+- ✅ Verifying NGC image pull (credential validation)
+- ✅ Testing internal service discovery via etcd
+- ❌ **NOT** OpenAI-compatible API testing
+- ❌ **NOT** GPU or inference validation
+
+### Recommended for API Testing
+
+**For API endpoint testing**, use one of these blueprints instead:
+
+| Blueprint | Location | API Endpoint |
+|-----------|----------|--------------|
+| **vllm-aggregated-default** | [`../backends/vllm/`](../backends/vllm/README.md) | `:8000/v1/completions` |
+| **sglang-aggregated-default** | [`../backends/sglang/`](../backends/sglang/README.md) | `:8000/v1/completions` |
+| **trtllm-aggregated-default** | [`../backends/trtllm/`](../backends/trtllm/README.md) | `:8000/v1/completions` |
+
 ## Prerequisites
 
 - Dynamo platform deployed in your EKS cluster

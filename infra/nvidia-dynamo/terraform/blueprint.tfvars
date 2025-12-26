@@ -44,8 +44,8 @@ dynamo_shared_cache_size = "500Gi"  # Size of shared model cache PVC
 # Get NGC API key from: https://ngc.nvidia.com/setup/api-key
 # Get HuggingFace token from: https://huggingface.co/settings/tokens
 #---------------------------------------------------------------
-ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
-huggingface_token = "YOUR_HF_TOKEN_HERE"
+ngc_api_key       = "your-ngc-api-key"
+huggingface_token = "your-huggingface-token"
 
 #---------------------------------------------------------------
 # Platform-Level Features (Optional)

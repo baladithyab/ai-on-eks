@@ -69,6 +69,117 @@ print_banner() {
 }
 
 #---------------------------------------------------------------
+# Output Sanitization Functions
+#---------------------------------------------------------------
+
+# Sanitize kubectl exec output by removing common artifacts
+# This handles:
+#   - "Defaulted to container" messages
+#   - ANSI color/escape codes
+#   - Carriage returns
+#   - Empty lines at start/end
+sanitize_kubectl_output() {
+    local raw_output="$1"
+    
+    # Return empty if input is empty
+    if [ -z "$raw_output" ]; then
+        echo ""
+        return 0
+    fi
+    
+    echo "$raw_output" | \
+        tr -d '\r' | \
+        sed 's/\x1b\[[0-9;]*m//g' | \
+        sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | \
+        grep -v "^Defaulted to container" | \
+        grep -v "^Defaulting container" | \
+        grep -v "^Unable to use a TTY" | \
+        sed '/^[[:space:]]*$/d' | \
+        sed '1{/^$/d}' | \
+        sed '${/^$/d}'
+}
+
+# Clean a string for JSON parsing by removing control characters
+sanitize_json_string() {
+    local raw_input="$1"
+    
+    if [ -z "$raw_input" ]; then
+        echo ""
+        return 0
+    fi
+    
+    # Remove control characters except newlines and tabs
+    # Then try to extract just the JSON portion (starts with { or [)
+    local cleaned
+    cleaned=$(echo "$raw_input" | tr -d '\000-\010\013-\037')
+    
+    # Try to find and extract JSON object or array
+    if echo "$cleaned" | grep -q '^[[:space:]]*{'; then
+        # Extract from first { to the end
+        cleaned=$(echo "$cleaned" | sed -n '/^[[:space:]]*{/,$p')
+    elif echo "$cleaned" | grep -q '^[[:space:]]*\['; then
+        # Extract from first [ to the end
+        cleaned=$(echo "$cleaned" | sed -n '/^[[:space:]]*\[/,$p')
+    fi
+    
+    echo "$cleaned"
+}
+
+# Validate that a response is valid JSON and return status
+# Returns 0 if valid JSON, 1 if invalid
+# Also handles common error cases
+validate_json_response() {
+    local response="$1"
+    local context="${2:-response}"
+    
+    if [ -z "$response" ]; then
+        warn "[$context] Empty response received"
+        return 1
+    fi
+    
+    # Check if jq is available
+    if ! command -v jq >/dev/null 2>&1; then
+        # Fallback to basic validation without jq
+        if echo "$response" | grep -qE '^[[:space:]]*[\{\[]'; then
+            return 0
+        else
+            warn "[$context] Response doesn't appear to be JSON"
+            return 1
+        fi
+    fi
+    
+    # Validate with jq
+    if ! echo "$response" | jq . >/dev/null 2>&1; then
+        local truncated="${response:0:200}"
+        warn "[$context] Invalid JSON received"
+        warn "Raw (first 200 chars): ${truncated}..."
+        return 1
+    fi
+    
+    return 0
+}
+
+# Extract JSON from mixed output (handles kubectl exec noise)
+extract_json_from_output() {
+    local raw_output="$1"
+    
+    if [ -z "$raw_output" ]; then
+        echo ""
+        return 1
+    fi
+    
+    # First, sanitize the output
+    local sanitized
+    sanitized=$(sanitize_kubectl_output "$raw_output")
+    
+    # Then clean for JSON
+    local cleaned
+    cleaned=$(sanitize_json_string "$sanitized")
+    
+    echo "$cleaned"
+}
+
+#---------------------------------------------------------------
 # Port Utilities
 #---------------------------------------------------------------
 
@@ -191,20 +302,26 @@ api_call() {
     local endpoint="$2"
     local data="${3:-}"
     local base_url="http://localhost:${LOCAL_PORT}"
+    local raw_response=""
 
     if [ "$USE_KUBECTL_EXEC" = true ] && [ -n "$FRONTEND_POD" ]; then
+        # kubectl exec path - capture both stdout and stderr
         if [ -n "$data" ]; then
-            kubectl exec "$FRONTEND_POD" -n "${NAMESPACE}" -- \
+            raw_response=$(kubectl exec "$FRONTEND_POD" -n "${NAMESPACE}" -- \
                 curl -s -X "$method" "http://localhost:8000${endpoint}" \
                 -H "Content-Type: application/json" \
                 -d "$data" \
-                --max-time ${REQUEST_TIMEOUT} 2>/dev/null
+                --max-time ${REQUEST_TIMEOUT} 2>&1)
         else
-            kubectl exec "$FRONTEND_POD" -n "${NAMESPACE}" -- \
+            raw_response=$(kubectl exec "$FRONTEND_POD" -n "${NAMESPACE}" -- \
                 curl -s "http://localhost:8000${endpoint}" \
-                --max-time ${REQUEST_TIMEOUT} 2>/dev/null
+                --max-time ${REQUEST_TIMEOUT} 2>&1)
         fi
+        
+        # Sanitize kubectl exec output to remove "Defaulted to container" messages etc.
+        extract_json_from_output "$raw_response"
     else
+        # Direct curl path - no sanitization needed
         if [ -n "$data" ]; then
             curl -s -X "$method" "${base_url}${endpoint}" \
                 -H "Content-Type: application/json" \
@@ -214,6 +331,26 @@ api_call() {
             curl -s "${base_url}${endpoint}" \
                 --max-time ${REQUEST_TIMEOUT} 2>/dev/null
         fi
+    fi
+}
+
+# API call with validation - returns empty string on invalid JSON
+# Use this when you need guaranteed valid JSON or nothing
+api_call_with_validation() {
+    local method="${1:-GET}"
+    local endpoint="$2"
+    local data="${3:-}"
+    local context="${4:-api_call}"
+    
+    local response
+    response=$(api_call "$method" "$endpoint" "$data")
+    
+    if validate_json_response "$response" "$context"; then
+        echo "$response"
+        return 0
+    else
+        echo ""
+        return 1
     fi
 }
 

@@ -72,6 +72,95 @@ print_banner() {
     echo -e "${BLUE}${line}${NC}\n"
 }
 
+#---------------------------------------------------------------
+# NGC Secret Pre-flight Check
+#---------------------------------------------------------------
+
+check_ngc_secret() {
+    local namespace="${1:-dynamo}"
+    local secret_name="${NGC_SECRET_NAME:-ngc-secret}"
+    
+    echo -e "${GREEN}🔐 Checking NGC credentials...${NC}"
+    
+    # Check if secret exists
+    if ! kubectl get secret "$secret_name" -n "$namespace" >/dev/null 2>&1; then
+        echo -e "${RED}❌ ERROR: NGC secret '$secret_name' not found in namespace '$namespace'${NC}"
+        echo ""
+        echo "The NGC image pull secret is required to pull NVIDIA Dynamo images from nvcr.io."
+        echo ""
+        echo "Create the secret manually with:"
+        echo "  kubectl create secret docker-registry $secret_name \\"
+        echo "    --docker-server=nvcr.io \\"
+        echo "    --docker-username='\$oauthtoken' \\"
+        echo "    --docker-password=<YOUR-NGC-API-KEY> \\"
+        echo "    -n $namespace"
+        echo ""
+        echo "Get your NGC API key from: https://org.ngc.nvidia.com/setup/api-key"
+        echo ""
+        echo "Or configure via Terraform:"
+        echo "  1. Set 'ngc_api_key' in infra/nvidia-dynamo/terraform/blueprint.tfvars"
+        echo "  2. Run 'terraform apply' to create the secret"
+        return 1
+    fi
+    
+    # Verify secret type is docker-registry
+    local secret_type
+    secret_type=$(kubectl get secret "$secret_name" -n "$namespace" -o jsonpath='{.type}' 2>/dev/null)
+    
+    if [ "$secret_type" != "kubernetes.io/dockerconfigjson" ]; then
+        echo -e "${RED}❌ ERROR: NGC secret exists but has wrong type: $secret_type${NC}"
+        echo "Expected type: kubernetes.io/dockerconfigjson"
+        echo ""
+        echo "Delete and recreate the secret:"
+        echo "  kubectl delete secret $secret_name -n $namespace"
+        echo "  kubectl create secret docker-registry $secret_name \\"
+        echo "    --docker-server=nvcr.io \\"
+        echo "    --docker-username='\$oauthtoken' \\"
+        echo "    --docker-password=<YOUR-NGC-API-KEY> \\"
+        echo "    -n $namespace"
+        return 1
+    fi
+    
+    # Verify secret has dockerconfigjson data
+    if ! kubectl get secret "$secret_name" -n "$namespace" -o json 2>/dev/null | jq -e '.data[".dockerconfigjson"]' >/dev/null 2>&1; then
+        echo -e "${RED}❌ ERROR: NGC secret is malformed - missing .dockerconfigjson data${NC}"
+        echo ""
+        echo "Delete and recreate the secret with proper format."
+        return 1
+    fi
+    
+    # Verify the dockerconfigjson contains nvcr.io
+    local decoded_config
+    decoded_config=$(kubectl get secret "$secret_name" -n "$namespace" \
+        -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+    
+    if [ -z "$decoded_config" ]; then
+        echo -e "${YELLOW}⚠ WARNING: Could not decode NGC secret for validation${NC}"
+        echo "Proceeding, but deployment may fail if credentials are invalid."
+        echo -e "${GREEN}✅ NGC secret exists (validation limited)${NC}"
+        return 0
+    fi
+    
+    if ! echo "$decoded_config" | grep -q "nvcr.io"; then
+        echo -e "${YELLOW}⚠ WARNING: NGC secret may not be configured for nvcr.io${NC}"
+        echo "The secret should contain credentials for nvcr.io registry."
+        echo "Current auths in secret:"
+        echo "$decoded_config" | jq -r '.auths | keys[]' 2>/dev/null | sed 's/^/  - /'
+        echo ""
+        echo "If you see only other registries, recreate with nvcr.io:"
+        echo "  kubectl delete secret $secret_name -n $namespace"
+        echo "  kubectl create secret docker-registry $secret_name \\"
+        echo "    --docker-server=nvcr.io \\"
+        echo "    --docker-username='\$oauthtoken' \\"
+        echo "    --docker-password=<YOUR-NGC-API-KEY> \\"
+        echo "    -n $namespace"
+        # Don't fail - the existing secret might still work
+    fi
+    
+    echo -e "${GREEN}✅ NGC secret validated successfully${NC}"
+    return 0
+}
+
 usage() {
     cat <<'EOF'
 NVIDIA Dynamo deployment script
@@ -467,16 +556,10 @@ if [ "${RESOURCE_KIND}" = "DynamoGraphDeployment" ] || [ "${RESOURCE_KIND}" = "D
         fi
     fi
 
-    if ! kubectl get secret ngc-secret -n "${TARGET_NAMESPACE}" >/dev/null 2>&1; then
-        error "NGC image pull secret not found in namespace ${TARGET_NAMESPACE}"
-        error ""
-        error "The NGC image pull secret is managed by Terraform."
-        error "Please ensure you have:"
-        error "  1. Set 'ngc_api_key' in infra/nvidia-dynamo/terraform/blueprint.tfvars"
-        error "  2. Run 'terraform apply' to create the secret"
+    # Use comprehensive NGC secret validation
+    if ! check_ngc_secret "${TARGET_NAMESPACE}"; then
+        error "NGC secret pre-flight check failed. Aborting deployment."
         exit 1
-    else
-        success "NGC image pull secret found"
     fi
 fi
 
