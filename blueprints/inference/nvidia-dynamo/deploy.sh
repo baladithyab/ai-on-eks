@@ -242,7 +242,7 @@ list_catalog() {
     section "Catalog (showcase-first)"
 
     local tier
-    for tier in core standard advanced experimental; do
+    for tier in core standard advanced experimental model-showcase; do
         echo -e "\n${BLUE}${tier^^}${NC}"
         echo "  ID                           BACKEND   NOTES"
         echo "  ---------------------------  -------   ------------------------------"

@@ -16,10 +16,37 @@
 #   TIER=core ./scripts/run-all-tests.sh          # Test only Core tier
 #   CLEANUP=false ./scripts/run-all-tests.sh      # Skip cleanup (debugging)
 #   TIMEOUT=1200 ./scripts/run-all-tests.sh       # Custom timeout (seconds)
+#   DEBUG=true ./scripts/run-all-tests.sh         # Enable verbose debug logging
 #
 #===============================================================================
 
 set -euo pipefail
+
+# ============================================================================
+# Debug and Error Trapping
+# ============================================================================
+
+# Enable debug mode via environment variable
+DEBUG="${DEBUG:-false}"
+
+# Log function for debug mode
+debug_log() {
+    if [[ "$DEBUG" == "true" ]]; then
+        echo -e "\033[0;35m[DEBUG]\033[0m $*" >&2
+    fi
+}
+
+# Error trap to catch unexpected exits
+trap_error() {
+    local exit_code=$?
+    local line_no=$1
+    if [[ $exit_code -ne 0 ]]; then
+        echo -e "\033[0;31m[FATAL]\033[0m Script terminated unexpectedly at line $line_no with exit code $exit_code" >&2
+        echo "Last command: ${BASH_COMMAND}" >&2
+    fi
+}
+
+trap 'trap_error $LINENO' ERR
 
 # ============================================================================
 # Configuration
@@ -40,7 +67,7 @@ WAIT_STABILIZE="${WAIT_STABILIZE:-60}"  # Wait time after deployment
 DGD_TIMEOUT="${DGD_TIMEOUT:-600}"    # 10 minutes for DGD to reach Running
 
 # Namespace configuration
-NAMESPACE="${NAMESPACE:-dynamo-cloud}"
+NAMESPACE="${NAMESPACE:-dynamo}"
 
 # ============================================================================
 # Colors and Formatting
@@ -95,6 +122,8 @@ EOF
 
 # ============================================================================
 # Counters
+# NOTE: Using ((++var)) instead of ((var++)) to avoid exit code 1 when var=0
+# With set -e, ((var++)) where var=0 evaluates to 0 (false) causing script exit
 # ============================================================================
 
 TOTAL=0
@@ -176,8 +205,11 @@ test_blueprint() {
     local blueprint_name="$1"
     
     header "Testing: $blueprint_name"
+    debug_log "Entering test_blueprint for: $blueprint_name"
     
-    ((TOTAL++))
+    # Use ((++TOTAL)) to avoid exit code 1 when TOTAL=0 with set -e
+    ((++TOTAL))
+    debug_log "TOTAL incremented to: $TOTAL"
     
     local start_time=$(date +%s)
     local test_status="UNKNOWN"
@@ -193,6 +225,7 @@ test_blueprint() {
     # Phase 1: Deploy
     # -------------------------
     info "  → [1/4] Deploying..."
+    debug_log "Running: timeout $TIMEOUT $BLUEPRINTS_DIR/deploy.sh $blueprint_name"
     
     if ! timeout "$TIMEOUT" "$BLUEPRINTS_DIR/deploy.sh" "$blueprint_name" > "$deploy_log" 2>&1; then
         local deploy_exit=$?
@@ -216,7 +249,7 @@ test_blueprint() {
     # -------------------------
     # Phase 2: Wait for Running
     # -------------------------
-    info "  → [2/4] Waiting for DGD Running status..."
+    info "  → [2/4] Waiting for DGD successful status..."
     
     local dgd_name="${blueprint_name}"
     local timeout_count=0
@@ -224,13 +257,13 @@ test_blueprint() {
     local status="Unknown"
     
     while [[ $timeout_count -lt $max_checks ]]; do
-        # Get DGD status
-        status=$(kubectl get dgd "$dgd_name" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
+        # Get DGD status (Dynamo uses .status.state not .status.phase)
+        status=$(kubectl get dgd "$dgd_name" -n "$NAMESPACE" -o jsonpath='{.status.state}' 2>/dev/null || echo "NotFound")
         
-        if [[ "$status" == "Running" ]]; then
-            success "DGD reached Running status"
+        if [[ "$status" == "successful" ]]; then
+            success "DGD reached successful status"
             break
-        elif [[ "$status" == "Failed" ]]; then
+        elif [[ "$status" == "Failed" ]] || [[ "$status" == "failed" ]]; then
             test_status="FAIL"
             test_notes="DGD status: Failed"
             error "DGD failed to deploy"
@@ -241,12 +274,13 @@ test_blueprint() {
         
         info "    Status: $status (waiting...)"
         sleep 10
-        ((timeout_count++))
+        # Use ((++timeout_count)) to avoid exit code 1 when timeout_count=0
+        ((++timeout_count))
     done
     
-    if [[ "$status" != "Running" ]]; then
+    if [[ "$status" != "successful" ]]; then
         test_status="FAIL"
-        test_notes="DGD did not reach Running (last: $status)"
+        test_notes="DGD did not reach successful (last: $status)"
         error "$test_notes"
         record_result "$blueprint_name" "$test_status" "$test_notes" "$start_time"
         [[ "$CLEANUP" == "true" ]] && cleanup_blueprint "$blueprint_name" "$cleanup_log"
@@ -313,6 +347,8 @@ test_blueprint() {
     else
         info "  → [4/4] Skipping cleanup (CLEANUP=false)"
     fi
+    
+    debug_log "Completed test_blueprint for: $blueprint_name"
 }
 
 # Cleanup a blueprint
@@ -342,20 +378,23 @@ record_result() {
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
     
+    debug_log "Recording result: $name = $status"
+    
     # Update counters and arrays
+    # Use ((++var)) to avoid exit code 1 when var=0 with set -e
     case "$status" in
         PASS)
-            ((PASSED++))
+            ((++PASSED))
             PASSED_BLUEPRINTS+=("$name")
             local status_icon="✅"
             ;;
         FAIL)
-            ((FAILED++))
+            ((++FAILED))
             FAILED_BLUEPRINTS+=("$name")
             local status_icon="❌"
             ;;
         SKIP)
-            ((SKIPPED++))
+            ((++SKIPPED))
             SKIPPED_BLUEPRINTS+=("$name")
             local status_icon="⚠️"
             ;;
@@ -363,6 +402,8 @@ record_result() {
             local status_icon="❓"
             ;;
     esac
+    
+    debug_log "Counters: PASSED=$PASSED FAILED=$FAILED SKIPPED=$SKIPPED"
     
     # Append to results file
     echo "| \`$name\` | $status_icon $status | ${duration}s | $notes |" >> "$RESULTS_FILE"
@@ -380,6 +421,9 @@ main() {
     info "Cleanup: $CLEANUP"
     info "Timeout: ${TIMEOUT}s"
     info "Results: $RESULTS_FILE"
+    if [[ "$DEBUG" == "true" ]]; then
+        info "Debug: ENABLED"
+    fi
     echo ""
     
     # Pre-flight checks
@@ -514,6 +558,7 @@ Environment Variables:
   WAIT_STABILIZE Wait time after deployment (default: 60)
   NAMESPACE      Kubernetes namespace (default: dynamo-cloud)
   RESULTS_DIR    Results output directory (default: ./test-results)
+  DEBUG          Enable verbose debug logging: true, false (default: false)
 
 Examples:
   # Test all Core tier blueprints
@@ -525,8 +570,8 @@ Examples:
   # Test without cleanup (for debugging)
   TIER=core CLEANUP=false $0
 
-  # Full test suite
-  $0
+  # Full test suite with debug logging
+  DEBUG=true $0
 
 Tiers:
   core      - Essential examples (hello-world, vllm/sglang/trtllm aggregated)
