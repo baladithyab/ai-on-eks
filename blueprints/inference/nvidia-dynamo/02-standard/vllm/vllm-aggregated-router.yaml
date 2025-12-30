@@ -47,11 +47,11 @@ spec:
       replicas: 1
       resources:
         requests:
-          cpu: "1"
-          memory: "2Gi"
+          cpu: "2"
+          memory: "4Gi"
         limits:
-          cpu: "1"
-          memory: "2Gi"
+          cpu: "2"
+          memory: "4Gi"
       extraPodSpec:
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
@@ -62,10 +62,10 @@ spec:
           args:
             # Enable KV Router by setting DYN_ROUTER_MODE=kv
             - "python3 -m dynamo.frontend --http-port 8000 --router-mode kv"
-          env:
-            # Alternative: Set via environment variable
-            - name: DYN_ROUTER_MODE
-              value: "kv"
+      envs:
+        # Alternative: Set via environment variable
+        - name: DYN_ROUTER_MODE
+          value: "kv"
     VllmWorker:
       envFromSecret: hf-token-secret
       livenessProbe:
@@ -83,7 +83,7 @@ spec:
         timeoutSeconds: 30
         failureThreshold: 60
       componentType: worker
-      replicas: 3  # Multiple replicas to demonstrate KV Router benefits
+      replicas: 2  # 2 replicas for load balancing with KV Router
       resources:
         requests:
           cpu: "10"
@@ -101,8 +101,8 @@ spec:
             httpGet:
               path: /health
               port: 9090
-            periodSeconds: 60
-            failureThreshold: 300
+            periodSeconds: 10
+            failureThreshold: 60
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           command:
@@ -110,6 +110,6 @@ spec:
             - -c
           args:
             # Enable prefix caching for better KV Router performance
-            # Reduced max-model-len to 29000 to fit within A10G GPU memory (24GB)
-            - "python3 -m dynamo.vllm --model Qwen/Qwen3-8B --enable-prefix-caching --max-model-len 29000 2>&1 | tee /tmp/vllm.log"
+            # Using Qwen3-0.6B for efficient resource utilization
+            - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B --enable-prefix-caching 2>&1 | tee /tmp/vllm.log"
 

@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# vLLM Disaggregated with Audit Logging
+# vLLM Aggregated with Audit Logging
 # Logs all chat completion requests in JSONL format for compliance and security auditing
+# Uses aggregated architecture (single worker) for efficient resource usage
 # Audit logs include request/response details, timestamps, and user information
 
 apiVersion: nvidia.com/v1alpha1
@@ -23,91 +24,85 @@ spec:
 
   services:
     Frontend:
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
       componentType: frontend
       replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
       extraPodSpec:
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.frontend
+            - /bin/sh
+            - -c
           args:
-            - --http-port
-            - "8000"
-          resources:
-            requests:
-              cpu: "4"
-              memory: "8Gi"
-            limits:
-              cpu: "8"
-              memory: "16Gi"
+            - "python3 -m dynamo.frontend --http-port 8000"
 
-    VllmDecodeWorker:
+    VllmWorker:
       envFromSecret: hf-token-secret
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
       componentType: worker
       replicas: 1
       resources:
         requests:
-          cpu: "8"
-          memory: "32Gi"
-        limits:
+          cpu: "10"
+          memory: "20Gi"
           gpu: "1"
-          memory: "32Gi"
+        limits:
+          cpu: "10"
+          memory: "20Gi"
+          gpu: "1"
       extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            failureThreshold: 300
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - /bin/sh
+            - -c
           args:
-            - --model
-            - Qwen/Qwen3-0.6B
-            - --gpu-memory-utilization
-            - "0.9"
-            - --disable-log-requests
-            - --max-model-len
-            - "8192"
-            - --enforce-eager
-        tolerations:
-          - key: "nvidia.com/gpu"
-            operator: "Exists"
-            effect: "NoSchedule"
-
-    VllmPrefillWorker:
-      envFromSecret: hf-token-secret
-      componentType: worker
-      replicas: 1
-      resources:
-        requests:
-          cpu: "8"
-          memory: "32Gi"
-        limits:
-          gpu: "1"
-          memory: "32Gi"
-      extraPodSpec:
-        mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
-          workingDir: /workspace/components/backends/vllm
-          command:
-          - python3
-          - -m
-          - dynamo.vllm
-          args:
-            - --model
-            - Qwen/Qwen3-0.6B
-            - --is-prefill-worker
-            - --gpu-memory-utilization
-            - "0.9"
-            - --disable-log-requests
-            - --max-model-len
-            - "8192"
-            - --enforce-eager
-        tolerations:
-          - key: "nvidia.com/gpu"
-            operator: "Exists"
-            effect: "NoSchedule"
+            - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm.log"
 

@@ -10,9 +10,11 @@ For comprehensive documentation on observability features, see:
 
 ## Available Examples
 
+- **`vllm-full-observability.yaml`** - vLLM with OTEL tracing + audit logging + metrics (aggregated architecture)
+
+Additional observability examples are available in `02-standard/observability/`:
 - **`vllm-otel-tracing.yaml`** - vLLM with OpenTelemetry distributed tracing
 - **`vllm-audit-logging.yaml`** - vLLM with audit logging for compliance
-- **`vllm-full-observability.yaml`** - vLLM with OTEL tracing + audit logging + metrics
 
 ## Features
 
@@ -35,7 +37,8 @@ spec:
       value: "true"
     - name: OTEL_EXPORT_ENABLED
       value: "1"
-    - name: OTEL_EXPORT_ENDPOINT
+    # NOTE: Use the correct OTEL SDK environment variable name
+    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
       value: "http://tempo.dynamo.svc.cluster.local:4317"
   
   services:
@@ -46,12 +49,12 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: "dynamo-frontend"
     
-    VllmDecodeWorker:
+    VllmWorker:
       extraPodSpec:
         mainContainer:
           env:
             - name: OTEL_SERVICE_NAME
-              value: "dynamo-worker-decode"
+              value: "dynamo-worker"
 ```
 
 ### Audit Logging
@@ -149,8 +152,7 @@ Prometheus is automatically configured via ServiceMonitor resources created by t
 
 ```text
 Client Request → Frontend (trace_id created)
-              → Prefill Worker (span with parent_id)
-              → Decode Worker (span with parent_id)
+              → Worker (span with parent_id)
               → Response (trace complete)
               
 All spans exported to Tempo via OTLP gRPC

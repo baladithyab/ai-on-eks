@@ -15,24 +15,15 @@
 # - Advanced image understanding and visual reasoning
 # - Multi-turn visual conversations
 # - Custom prompt template support
-# - 32K token context window (optimized for images)
+# - 16K token context window (optimized for images)
 #
 # Requirements:
-# - 4 GPUs total (1 for EncodeWorker, 2 for VLMWorker with KVBM, 1 for Processor)
+# - 3 GPUs total (1 for EncodeWorker, 1 for VLMWorker, 1 for Processor)
 # - HuggingFace token secret (hf-token-secret) for model download
 #
 # Resource Notes:
-# - VLMWorker: 2 GPUs + KVBM CPU/Disk offloading (100GB CPU cache + 200GB disk)
-# - VLMWorker: 200Gi memory for CPU cache and model
-# - EncodeWorker/Processor: 24Gi memory
+# - All workers: 24Gi memory for model loading
 # - CPU/Memory requests ensure Karpenter provisions appropriately-sized GPU nodes
-# - KVBM three-tier caching: GPU (48GB) → CPU (100GB) → Disk (200GB)
-#
-# Extended Context / Tensor Parallelism:
-# - Default context: 32K tokens (--max-model-len 32768)
-# - For longer contexts (up to 64K), see qwen2.5-vl-7b-video.yaml
-# - For tensor parallelism across multiple GPUs, add --tensor-parallel-size N to VLMWorker args
-# - Note: TP requires N GPUs per VLMWorker replica (e.g., TP=2 needs 2 GPUs)
 
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
@@ -45,29 +36,47 @@ spec:
     Frontend:
       componentType: frontend
       replicas: 1
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
       extraPodSpec:
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
-          resources:
-            requests:
-              cpu: "2"
-              memory: "4Gi"
-            limits:
-              cpu: "4"
-              memory: "8Gi"
 
     EncodeWorker:
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
       resources:
         requests:
           cpu: "4"
           memory: "24Gi"
+          gpu: "1"
         limits:
+          cpu: "4"
           gpu: "1"
           memory: "24Gi"
       extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/examples/multimodal
@@ -94,70 +103,32 @@ spec:
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
       resources:
         requests:
-          cpu: "16"
-          memory: "200Gi"
-        limits:
-          gpu: "2"
-          memory: "250Gi"
-      envs:
-        # Enable KVBM CPU cache (100GB of host memory for KV cache overflow)
-        - name: DYN_KVBM_CPU_CACHE_GB
-          value: "100"
-        # Enable KVBM disk cache (200GB for long context/image sequences)
-        - name: DYN_KVBM_DISK_CACHE_GB
-          value: "200"
-        # Enable KVBM metrics for monitoring cache performance
-        - name: DYN_KVBM_METRICS
-          value: "true"
-      extraPodSpec:
-        mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
-          workingDir: /workspace/examples/multimodal
-          securityContext:
-            privileged: true
-          startupProbe:
-            httpGet:
-              path: /live
-              port: 9090
-            periodSeconds: 10
-            timeoutSeconds: 30
-            failureThreshold: 120  # 120 * 10s = 20 minutes for model loading + torch.compile
-          command:
-            - /bin/sh
-            - -c
-          args:
-            - python3 components/worker.py --model Qwen/Qwen2.5-VL-7B-Instruct --worker-type prefill --max-model-len 32768 --gpu-memory-utilization 0.85 --tensor-parallel-size 2
-          # Volume mount for disk cache
-          volumeMounts:
-            - name: kvbm-disk-cache
-              mountPath: /tmp/kvbm-cache
-        # Volume for disk cache storage
-        volumes:
-          - name: kvbm-disk-cache
-            emptyDir:
-              sizeLimit: 250Gi
-              # For production, use a PersistentVolumeClaim instead:
-              # persistentVolumeClaim:
-              #   claimName: qwen-vl-kvbm-cache-pvc
-        tolerations:
-          - key: "nvidia.com/gpu"
-            operator: "Exists"
-            effect: "NoSchedule"
-
-    Processor:
-      envFromSecret: hf-token-secret
-      componentType: worker
-      replicas: 1
-      resources:
-        requests:
-          cpu: "4"
+          cpu: "10"
           memory: "24Gi"
+          gpu: "1"
         limits:
+          cpu: "10"
           gpu: "1"
           memory: "24Gi"
       extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
           workingDir: /workspace/examples/multimodal
@@ -174,7 +145,59 @@ spec:
             - /bin/sh
             - -c
           args:
-            - 'python3 components/processor.py --model Qwen/Qwen2.5-VL-7B-Instruct --prompt-template "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><prompt><|im_end|>\n<|im_start|>assistant\n"'
+            - python3 components/worker.py --model Qwen/Qwen2.5-VL-7B-Instruct --worker-type prefill --max-model-len 16384 --gpu-memory-utilization 0.80
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    Processor:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "4"
+          memory: "24Gi"
+          gpu: "1"
+        limits:
+          cpu: "4"
+          gpu: "1"
+          memory: "24Gi"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 120
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - 'python3 components/processor.py --model Qwen/Qwen2.5-VL-7B-Instruct --prompt-template "USER: <image>\n<prompt> ASSISTANT:"'
         tolerations:
           - key: "nvidia.com/gpu"
             operator: "Exists"
