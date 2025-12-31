@@ -18,7 +18,7 @@
 # - 16K token context window (optimized for images)
 #
 # Requirements:
-# - 3 GPUs total (1 for EncodeWorker, 1 for VLMWorker, 1 for Processor)
+# - 4 GPUs total (1 for EncodeWorker, 2 for VLMWorker, 1 for Processor)
 # - HuggingFace token secret (hf-token-secret) for model download
 #
 # Resource Notes:
@@ -121,10 +121,10 @@ spec:
         requests:
           cpu: "10"
           memory: "24Gi"
-          gpu: "1"
+          gpu: "2"
         limits:
           cpu: "10"
-          gpu: "1"
+          gpu: "2"
           memory: "24Gi"
       extraPodSpec:
         nodeSelector:
@@ -145,7 +145,7 @@ spec:
             - /bin/sh
             - -c
           args:
-            - python3 components/worker.py --model Qwen/Qwen2.5-VL-7B-Instruct --worker-type prefill --max-model-len 16384 --gpu-memory-utilization 0.80
+            - python3 components/worker.py --model Qwen/Qwen2.5-VL-7B-Instruct --worker-type prefill --max-model-len 32768 --gpu-memory-utilization 0.90 --tensor-parallel-size 2
         tolerations:
           - key: "nvidia.com/gpu"
             operator: "Exists"
