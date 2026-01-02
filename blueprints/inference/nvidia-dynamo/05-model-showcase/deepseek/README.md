@@ -2,34 +2,27 @@
 
 This directory demonstrates DeepSeek's cutting-edge open-source reasoning models running on NVIDIA Dynamo.
 
-## Models
+## Available Blueprints
 
 ### DeepSeek R1-Distill-Llama-8B (`deepseek-ai/DeepSeek-R1-Distill-Llama-8B`)
-- **Size:** 8 billion parameters
-- **GPU Requirements:** 1x GPU - g5.2xlarge (1x A10G, 24GB VRAM)
-- **VRAM:** ~16GB for model weights
-- **Capabilities:** Advanced reasoning, math, code generation
-- **Backend Support:** SGLang (recommended), vLLM
 
-**Blueprint:** [`sglang-deepseek-r1-distill-8b.yaml`](sglang-deepseek-r1-distill-8b.yaml)
+| Blueprint | Backend | Architecture | GPUs | Status |
+|-----------|---------|--------------|------|--------|
+| [`sglang-deepseek-r1-distill-8b.yaml`](sglang-deepseek-r1-distill-8b.yaml) | SGLang | Aggregated | 1 (TP=1) | ✅ |
 
-### DeepSeek R1-Distill-Qwen-32B (`deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`)  
-- **Size:** 32 billion parameters
-- **GPU Requirements:** 2x GPUs (TP=2) - g5.12xlarge (4x A10G)
-- **VRAM:** ~64GB for model weights
-- **Capabilities:** Enhanced reasoning, complex problem solving
-- **Backend Support:** vLLM with DynamoGraphDeploymentResource
+### DeepSeek R1-Distill-Qwen-32B (`deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`)
 
-**Blueprint:** [`vllm-dgdr-deepseek-32b.yaml`](vllm-dgdr-deepseek-32b.yaml)
+| Blueprint | Backend | Architecture | GPUs | Status |
+|-----------|---------|--------------|------|--------|
+| [`vllm-dgdr-deepseek-32b.yaml`](vllm-dgdr-deepseek-32b.yaml) | vLLM | DGDR | 2 (TP=2) | ⚠️ PCIe caution |
 
 ### DeepSeek R1-Distill-Llama-70B (`deepseek-ai/DeepSeek-R1-Distill-Llama-70B`)
-- **Size:** 70 billion parameters
-- **GPU Requirements:** 8x GPUs (TP=8) - p5.48xlarge (8x H100)
-- **VRAM:** ~140GB for model weights
-- **Capabilities:** State-of-the-art reasoning, matches GPT-4 class
-- **Backend Support:** vLLM disaggregated architecture
 
-**Blueprint:** [`vllm-disaggregated-deepseek-70b.yaml`](vllm-disaggregated-deepseek-70b.yaml)
+| Blueprint | Backend | Architecture | GPUs | Status |
+|-----------|---------|--------------|------|--------|
+| [`vllm-disaggregated-deepseek-70b.yaml`](vllm-disaggregated-deepseek-70b.yaml) | vLLM | Disaggregated | 16 (TP=8 x 2) | ⚠️ Requires NVLink |
+| [`sglang-aggregated-deepseek-70b.yaml`](sglang-aggregated-deepseek-70b.yaml) | SGLang | Aggregated | 4 (TP=4) | 🧪 New - g6e.24xlarge |
+| [`sglang-disaggregated-deepseek-70b.yaml`](sglang-disaggregated-deepseek-70b.yaml) | SGLang | Disaggregated | 8 (TP=4 x 2) | ⏳ Untested - requires 8 GPUs |
 
 ## Why DeepSeek?
 
@@ -41,36 +34,62 @@ DeepSeek models are among the most popular and capable open-source LLMs:
 - **Cost-performance ratio** - Exceptional capability per compute dollar
 - **Distillation approach** - R1-Distill models preserve reasoning via knowledge distillation
 
-## Model Family Comparison
+## Hardware Requirements
 
-| Model | Parameters | GPUs | VRAM | Best For |
-|-------|------------|------|------|----------|
-| R1-Distill-8B | 8B | 1 | ~16GB | Development, testing, edge |
-| R1-Distill-32B | 32B | 2 | ~64GB | Balanced cost/performance |
-| R1-Distill-70B | 70B | 8 | ~140GB | Production, max capability |
+| Model | Parameters | Instance | GPUs | VRAM |
+|-------|------------|----------|------|------|
+| R1-Distill-8B | 8B | g5.2xlarge | 1x A10G | ~16GB |
+| R1-Distill-32B | 32B | g5.12xlarge | 2x A10G | ~64GB |
+| R1-Distill-70B | 70B | g6e.24xlarge | 4x L40S | ~140GB |
+| R1-Distill-70B (Disagg) | 70B | g6e.48xlarge | 8x L40S | ~140GB x 2 |
+
+## Backend Recommendations
+
+### SGLang (Recommended for PCIe)
+SGLang is **recommended** for PCIe-based GPU topologies (g5, g6, g6e):
+- Different tensor parallelism coordination mechanism
+- Avoids vLLM's `shm_broadcast` deadlock on PCIe topologies
+- TP=4 fits 70B model on g6e.24xlarge (4x L40S, 192GB VRAM)
+
+### vLLM
+vLLM works well for **NVLink-connected** GPUs:
+- ⚠️ TP>1 on PCIe may experience deadlock
+- p5 instances (H100 with NVLink) recommended for vLLM
 
 ## Quick Start
 
 ```bash
-# Navigate to the blueprints directory
-cd ai-on-eks/blueprints/inference/nvidia-dynamo
+# Deploy SGLang DeepSeek-70B (requires g6e.24xlarge or larger)
+kubectl apply -f sglang-aggregated-deepseek-70b.yaml
 
-# Deploy the 8B model (single GPU, fastest startup)
-./deploy.sh 05-model-showcase/deepseek/sglang-deepseek-r1-distill-8b.yaml
-
-# Wait for Ready status
+# Wait for Ready status (model loading takes 10-20 minutes)
 kubectl get dgd -n dynamo -w
 
+# Test health
+curl http://<frontend-svc>:8000/health
+
 # Test reasoning capability
-curl -X POST http://$(kubectl get svc -n dynamo sglang-deepseek-r1-8b-frontend -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'):8000/v1/chat/completions \
+curl -X POST http://<frontend-svc>:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
     "messages": [
       {"role": "user", "content": "Solve this step by step: If x + 5 = 12, what is x?"}
     ]
   }'
 ```
+
+## Architecture Patterns
+
+### Aggregated (Single Worker)
+- Single worker handles both prefill and decode
+- TP=4 on g6e.24xlarge (4x L40S, 192GB VRAM)
+- Best for: Development, cost-effective production
+
+### Disaggregated (Prefill/Decode Split)
+- Separate workers for prefill and decode phases
+- Requires 8 GPUs total (4 per worker)
+- Best for: High-throughput production with varied prompts
 
 ## Reasoning Capabilities
 
@@ -85,7 +104,7 @@ DeepSeek R1-Distill models excel at:
 
 ```json
 {
-  "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+  "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
   "messages": [
     {
       "role": "user", 
@@ -95,23 +114,20 @@ DeepSeek R1-Distill models excel at:
 }
 ```
 
-## Backend Considerations
+## Features Demonstrated
 
-| Backend | 8B | 32B | 70B | Notes |
-|---------|----|----|-----|-------|
-| SGLang | ✓ Recommended | ✓ | - | Fast inference, efficient KV cache |
-| vLLM | ✓ | ✓ | ✓ Recommended | Disaggregated support for large models |
-| TensorRT-LLM | ✓ | ✓ | ✓ | Best throughput after compilation |
-
-## Related Blueprints
-
-- **Core tier:** See `01-core/` for Qwen3-0.6B feature demonstrations
-- **Standard tier:** See `02-standard/` for 8B model benchmarks  
-- **Advanced tier:** See `03-advanced/` for more DeepSeek configurations
+| Feature | SGLang Aggregated | SGLang Disaggregated |
+|---------|-------------------|---------------------|
+| Tensor Parallelism | TP=4 | TP=4 x 2 workers |
+| Architecture | Aggregated | Prefill/Decode Split |
+| EFS Model Cache | ✓ | ✓ |
+| Health Probes | ✓ | ✓ |
+| PCIe Compatible | ✓ | ✓ |
+| Reasoning | ✓ | ✓ |
 
 ## Resources
 
 - [DeepSeek AI Official](https://www.deepseek.com/)
-- [DeepSeek R1 Paper](https://arxiv.org/abs/2401.xxxxx)
+- [DeepSeek R1 Research](https://arxiv.org/abs/2401.02954)
 - [Hugging Face Model Hub](https://huggingface.co/deepseek-ai)
 - [SGLang Project](https://github.com/sgl-project/sglang)

@@ -1,0 +1,184 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM DGDR - DeepSeek-R1-Distill-Llama-70B Online Profiling
+#
+# This profiles and auto-deploys DeepSeek-R1-Distill-Llama-70B:
+# - EFS-backed model cache (dynamo-shared-models PVC)
+# - Uses vLLM backend (NOT SGLang - SGLang DGDR has upstream profiler bug)
+# - Dense 70B model distilled from DeepSeek R1 into Llama 3.3 architecture
+# - TP=8 required for 70B model (~140GB weights)
+#
+# Expected profiling time: 3-4 hours
+#
+# Prerequisites:
+# - dynamo-shared-models PVC created (EFS-backed)
+# - hf-token-secret with HuggingFace token (optional for open model)
+# - p5.48xlarge (8x H100) or 2x g6e.48xlarge (8x L40S each)
+#
+# Why vLLM for DGDR instead of SGLang?
+# - SGLang DGDR has upstream profiler bug that causes failures
+# - vLLM DGDR is the recommended path for auto-profiling
+# - Use sglang-aggregated/disaggregated for manual deployments
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-dgdr-deepseek-70b
+  namespace: dynamo
+spec:
+  model: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+    # Reference ConfigMap with EFS cache configuration
+    configMapRef:
+      name: deepseek-70b-dgd-config
+      key: disagg.yaml
+    config:
+      deployment:
+        # Model loading timeout for 70B model
+        timeout: 3600  # 60 minutes
+      hardware:
+        # 70B model needs ~140GB VRAM for BF16
+        min_num_gpus_per_engine: 8
+        max_num_gpus_per_engine: 8
+        num_gpus_per_node: 8
+      sweep:
+        # Online profiling (AIPerf benchmarks)
+        use_ai_configurator: false
+      sla:
+        # Reasoning-optimized SLA targets (longer outputs expected from R1 distill)
+        isl: 2048      # Input sequence length
+        osl: 512       # Output sequence length
+        ttft: 500.0    # Time To First Token (ms) - higher for 70B
+        itl: 50.0      # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+
+  autoApply: true
+---
+# ConfigMap with full DGD base config for DeepSeek-R1-Distill-Llama-70B with EFS cache
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deepseek-70b-dgd-config
+  namespace: dynamo
+data:
+  disagg.yaml: |
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeployment
+    metadata:
+      name: vllm-deepseek-70b-disagg
+    spec:
+      pvcs:
+        - name: dynamo-shared-models
+          create: false
+      envs:
+        - name: HF_HOME
+          value: "/models"
+      services:
+        Frontend:
+          componentType: frontend
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - "python3 -m dynamo.frontend --http-port 8000"
+        VllmDecodeWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: decode
+          replicas: 1
+          envs:
+            - name: UCX_TLS
+              value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            requests:
+              cpu: "48"
+              memory: "400Gi"
+              gpu: "8"
+            limits:
+              cpu: "48"
+              memory: "400Gi"
+              gpu: "8"
+          sharedMemory:
+            size: 40Gi
+          extraPodSpec:
+            nodeSelector:
+              karpenter.sh/nodepool: p5-nvidia
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+                - --tensor-parallel-size
+                - "8"
+                - --max-model-len
+                - "8192"
+                - --gpu-memory-utilization
+                - "0.90"
+                - --enforce-eager
+                - --trust-remote-code
+        VllmPrefillWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: prefill
+          replicas: 1
+          envs:
+            - name: UCX_TLS
+              value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            requests:
+              cpu: "48"
+              memory: "400Gi"
+              gpu: "8"
+            limits:
+              cpu: "48"
+              memory: "400Gi"
+              gpu: "8"
+          sharedMemory:
+            size: 40Gi
+          extraPodSpec:
+            nodeSelector:
+              karpenter.sh/nodepool: p5-nvidia
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+                - --is-prefill-worker
+                - --tensor-parallel-size
+                - "8"
+                - --max-model-len
+                - "8192"
+                - --gpu-memory-utilization
+                - "0.90"
+                - --enforce-eager
+                - --trust-remote-code

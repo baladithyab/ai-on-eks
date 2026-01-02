@@ -1,0 +1,173 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM DGDR - Meta Llama 3.3-70B-Instruct Online Profiling
+#
+# This profiles and auto-deploys Meta's Llama 3.3-70B-Instruct:
+# - EFS-backed model cache (dynamo-shared-models PVC)
+# - Uses vLLM backend (NOT SGLang - SGLang DGDR has upstream profiler bug)
+# - TP=8 required for 70B model (~140GB weights)
+#
+# Expected profiling time: 3-4 hours
+#
+# Prerequisites:
+# - dynamo-shared-models PVC created (EFS-backed)
+# - hf-token-secret with HuggingFace token (gated model)
+# - p5.48xlarge (8x H100) or 8x L40S equivalent
+#
+# Why vLLM for DGDR instead of SGLang?
+# - SGLang DGDR has upstream profiler bug that causes failures
+# - vLLM DGDR is the recommended path for auto-profiling
+# - Use sglang-aggregated/disaggregated for manual deployments
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-dgdr-llama-3.3-70b
+  namespace: dynamo
+spec:
+  model: meta-llama/Llama-3.3-70B-Instruct
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+    # Reference ConfigMap with EFS cache configuration
+    configMapRef:
+      name: llama-3.3-70b-dgd-config
+      key: disagg.yaml
+    config:
+      deployment:
+        # Model loading timeout for 70B model
+        timeout: 3600  # 60 minutes
+      hardware:
+        # 70B model needs ~140GB VRAM for BF16
+        min_num_gpus_per_engine: 8
+        max_num_gpus_per_engine: 8
+        num_gpus_per_node: 8
+      sweep:
+        # Online profiling (AIPerf benchmarks)
+        use_ai_configurator: false
+      sla:
+        # Production SLA targets for 70B model
+        isl: 2048      # Input sequence length
+        osl: 512       # Output sequence length
+        ttft: 500.0    # Time To First Token (ms) - higher for 70B
+        itl: 50.0      # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+
+  autoApply: true
+---
+# ConfigMap with full DGD base config for Llama 3.3-70B with EFS cache
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llama-3.3-70b-dgd-config
+  namespace: dynamo
+data:
+  disagg.yaml: |
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeployment
+    metadata:
+      name: vllm-llama-3.3-70b-disagg
+    spec:
+      pvcs:
+        - name: dynamo-shared-models
+          create: false
+      envs:
+        - name: HF_HOME
+          value: "/models"
+      services:
+        Frontend:
+          componentType: frontend
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - "python3 -m dynamo.frontend --http-port 8000"
+        VllmDecodeWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: decode
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            requests:
+              cpu: "48"
+              memory: "400Gi"
+              gpu: "8"
+            limits:
+              cpu: "48"
+              memory: "400Gi"
+              gpu: "8"
+          sharedMemory:
+            size: 24Gi
+          extraPodSpec:
+            nodeSelector:
+              karpenter.sh/nodepool: p5-nvidia
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - meta-llama/Llama-3.3-70B-Instruct
+                - --tensor-parallel-size
+                - "8"
+                - --max-model-len
+                - "32768"
+                - --gpu-memory-utilization
+                - "0.90"
+        VllmPrefillWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: prefill
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            requests:
+              cpu: "48"
+              memory: "400Gi"
+              gpu: "8"
+            limits:
+              cpu: "48"
+              memory: "400Gi"
+              gpu: "8"
+          sharedMemory:
+            size: 24Gi
+          extraPodSpec:
+            nodeSelector:
+              karpenter.sh/nodepool: p5-nvidia
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - meta-llama/Llama-3.3-70B-Instruct
+                - --is-prefill-worker
+                - --tensor-parallel-size
+                - "8"
+                - --max-model-len
+                - "32768"
+                - --gpu-memory-utilization
+                - "0.90"

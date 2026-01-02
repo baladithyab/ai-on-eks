@@ -1,39 +1,43 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# vLLM Aggregated Deployment for GPT-OSS-20B
+# SGLang Aggregated Deployment for GPT-OSS-120B
 #
-# OpenAI's GPT-OSS-20B is a smaller reasoning model with tool calling support.
-# Uses AGGREGATED architecture (single worker) to bypass shared memory broadcast
-# issues found in disaggregated deployments on PCIe GPU topologies.
+# **UNTESTED - REQUIRES 8 GPUs**
+#
+# OpenAI's GPT-OSS-120B is the full-size reasoning model with advanced
+# chain-of-thought and tool calling capabilities.
 #
 # Hardware Requirements:
-# - 1x g6e instance with ≥1x L40S (48GB) recommended
-# - Single-GPU deployment (TP=1) to avoid vLLM multi-GPU shared memory deadlock on PCIe
-# - Single node deployment
+# - 8x L40S GPUs (g6e.48xlarge) or 8x H100 (p5.48xlarge)
+# - ~240GB VRAM total for 120B model (BF16)
+# - TP=8 for multi-GPU inference
+# - High-bandwidth interconnect (NVLink preferred for H100)
+#
+# Instance Options:
+# - g6e.48xlarge: 8x L40S, 384GB VRAM - fits 120B with TP=8
+# - p5.48xlarge: 8x H100, 640GB VRAM - optimal performance
 #
 # Features:
-# - EFS-backed model cache
+# - EFS-backed model cache for fast restarts
 # - Reasoning parser (gpt_oss) for chain-of-thought
 # - Tool call parser (harmony) for function calling
-# - No inter-process communication (bypasses shared memory bug)
-# - RECOMMENDED pattern for large models until upstream bug fixed
+# - SGLang backend for PCIe compatibility (if g6e)
+# - Full 120B model capabilities
 #
 # Use cases:
-# - Development and testing of reasoning pipelines
-# - Production inference when disaggregated fails
-# - Single-worker deployment for maximum reliability
+# - Enterprise-grade reasoning workloads
+# - Complex multi-step problem solving
+# - Advanced tool calling and function execution
+# - Research and development
 #
-# Why Aggregated?
-# - Disaggregated deployments hit shared memory broadcast synchronization
-#   deadlock on PCIe GPU topologies (tested: DeepSeek-70B, GPT-OSS-20B)
-# - Aggregated single-worker mode bypasses all inter-process communication
-# - Proven stable pattern for ai-on-eks deployments
+# Note: This blueprint requires 8 GPUs and cannot be tested on
+# g6e.24xlarge (4x L40S). Deploy on g6e.48xlarge or p5 instances.
 
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: vllm-gptoss-20b-agg
+  name: sglang-gptoss-120b-agg
   namespace: dynamo
 spec:
   # Use shared HF cache from EFS
@@ -70,27 +74,26 @@ spec:
         failureThreshold: 10
       resources:
         requests:
-          cpu: "1"
-          memory: "2Gi"
+          cpu: "2"
+          memory: "4Gi"
         limits:
-          cpu: "1"
-          memory: "2Gi"
+          cpu: "2"
+          memory: "4Gi"
       volumeMounts:
         - name: dynamo-shared-models
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
-          workingDir: /workspace/components/backends/vllm
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh
             - -c
           args:
             - "python3 -m dynamo.frontend --http-port 8000"
 
-    VllmWorker:
-      # AGGREGATED: Single worker handles both prefill and decode
-      # NO inter-process communication = NO shared memory broadcast issues
+    SglangWorker:
+      # AGGREGATED: Single worker with 8 GPUs for full 120B model
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
@@ -110,20 +113,22 @@ spec:
         failureThreshold: 60
       resources:
         requests:
-          cpu: "10"
-          memory: "40Gi"
-          gpu: "1"
+          cpu: "48"
+          memory: "200Gi"
+          gpu: "8"
         limits:
-          cpu: "10"
-          memory: "40Gi"
-          gpu: "1"
+          cpu: "48"
+          memory: "200Gi"
+          gpu: "8"
       sharedMemory:
-        size: 12Gi
+        size: 40Gi
       volumeMounts:
         - name: dynamo-shared-models
           mountPoint: /models
       extraPodSpec:
         nodeSelector:
+          # Use g6e.48xlarge (8x L40S) or p5 (8x H100)
+          # Karpenter will provision appropriate instance
           karpenter.sh/nodepool: g6e-nvidia
         mainContainer:
           startupProbe:
@@ -131,23 +136,22 @@ spec:
               path: /health
               port: 9090
             periodSeconds: 60
-            # 300 * 60s = 5 hours max startup time for large model loading
+            # 300 * 60s = 5 hours max startup time for 120B model loading
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
-          workingDir: /workspace/components/backends/vllm
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh
             - -c
           args:
-            # AGGREGATED MODE: Single worker, no --is-prefill-worker flag
-            # Full vLLM engine handles both prefill and decode phases
+            # SGLang AGGREGATED MODE for full 120B model
             - |
-              python3 -m dynamo.vllm \
-                --model openai/gpt-oss-20b \
-                --tensor-parallel-size 1 \
-                --max-model-len 8192 \
-                --gpu-memory-utilization 0.90 \
-                --enforce-eager \
+              python3 -m dynamo.sglang \
+                --model-path openai/gpt-oss-120b \
+                --served-model-name openai/gpt-oss-120b \
+                --tp 8 \
+                --trust-remote-code \
+                --mem-fraction-static 0.85 \
                 --dyn-reasoning-parser gpt_oss \
                 --dyn-tool-call-parser harmony \
-                2>&1 | tee /tmp/vllm.log
+                2>&1 | tee /tmp/sglang.log

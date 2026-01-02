@@ -2,97 +2,111 @@
 
 This directory demonstrates NVIDIA's open-source GPT models running on NVIDIA Dynamo for production LLM inference.
 
-## Models
+## Available Blueprints
 
 ### GPT-OSS-20B (`openai/gpt-oss-20b`)
-- **Size:** 20 billion parameters
-- **GPU Requirements:** 4x GPUs (TP=4) - g6e.12xlarge (4x L40S) or similar
-- **VRAM:** ~40GB for model weights
-- **Capabilities:** Reasoning, tool calling, general-purpose generation
-- **Backend Support:** vLLM with reasoning parser
 
-**Blueprint:** [`vllm-aggregated-gptoss-20b.yaml`](vllm-aggregated-gptoss-20b.yaml)
+| Blueprint | Backend | Architecture | GPUs | Status |
+|-----------|---------|--------------|------|--------|
+| [`vllm-aggregated-gptoss-20b.yaml`](vllm-aggregated-gptoss-20b.yaml) | vLLM | Aggregated | 2 (TP=2) | ⚠️ PCIe TP>1 may deadlock |
+| [`sglang-aggregated-gptoss-20b.yaml`](sglang-aggregated-gptoss-20b.yaml) | SGLang | Aggregated | 2 (TP=2) | ✅ Validated |
+| [`trtllm-aggregated-gptoss-20b.yaml`](trtllm-aggregated-gptoss-20b.yaml) | TensorRT-LLM | Aggregated | 2 (TP=2) | 🧪 New |
+| [`sglang-disaggregated-gptoss-20b.yaml`](sglang-disaggregated-gptoss-20b.yaml) | SGLang | Disaggregated | 4 (TP=2 x 2) | 🧪 New |
+| [`sglang-router-gptoss-20b.yaml`](sglang-router-gptoss-20b.yaml) | SGLang | Router | 4+ (TP=2 x N) | 🧪 New |
 
 ### GPT-OSS-120B (`openai/gpt-oss-120b`)
-- **Size:** 120 billion parameters  
-- **GPU Requirements:** 8x GPUs (TP=8) - p5.48xlarge (8x H100) or similar
-- **VRAM:** ~240GB for model weights
-- **Capabilities:** Advanced reasoning, complex tool calling, enterprise workloads
-- **Backend Support:** vLLM disaggregated architecture
 
-**Blueprint:** [`vllm-disaggregated-gptoss-120b.yaml`](vllm-disaggregated-gptoss-120b.yaml)
+| Blueprint | Backend | Architecture | GPUs | Status |
+|-----------|---------|--------------|------|--------|
+| [`vllm-disaggregated-gptoss-120b.yaml`](vllm-disaggregated-gptoss-120b.yaml) | vLLM | Disaggregated | 16 (TP=8 x 2) | ⚠️ Requires 16 GPUs |
+| [`sglang-aggregated-gptoss-120b.yaml`](sglang-aggregated-gptoss-120b.yaml) | SGLang | Aggregated | 8 (TP=8) | ⏳ Untested - requires 8 GPUs |
 
-## Why GPT-OSS?
+## Hardware Requirements
 
-NVIDIA GPT-OSS models represent cutting-edge open-source LLM contributions:
+### GPT-OSS-20B
+- **VRAM:** ~40GB for model weights (BF16)
+- **Minimum:** 2x L40S (g6e.12xlarge) for TP=2
+- **Recommended:** 4x L40S (g6e.24xlarge) for DGDR patterns
 
-- **Open weights and training methodology** - Full transparency for research and production
-- **Optimized for NVIDIA GPU architectures** - Native acceleration on NVIDIA hardware
-- **Competitive performance** - Matches or exceeds proprietary models on key benchmarks
-- **Reasoning capabilities** - Built-in chain-of-thought support via `gpt_oss` parser
-- **Tool calling support** - `harmony` parser for function/tool integration
+### GPT-OSS-120B
+- **VRAM:** ~240GB for model weights (BF16)
+- **Minimum:** 8x L40S (g6e.48xlarge) or 8x H100 (p5.48xlarge)
+- **Recommended:** p5 instance with NVLink for optimal performance
 
-## Features Demonstrated
+## Backend Recommendations
 
-| Feature | GPT-OSS-20B | GPT-OSS-120B |
-|---------|-------------|--------------|
-| Tensor Parallelism | TP=4 | TP=8 |
-| Architecture | Aggregated | Disaggregated |
-| Reasoning Parser | `gpt_oss` | `gpt_oss` |
-| Tool Call Parser | `harmony` | `harmony` |
-| EFS Model Cache | ✓ | ✓ |
-| Health Probes | ✓ | ✓ |
+### SGLang (Recommended for PCIe)
+SGLang is **recommended** for PCIe-based GPU topologies (g5, g6, g6e instances):
+- Different tensor parallelism coordination mechanism
+- Avoids vLLM's `shm_broadcast` deadlock on PCIe topologies
+- Proven stable on g6e.24xlarge with 4x L40S
+
+### TensorRT-LLM
+TensorRT-LLM provides maximum throughput via:
+- CUDA graph capture for reduced latency
+- Optimized attention kernels
+- Efficient KV cache management
+
+### vLLM
+vLLM works well for **single-GPU** or **NVLink-connected** GPUs:
+- ⚠️ TP>1 on PCIe may experience `shm_broadcast.acquire_read` deadlock
+- Use aggregated single-worker mode on PCIe if vLLM is required
 
 ## Quick Start
 
 ```bash
-# Navigate to the model-showcase directory
-cd ai-on-eks/blueprints/inference/nvidia-dynamo
-
-# Deploy GPT-OSS-20B (requires g6e.12xlarge node pool)
-./deploy.sh 05-model-showcase/gpt-oss/vllm-aggregated-gptoss-20b.yaml
+# Deploy SGLang GPT-OSS-20B (recommended)
+kubectl apply -f sglang-aggregated-gptoss-20b.yaml
 
 # Wait for Ready status
 kubectl get dgd -n dynamo -w
 
+# Test health
+curl http://<frontend-svc>:8000/health
+
 # Test inference
-curl -X POST http://$(kubectl get svc -n dynamo vllm-gptoss-20b-agg-frontend -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'):8000/v1/chat/completions \
+curl -X POST http://<frontend-svc>:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai/gpt-oss-20b",
-    "messages": [{"role": "user", "content": "What is the capital of France?"}]
+    "messages": [{"role": "user", "content": "Explain quantum computing."}]
   }'
 ```
 
-## Architecture Notes
+## Architecture Patterns
 
-### Aggregated vs Disaggregated
+### Aggregated (Single Worker)
+- Single worker handles both prefill and decode
+- Simplest deployment pattern
+- Best for: Development, testing, single-node deployments
 
-- **GPT-OSS-20B uses Aggregated architecture:** Single worker handles both prefill and decode, bypassing potential shared memory broadcast issues on PCIe topologies.
+### Disaggregated (Prefill/Decode Split)
+- Separate workers for prefill (context processing) and decode (token generation)
+- Better GPU utilization for mixed workloads
+- Best for: Production with varied prompt lengths
 
-- **GPT-OSS-120B uses Disaggregated architecture:** Separate prefill and decode workers for better throughput on NVLink-connected GPUs (H100/H200).
+### Router (Smart Load Balancing)
+- Multiple workers with KV cache-aware routing
+- Processor collects metrics for intelligent routing decisions
+- Best for: High-throughput production, multi-worker scaling
 
-### Reasoning Support
+## Special Features
 
-Both models support chain-of-thought reasoning via the `dyn-reasoning-parser gpt_oss` flag:
-
+### Reasoning Parser (`gpt_oss`)
+Enables chain-of-thought reasoning:
 ```yaml
-args:
-  - |
-    python3 -m dynamo.vllm \
-      --model openai/gpt-oss-20b \
-      --dyn-reasoning-parser gpt_oss \
-      --dyn-tool-call-parser harmony
+--dyn-reasoning-parser gpt_oss
 ```
 
-## Related Blueprints
-
-- **Core tier examples:** See `01-core/` for feature demonstrations with smaller models
-- **Standard tier:** See `02-standard/` for 8B model benchmarks
-- **Advanced tier:** See `03-advanced/` for additional GPT-OSS configurations
+### Tool Calling Parser (`harmony`)
+Enables function/tool integration:
+```yaml
+--dyn-tool-call-parser harmony
+```
 
 ## Resources
 
 - [NVIDIA AI Dynamo Documentation](https://docs.nvidia.com/nim/)
+- [SGLang Project](https://github.com/sgl-project/sglang)
 - [vLLM Project](https://github.com/vllm-project/vllm)
 - [GPT-OSS Model Card](https://huggingface.co/openai/gpt-oss-20b)

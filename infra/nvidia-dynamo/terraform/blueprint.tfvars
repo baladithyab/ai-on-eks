@@ -15,6 +15,15 @@ enable_nvidia_gpu_operator       = false
 dynamo_stack_version             = "v0.7.1"
 
 #---------------------------------------------------------------
+# VPC and Availability Zones
+# IMPORTANT: p5.48xlarge capacity may only be available in certain AZs
+# us-west-2 typically has p5 capacity in us-west-2c and us-west-2d
+#---------------------------------------------------------------
+# NOTE: Expanding from 2 to 4 AZs adds subnets in us-west-2c and us-west-2d
+# This is needed because p5.48xlarge capacity is often only in these AZs
+availability_zones_count = 4
+
+#---------------------------------------------------------------
 # Observability Features
 #---------------------------------------------------------------
 # Grafana Tempo for OpenTelemetry distributed tracing

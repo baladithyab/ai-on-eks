@@ -1,0 +1,212 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# SGLang Disaggregated Deployment for DeepSeek-R1-Distill-Llama-70B
+#
+# **UNTESTED - REQUIRES 8 GPUs (4 per worker)**
+#
+# DISAGGREGATED architecture separates prefill (context processing) from
+# decode (token generation) for optimized resource utilization.
+#
+# Hardware Requirements:
+# - Prefill worker: 4x L40S GPUs (TP=4), ~70GB VRAM
+# - Decode worker: 4x L40S GPUs (TP=4), ~70GB VRAM
+# - Total: 8x L40S GPUs (g6e.48xlarge or 2x g6e.24xlarge)
+# - OR: 8x H100 (p5.48xlarge)
+#
+# Features:
+# - EFS-backed model cache for fast restarts
+# - Separate prefill/decode workers for optimized inference
+# - SGLang backend for PCIe multi-GPU compatibility
+# - Dense architecture (no MoE complexity)
+# - Strong reasoning capabilities from R1 distillation
+#
+# Architecture:
+# - Frontend routes requests to prefill worker
+# - Prefill worker processes context and transfers KV cache
+# - Decode worker generates tokens using transferred cache
+# - Better GPU utilization for mixed workloads
+#
+# Use cases:
+# - Production workloads with mixed prompt lengths
+# - High-throughput reasoning inference
+# - Workloads benefiting from specialized prefill/decode tuning
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: sglang-deepseek-70b-disagg
+  namespace: dynamo
+spec:
+  # Use shared HF cache from EFS
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+
+  # Set HF_HOME for model caching
+  envs:
+    - name: HF_HOME
+      value: "/models"
+
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    SglangPrefillWorker:
+      # PREFILL WORKER: Handles context processing
+      envFromSecret: hf-token-secret
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "24"
+          memory: "150Gi"
+          gpu: "4"
+        limits:
+          cpu: "24"
+          memory: "150Gi"
+          gpu: "4"
+      sharedMemory:
+        size: 24Gi
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            # SGLang PREFILL WORKER with --is-prefill-worker flag
+            - |
+              python3 -m dynamo.sglang \
+                --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
+                --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
+                --tp 4 \
+                --trust-remote-code \
+                --mem-fraction-static 0.85 \
+                --is-prefill-worker \
+                2>&1 | tee /tmp/sglang-prefill.log
+
+    SglangDecodeWorker:
+      # DECODE WORKER: Handles token generation
+      envFromSecret: hf-token-secret
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "24"
+          memory: "150Gi"
+          gpu: "4"
+        limits:
+          cpu: "24"
+          memory: "150Gi"
+          gpu: "4"
+      sharedMemory:
+        size: 24Gi
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            # SGLang DECODE WORKER without --is-prefill-worker flag
+            - |
+              python3 -m dynamo.sglang \
+                --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
+                --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
+                --tp 4 \
+                --trust-remote-code \
+                --mem-fraction-static 0.85 \
+                2>&1 | tee /tmp/sglang-decode.log

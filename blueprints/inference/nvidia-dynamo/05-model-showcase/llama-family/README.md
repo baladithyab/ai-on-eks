@@ -2,17 +2,15 @@
 
 This directory demonstrates Meta's industry-standard Llama model family running on NVIDIA Dynamo.
 
-## Models
+## Available Blueprints
 
 ### Llama 3.3-70B-Instruct (`meta-llama/Llama-3.3-70B-Instruct`)
-- **Size:** 70 billion parameters
-- **GPU Requirements:** 8x GPUs (TP=8) - p5.48xlarge (8x H100)
-- **VRAM:** ~140GB for model weights
-- **Context Length:** Up to 128K tokens
-- **Capabilities:** Instruction following, reasoning, coding, multilingual
-- **Backend Support:** vLLM, TensorRT-LLM
 
-**Blueprint:** [`vllm-llama-3.3-70b.yaml`](vllm-llama-3.3-70b.yaml)
+| Blueprint | Backend | Architecture | GPUs | Status |
+|-----------|---------|--------------|------|--------|
+| [`vllm-llama-3.3-70b.yaml`](vllm-llama-3.3-70b.yaml) | vLLM | Aggregated | 8 (TP=8) | ⚠️ Requires p5 (NVLink) |
+| [`sglang-aggregated-llama-3.3-70b.yaml`](sglang-aggregated-llama-3.3-70b.yaml) | SGLang | Aggregated | 4 (TP=4) | 🧪 New - g6e.24xlarge |
+| [`sglang-disaggregated-llama-3.3-70b.yaml`](sglang-disaggregated-llama-3.3-70b.yaml) | SGLang | Disaggregated | 8 (TP=4 x 2) | ⏳ Untested - requires 8 GPUs |
 
 ## Why Llama?
 
@@ -25,29 +23,44 @@ Meta's Llama family is the industry-standard for open LLMs:
 - **Multilingual** - Strong performance across multiple languages
 - **Active ecosystem** - Extensive fine-tuning, tooling, and community support
 
-## Available Variants
+## Hardware Requirements
 
-### Core Tier (Fast Testing)
-The Core tier uses **Qwen3-0.6B** for feature demonstrations. This allows testing Dynamo features without the overhead of large model loading.
+| Configuration | Instance | GPUs | VRAM | TP |
+|--------------|----------|------|------|-----|
+| SGLang Aggregated (PCIe) | g6e.24xlarge | 4x L40S | 192GB | 4 |
+| SGLang Aggregated (NVLink) | p5.48xlarge | 8x H100 | 640GB | 8 |
+| SGLang Disaggregated | g6e.48xlarge or p5 | 8x GPUs | 384GB+ | 4 x 2 |
+| vLLM Aggregated | p5.48xlarge | 8x H100 | 640GB | 8 |
 
-### Advanced Tier
-For production Llama deployments, see:
-- `04-experimental/lws-multinode/llama3-70b-lws.yaml` - Multi-node LeaderWorkerSet deployment
+**Note:** 70B model requires ~140GB VRAM (BF16). On g6e.24xlarge (192GB total), TP=4 provides sufficient memory with KV cache headroom.
+
+## Backend Recommendations
+
+### SGLang (Recommended for PCIe)
+SGLang is **recommended** for PCIe-based GPU topologies (g5, g6, g6e):
+- Different tensor parallelism coordination mechanism
+- Avoids vLLM's `shm_broadcast` deadlock on PCIe topologies
+- TP=4 fits on g6e.24xlarge (4x L40S)
+
+### vLLM
+vLLM works well for **NVLink-connected** GPUs:
+- ⚠️ TP>1 on PCIe may experience deadlock
+- p5 instances (H100 with NVLink) recommended for vLLM
 
 ## Quick Start
 
 ```bash
-# Navigate to blueprints directory
-cd ai-on-eks/blueprints/inference/nvidia-dynamo
-
-# Deploy Llama 3.3-70B (requires p5.48xlarge node pool)
-./deploy.sh 05-model-showcase/llama-family/vllm-llama-3.3-70b.yaml
+# Deploy SGLang Llama-3.3-70B (requires g6e.24xlarge or larger)
+kubectl apply -f sglang-aggregated-llama-3.3-70b.yaml
 
 # Wait for Ready status (model loading takes 10-20 minutes)
 kubectl get dgd -n dynamo -w
 
+# Test health
+curl http://<frontend-svc>:8000/health
+
 # Test inference
-curl -X POST http://$(kubectl get svc -n dynamo vllm-llama-3.3-70b-frontend -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'):8000/v1/chat/completions \
+curl -X POST http://<frontend-svc>:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-3.3-70B-Instruct",
@@ -58,38 +71,17 @@ curl -X POST http://$(kubectl get svc -n dynamo vllm-llama-3.3-70b-frontend -o j
   }'
 ```
 
-## Hardware Requirements
+## Architecture Patterns
 
-| Model | Parameters | Min GPUs | Recommended Instance | VRAM |
-|-------|------------|----------|---------------------|------|
-| Llama-3.3-70B | 70B | 8x H100 | p5.48xlarge | ~140GB |
-| Llama-3.1-70B | 70B | 8x H100 | p5.48xlarge | ~140GB |
-| Llama-3.1-8B | 8B | 1x A10G | g5.2xlarge | ~16GB |
+### Aggregated (Single Worker)
+- Single worker handles both prefill and decode
+- TP=4 on g6e.24xlarge (4x L40S, 192GB VRAM)
+- Best for: Development, cost-effective production
 
-## Features Demonstrated
-
-| Feature | Llama-3.3-70B |
-|---------|---------------|
-| Tensor Parallelism | TP=8 |
-| Architecture | Aggregated |
-| EFS Model Cache | ✓ |
-| Health Probes | ✓ |
-| Startup Probe | ✓ (5hr timeout) |
-| Max Context | 32K (configurable) |
-
-## Instruction Format
-
-Llama 3.x uses a specific chat format:
-
-```
-<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-You are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
-
-Hello, how are you?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-```
-
-The OpenAI-compatible API handles this formatting automatically.
+### Disaggregated (Prefill/Decode Split)  
+- Separate workers for prefill and decode phases
+- Requires 8 GPUs total (4 per worker)
+- Best for: High-throughput production with varied prompts
 
 ## Model Access
 
@@ -105,15 +97,20 @@ Llama 3.3 requires Meta license acceptance:
      -n dynamo
    ```
 
-## Related Blueprints
+## Features Demonstrated
 
-- **Core tier:** See `01-core/` for Qwen3-0.6B feature demonstrations
-- **Standard tier:** See `02-standard/` for 8B model benchmarks
-- **Experimental:** See `04-experimental/lws-multinode/` for multi-node Llama
+| Feature | SGLang Aggregated | SGLang Disaggregated |
+|---------|-------------------|---------------------|
+| Tensor Parallelism | TP=4 | TP=4 x 2 workers |
+| Architecture | Aggregated | Prefill/Decode Split |
+| EFS Model Cache | ✓ | ✓ |
+| Health Probes | ✓ | ✓ |
+| Startup Probe | ✓ (5hr timeout) | ✓ (5hr timeout) |
+| PCIe Compatible | ✓ | ✓ |
 
 ## Resources
 
 - [Meta AI Llama](https://llama.meta.com/)
 - [Llama 3.3 Model Card](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct)
-- [Llama 3 Paper](https://ai.meta.com/research/publications/llama-3-herd-of-models/)
+- [SGLang Project](https://github.com/sgl-project/sglang)
 - [vLLM Project](https://github.com/vllm-project/vllm)

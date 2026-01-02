@@ -40,6 +40,7 @@ echo "Fetching job spec..."
 kubectl get job "$JOB_NAME" -n "$NAMESPACE" -o json | \
   jq 'del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.managedFields, .status)' | \
   jq 'del(.spec.selector, .spec.template.metadata.labels["controller-uid"], .spec.template.metadata.labels["batch.kubernetes.io/controller-uid"])' | \
+  jq 'del(.spec.template.spec.nodeSelector)' | \
   jq '.spec.backoffLimit = '"$BACKOFF_LIMIT"'' | \
   jq '.spec.template.spec.volumes[0] |= if .name == "profiling-output" then del(.emptyDir) | .persistentVolumeClaim = {"claimName": "'"$PVC_NAME"'"} else . end' \
   > /tmp/profiler-job-patched.json

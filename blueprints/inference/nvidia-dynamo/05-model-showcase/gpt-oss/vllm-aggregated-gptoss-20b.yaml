@@ -8,8 +8,8 @@
 # issues found in disaggregated deployments on PCIe GPU topologies.
 #
 # Hardware Requirements:
-# - 1x g6e.12xlarge (4x L40S, 192GB VRAM total) or similar
-# - ~40GB VRAM for 20B model weights (TP=4)
+# - 1x g6e instance with ≥2x L40S (2 GPUs) recommended
+# - Using TP=2 for validation (note: vLLM TP>1 may still deadlock on PCIe)
 # - Single node deployment
 #
 # Features:
@@ -80,7 +80,7 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
@@ -112,11 +112,11 @@ spec:
         requests:
           cpu: "10"
           memory: "40Gi"
-          gpu: "4"
+          gpu: "2"
         limits:
           cpu: "10"
           memory: "40Gi"
-          gpu: "4"
+          gpu: "2"
       sharedMemory:
         size: 12Gi
       volumeMounts:
@@ -133,7 +133,7 @@ spec:
             periodSeconds: 60
             # 300 * 60s = 5 hours max startup time for large model loading
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
@@ -144,7 +144,7 @@ spec:
             - |
               python3 -m dynamo.vllm \
                 --model openai/gpt-oss-20b \
-                --tensor-parallel-size 4 \
+                --tensor-parallel-size 2 \
                 --max-model-len 8192 \
                 --gpu-memory-utilization 0.90 \
                 --enforce-eager \

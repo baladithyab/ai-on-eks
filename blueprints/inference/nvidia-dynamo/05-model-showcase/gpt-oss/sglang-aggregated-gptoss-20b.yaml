@@ -1,39 +1,33 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# vLLM Aggregated Deployment for GPT-OSS-20B
+# SGLang Aggregated Deployment for GPT-OSS-20B
 #
-# OpenAI's GPT-OSS-20B is a smaller reasoning model with tool calling support.
-# Uses AGGREGATED architecture (single worker) to bypass shared memory broadcast
-# issues found in disaggregated deployments on PCIe GPU topologies.
+# ALTERNATIVE to vLLM for PCIe GPU topologies (g5, g6, g6e instances).
+# 
+# vLLM with TP>1 on PCIe exhibits shared memory broadcast deadlock
+# (shm_broadcast.acquire_read stalls). SGLang uses different multi-GPU
+# coordination that may avoid this issue.
 #
 # Hardware Requirements:
-# - 1x g6e instance with ≥1x L40S (48GB) recommended
-# - Single-GPU deployment (TP=1) to avoid vLLM multi-GPU shared memory deadlock on PCIe
-# - Single node deployment
+# - 2x L40S GPUs (g6e.12xlarge) or 4x A10G (g5.12xlarge)
+# - Using TP=2 for PCIe-based deployments
 #
 # Features:
 # - EFS-backed model cache
 # - Reasoning parser (gpt_oss) for chain-of-thought
 # - Tool call parser (harmony) for function calling
-# - No inter-process communication (bypasses shared memory bug)
-# - RECOMMENDED pattern for large models until upstream bug fixed
+# - SGLang backend for better PCIe compatibility
 #
-# Use cases:
-# - Development and testing of reasoning pipelines
-# - Production inference when disaggregated fails
-# - Single-worker deployment for maximum reliability
-#
-# Why Aggregated?
-# - Disaggregated deployments hit shared memory broadcast synchronization
-#   deadlock on PCIe GPU topologies (tested: DeepSeek-70B, GPT-OSS-20B)
-# - Aggregated single-worker mode bypasses all inter-process communication
-# - Proven stable pattern for ai-on-eks deployments
+# Why SGLang over vLLM for PCIe?
+# - Different tensor parallelism coordination mechanism
+# - May avoid vLLM's shm_broadcast deadlock on PCIe topologies
+# - Proven stable on non-NVLink hardware in some configurations
 
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: vllm-gptoss-20b-agg
+  name: sglang-gptoss-20b-agg
   namespace: dynamo
 spec:
   # Use shared HF cache from EFS
@@ -80,17 +74,16 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
-          workingDir: /workspace/components/backends/vllm
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh
             - -c
           args:
             - "python3 -m dynamo.frontend --http-port 8000"
 
-    VllmWorker:
+    SglangWorker:
       # AGGREGATED: Single worker handles both prefill and decode
-      # NO inter-process communication = NO shared memory broadcast issues
       envFromSecret: hf-token-secret
       componentType: worker
       replicas: 1
@@ -112,11 +105,11 @@ spec:
         requests:
           cpu: "10"
           memory: "40Gi"
-          gpu: "1"
+          gpu: "2"
         limits:
           cpu: "10"
           memory: "40Gi"
-          gpu: "1"
+          gpu: "2"
       sharedMemory:
         size: 12Gi
       volumeMounts:
@@ -133,21 +126,20 @@ spec:
             periodSeconds: 60
             # 300 * 60s = 5 hours max startup time for large model loading
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
-          workingDir: /workspace/components/backends/vllm
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh
             - -c
           args:
-            # AGGREGATED MODE: Single worker, no --is-prefill-worker flag
-            # Full vLLM engine handles both prefill and decode phases
+            # SGLang AGGREGATED MODE with reasoning and tool calling support
             - |
-              python3 -m dynamo.vllm \
-                --model openai/gpt-oss-20b \
-                --tensor-parallel-size 1 \
-                --max-model-len 8192 \
-                --gpu-memory-utilization 0.90 \
-                --enforce-eager \
+              python3 -m dynamo.sglang \
+                --model-path openai/gpt-oss-20b \
+                --served-model-name openai/gpt-oss-20b \
+                --tp 2 \
+                --trust-remote-code \
+                --mem-fraction-static 0.85 \
                 --dyn-reasoning-parser gpt_oss \
                 --dyn-tool-call-parser harmony \
-                2>&1 | tee /tmp/vllm.log
+                2>&1 | tee /tmp/sglang.log
