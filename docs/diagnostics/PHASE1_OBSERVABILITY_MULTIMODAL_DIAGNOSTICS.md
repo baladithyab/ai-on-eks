@@ -2,7 +2,7 @@
 
 **Date:** December 22, 2025  
 **Cluster:** EKS with Bottlerocket NVIDIA AMI  
-**Dynamo Version:** v0.7.0.post1  
+**Dynamo Version:** v0.7.1  
 
 ---
 

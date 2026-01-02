@@ -2,12 +2,12 @@
 
 **Date**: 2025-12-11
 **Phase**: 14 - Deep-Dive Bug Investigation and Fix Development
-**Dynamo Version**: v0.7.0.post1
+**Dynamo Version**: v0.7.1
 **Last Updated**: 2025-12-11T07:18:01Z (Phase 14 Part 5 findings added)
 
 ## Executive Summary
 
-This document presents the results of a deep investigation into three critical bugs discovered during Phase 13 testing of NVIDIA Dynamo v0.7.0.post1 in the ai-on-eks infrastructure.
+This document presents the results of a deep investigation into three critical bugs discovered during Phase 13 testing of NVIDIA Dynamo v0.7.1 in the ai-on-eks infrastructure.
 
 ### Bugs Investigated
 
@@ -225,7 +225,7 @@ spec:
     spec:
       containers:
       - name: downloader
-        image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+        image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
         command: ["huggingface-cli"]
         args:
           - download

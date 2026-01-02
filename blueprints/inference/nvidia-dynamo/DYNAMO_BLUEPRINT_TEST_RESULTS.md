@@ -1,9 +1,9 @@
-# NVIDIA Dynamo v0.7.0 Modular Test Results
+# NVIDIA Dynamo v0.7.1 Modular Test Results
 
 **Test Date**: December 16, 2025  
 **Platform**: Amazon EKS with Bottlerocket AMI  
 **GPU Nodes**: g5.12xlarge (4x A10G), g6e.12xlarge (4x L40S), g6e.48xlarge (8x L40S)  
-**Dynamo Version**: v0.7.0  
+**Dynamo Version**: v0.7.1  
 **Test Framework**: Modular (test.sh + tests/ directory)
 
 ---
@@ -11,7 +11,7 @@
 ## Executive Summary
 
 **Test Date:** December 22, 2025
-**Dynamo Version:** 0.7.0.post1
+**Dynamo Version:** 0.7.1
 **Overall Pass Rate:** 87.5% (21/24 examples validated)
 
 ### Key Findings
@@ -21,7 +21,7 @@
 - **2 Reference CRDs Reclassified:** DynamoModel examples working as designed (Phase II)
 - **Remaining:** 3 examples require specific prerequisites (audit logging, multi-node)
 
-**Platform Status:** ✅ Production-ready at v0.7.0.post1
+**Platform Status:** ✅ Production-ready at v0.7.1
 
 | Tier | Passed | Failed | Skipped | Total | Pass Rate |
 |------|--------|--------|---------|-------|-----------|

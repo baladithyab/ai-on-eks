@@ -42,7 +42,7 @@ spec:
         # Grove: Network topology-aware gang scheduling and auto-scaling
         # Kai Scheduler: GPU-aware scheduler with queue management
         #
-        # NOTE: Grove v0.1.0-alpha.3 bundled with Dynamo v0.7.0 has a bug where
+        # NOTE: Grove v0.1.0-alpha.3 bundled with Dynamo v0.7.1 has a bug where
         # the cert-rotation controller triggers a pod restart on every startup,
         # causing crash loops. This is hardcoded behavior (RestartOnSecretRefresh=true)
         # that cannot be disabled via configuration.
@@ -71,7 +71,7 @@ spec:
 
         # NATS configuration - use EFS for JetStream persistence
         # Note: etcd inherits from global.storageClass, but NATS needs explicit setting
-        # v0.7.0 NEW: NATS can be disabled in favor of HTTP/TCP request plane
+        # v0.7.1 NEW: NATS can be disabled in favor of HTTP/TCP request plane
         # Set DYN_REQUEST_PLANE=http or DYN_REQUEST_PLANE=tcp in workload deployments
         nats:
           config:
@@ -81,7 +81,7 @@ spec:
                   storageClassName: efs-sc-dynamic
 
         # etcd configuration - disable JWT auth and pre-upgrade hook
-        # v0.7.0 NEW: etcd can be replaced with Kubernetes-native service discovery
+        # v0.7.1 NEW: etcd can be replaced with Kubernetes-native service discovery
         # Use operator flag: --discovery-backend=kubernetes
         # Or use filesystem-backed KeyValueStore for non-distributed deployments
         etcd:

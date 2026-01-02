@@ -23,7 +23,7 @@ TRT-LLM disaggregated deployment works flawlessly with the UCX_TLS fix applied. 
 Name: trtllm-disaggregated-default
 Namespace: dynamo
 Backend: TensorRT-LLM 1.2.0rc3
-Image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1
+Image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
 ```
 
 ### UCX_TLS Fix Present

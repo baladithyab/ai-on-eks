@@ -63,7 +63,7 @@ huggingface_token = "your-huggingface-token"
 #---------------------------------------------------------------
 # Multi-node orchestration with Grove + Kai Scheduler
 #
-# NOTE: Grove v0.1.0-alpha.3 bundled with Dynamo v0.7.0 has a bug where the
+# NOTE: Grove v0.1.0-alpha.3 bundled with Dynamo v0.7.1 has a bug where the
 # cert-rotation controller triggers a pod restart on every startup, causing
 # crash loops. This is hardcoded behavior (RestartOnSecretRefresh=true) that
 # cannot be disabled via configuration.

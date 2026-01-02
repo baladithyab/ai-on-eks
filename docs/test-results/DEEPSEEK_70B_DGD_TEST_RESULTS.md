@@ -58,7 +58,7 @@ g6-nvidia-jrh97:
 
 ## Container Image Details
 
-- **Image**: `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1`
+- **Image**: `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1`
 - **Size**: 8,774,413,640 bytes (~8.7GB)
 - **Pull time**: 1m38s (from NVCR)
 
@@ -170,7 +170,7 @@ spec:
     spec:
       containers:
       - name: downloader
-        image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+        image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
         command: ["huggingface-cli", "download", "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"]
         env:
         - name: HF_HOME

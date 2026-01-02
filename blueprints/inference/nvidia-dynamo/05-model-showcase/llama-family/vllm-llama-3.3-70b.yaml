@@ -74,7 +74,7 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
@@ -125,7 +125,7 @@ spec:
             periodSeconds: 60
             # 300 * 60s = 5 hours max startup time for large model loading
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh

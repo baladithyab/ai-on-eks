@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #---------------------------------------------------------------
-# NVIDIA Dynamo v0.7.0 Enhanced Testing Script
+# NVIDIA Dynamo v0.7.1 Enhanced Testing Script
 #
 # Comprehensive testing script for deployed Dynamo examples.
 # Supports all backends (vLLM, SGLang, TensorRT-LLM), multimodal,
@@ -116,7 +116,7 @@ print_banner() {
 
 show_help() {
     cat <<'HELP'
-NVIDIA Dynamo v0.7.0 Enhanced Testing Script
+NVIDIA Dynamo v0.7.1 Enhanced Testing Script
 
 Comprehensive testing script for deployed Dynamo examples.
 Supports all backends (vLLM, SGLang, TensorRT-LLM), multimodal,

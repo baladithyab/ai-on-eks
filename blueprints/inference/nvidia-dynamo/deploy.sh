@@ -37,7 +37,7 @@ CATALOG_FILE="${SCRIPT_DIR}/catalog/catalog.yaml"
 
 # Dynamo version management
 TFVARS_FILE="${SCRIPT_DIR}/../../../infra/nvidia-dynamo/terraform/blueprint.tfvars"
-DEFAULT_VERSION="v0.7.0.post1"  # Fallback if tfvars file not found
+DEFAULT_VERSION="v0.7.1"  # Fallback if tfvars file not found
 VERSION_SOURCE=""  # Track where version came from
 
 # Utility functions
@@ -484,7 +484,7 @@ info "Primary name: ${RESOURCE_NAME}"
 info "Namespace: ${TARGET_NAMESPACE}"
 
 #---------------------------------------------------------------
-# Version tag patching (safe, avoids :0.7.0.post1.post1 drift)
+# Version tag patching (safe, avoids :0.7.1.post1 drift)
 #---------------------------------------------------------------
 
 VERSION_TAG="${DYNAMO_VERSION#v}"

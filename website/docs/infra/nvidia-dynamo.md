@@ -207,7 +207,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true # Required for NVIDIA Dynamo high-performance networking
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.7.0.post1"
+dynamo_stack_version             = "v0.7.1"
 
 # Required Secrets - Replace with your actual tokens
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -256,7 +256,7 @@ For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `dynamo_stack_version` | string | `"v0.7.0.post1"` | Dynamo platform version to deploy |
+| `dynamo_stack_version` | string | `"v0.7.1"` | Dynamo platform version to deploy |
 | `dynamo_enable_grove` | bool | `false` | Enable Grove for multi-node inference coordination |
 | `dynamo_enable_kai_scheduler` | bool | `false` | Enable Kai Scheduler for intelligent resource allocation |
 | `dynamo_operator_namespace_restriction_enabled` | bool | `false` | Restrict operator to dynamo namespace only |
@@ -265,7 +265,7 @@ For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](
 #### dynamo_stack_version
 
 **Type**: `string`
-**Default**: `"v0.7.0"`
+****Default**: `"v0.7.1"`
 **Example**: `"v0.5.1"` (for rollback)
 
 :::info What's New in v0.6.1
@@ -293,7 +293,7 @@ Specifies the NVIDIA Dynamo platform version to deploy. This determines which He
 
 **Example:**
 ```hcl
-dynamo_stack_version = "v0.7.0.post1"
+dynamo_stack_version = "v0.7.1"
 ```
 
 :::tip Version Updates
@@ -438,7 +438,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.7.0.post1"
+dynamo_stack_version             = "v0.7.1"
 
 # Required Secrets
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -458,7 +458,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.7.0.post1"
+dynamo_stack_version             = "v0.7.1"
 
 # Required Secrets
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -476,7 +476,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.7.0.post1"
+dynamo_stack_version             = "v0.7.1"
 
 # Required Secrets
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"

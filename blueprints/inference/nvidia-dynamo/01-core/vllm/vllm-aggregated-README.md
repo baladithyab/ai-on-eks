@@ -38,7 +38,7 @@ Frontend:
     nodeSelector:
       karpenter.sh/nodepool: cpu-karpenter  # CPU-only node (cost effective)
     mainContainer:
-      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
       workingDir: /workspace/components/backends/vllm
       args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
   livenessProbe:
@@ -76,7 +76,7 @@ VllmWorker:
       operator: Exists
       effect: NoSchedule
     mainContainer:
-      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
       workingDir: /workspace/components/backends/vllm
       args: ["python3", "-m", "dynamo.vllm", "--model", "Qwen/Qwen3-0.6B", "2>&1", "|", "tee", "/tmp/vllm.log"]
   envs:

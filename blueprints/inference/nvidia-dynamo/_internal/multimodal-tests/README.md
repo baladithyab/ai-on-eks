@@ -69,7 +69,7 @@ chmod +x test-image-base64.sh
 ### 3. `test-video.sh` - Video Understanding Testing
 Tests Qwen2.5-VL video understanding capabilities with long videos.
 
-**⚠️ Current Limitation**: Direct video URL processing is **not supported** in NVIDIA Dynamo v0.7.0 through the OpenAI API. Video files must be preprocessed into frames before sending to the API.
+**⚠️ Current Limitation**: Direct video URL processing is **not supported** in NVIDIA Dynamo v0.7.1 through the OpenAI API. Video files must be preprocessed into frames before sending to the API.
 
 **Compatible Models:**
 - ⚠️ Qwen2.5-VL 7B Video (`Qwen/Qwen2.5-VL-7B-Instruct` with video config) - Requires frame extraction
@@ -323,7 +323,7 @@ All scripts use the OpenAI-compatible chat completions API format:
 ```
 
 ### Video Input Format (Not Currently Supported via API)
-**Note**: Direct video input is not supported in NVIDIA Dynamo v0.7.0. Use multi-image input with extracted frames instead.
+**Note**: Direct video input is not supported in NVIDIA Dynamo v0.7.1. Use multi-image input with extracted frames instead.
 
 **Workaround - Multi-Image Input for Video Frames:**
 ```json

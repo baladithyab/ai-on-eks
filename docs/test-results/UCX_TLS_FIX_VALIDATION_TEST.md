@@ -14,7 +14,7 @@
 | Model | openai/gpt-oss-20b |
 | Architecture | Disaggregated (prefill + decode workers) |
 | Hardware | g6.48xlarge (8x L40S GPUs) |
-| Runtime | nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1 |
+| Runtime | nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1 |
 
 ## Fix Implementation
 

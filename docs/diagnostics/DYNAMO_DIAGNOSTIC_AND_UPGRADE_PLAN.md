@@ -99,10 +99,10 @@ We have identified three distinct categories of failures. This framework defines
 
 ## 4. Phase III Strategy: Dynamo 0.8.0 Upgrade Analysis
 
-**Objective:** Plan the upgrade from v0.7.0.post1 to v0.8.0.
+**Objective:** Plan the upgrade from v0.7.1 to v0.8.0.
 
 ### 4.1 Version Delta Analysis
-*   **Current:** v0.7.0.post1 (Container), v0.7.0 (Helm Chart)
+*   **Current:** v0.7.1 (Container), v0.7.0 (Helm Chart)
 *   **Target:** v0.8.0
 *   **Key Changes to Investigate:**
     *   **Helm Chart:** `dynamo/deploy/helm/chart/Chart.yaml` is already at 0.8.0 in the repo. This suggests the repo is ahead of the deployed version.
@@ -119,7 +119,7 @@ We have identified three distinct categories of failures. This framework defines
     *   Review all 48 example blueprints for deprecated fields.
     *   Specifically check `backendFramework` configuration and `resources` blocks.
 3.  **Testing Plan:**
-    *   **Pre-Upgrade:** Run full regression suite on 0.7.0.post1 (establish baseline).
+    *   **Pre-Upgrade:** Run full regression suite on 0.7.1 (establish baseline).
     *   **Upgrade:** Apply Terraform changes.
     *   **Post-Upgrade:** Run regression suite. Focus on:
         *   Basic Inference (vLLM, SGLang, TRT-LLM)
@@ -198,7 +198,7 @@ We have identified three distinct categories of failures. This framework defines
 - **Finalize Artifacts** (15 min)
   - Update [`DYNAMO_BLUEPRINT_TEST_RESULTS.md`](ai-on-eks/blueprints/inference/nvidia-dynamo/DYNAMO_BLUEPRINT_TEST_RESULTS.md) with corrected pass rate (87.5%)
   - Commit diagnostic reports to git
-  - Tag commit: `diagnostic-complete-v0.7.0.post1`
+  - Tag commit: `diagnostic-complete-v0.7.1`
 
 **Success Criteria:**
 - ✅ 3 observability examples passing
@@ -224,7 +224,7 @@ We have identified three distinct categories of failures. This framework defines
 - [ ] Verify operator pods running v0.8.0
 
 **Blueprint Updates:**
-- [ ] Bulk update image tags in all 48 blueprints (0.7.0.post1 → 0.8.0)
+- [ ] Bulk update image tags in all 48 blueprints (0.7.1 → 0.8.0)
 - [ ] Apply observability fixes
 - [ ] Review backend-specific changes:
   - vLLM 0.6.4 → 0.12.0 compatibility
@@ -236,7 +236,7 @@ We have identified three distinct categories of failures. This framework defines
 - [ ] Backend coverage (all 3 backends tested)
 - [ ] Run `./test-all-tiers.sh core` for Tier 1 regression
 - [ ] Run `./test-all-tiers.sh standard` for Tier 2 regression
-- [ ] Compare results to v0.7.0.post1 baseline
+- [ ] Compare results to v0.7.1 baseline
 
 **Documentation:**
 - [ ] Update main README with v0.8.0 features

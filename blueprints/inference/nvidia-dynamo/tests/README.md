@@ -1,6 +1,6 @@
 # NVIDIA Dynamo Test Organization
 
-This directory contains a modular test suite for NVIDIA Dynamo v0.7.0 deployments on EKS.
+This directory contains a modular test suite for NVIDIA Dynamo v0.7.1 deployments on EKS.
 
 ## Directory Structure
 

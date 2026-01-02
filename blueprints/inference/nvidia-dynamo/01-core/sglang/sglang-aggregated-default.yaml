@@ -39,7 +39,7 @@ spec:
           memory: "10Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
           workingDir: /workspace/components/backends/sglang
           command: ["sh", "-c"]
           args:
@@ -80,7 +80,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
           workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh

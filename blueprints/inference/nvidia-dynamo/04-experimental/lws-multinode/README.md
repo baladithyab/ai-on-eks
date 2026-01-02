@@ -29,7 +29,7 @@ LeaderWorkerSet (LWS) is a Kubernetes SIG project that provides a standardized w
 1. **EKS Cluster** with GPU nodes (e.g., p5.48xlarge, p4d.24xlarge)
 2. **LeaderWorkerSet Operator** (v0.7.0+)
 3. **Volcano Scheduler**
-4. **Dynamo Operator** (v0.7.0.post1+)
+4. **Dynamo Operator** (v0.7.1+)
 5. **NVIDIA GPU Operator**
 
 ### Installation

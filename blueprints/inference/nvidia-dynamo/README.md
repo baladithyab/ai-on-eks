@@ -1,8 +1,8 @@
-# NVIDIA Dynamo v0.7.0 Inference Examples
+# NVIDIA Dynamo v0.7.1 Inference Examples
 
-This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.7.0 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
+This directory contains production-ready examples for deploying different inference backends using NVIDIA Dynamo v0.7.1 on Amazon EKS. These examples use official NGC prebuilt containers with `DynamoGraphDeployment` manifests for GitOps-based deployment via ArgoCD.
 
-## 🆕 What's New in v0.7.0
+## 🆕 What's New in v0.7.1
 
 **Infrastructure Modernization:**
 - ✅ **NATS Removal Path**: HTTP/TCP transport alternatives via `DYN_REQUEST_PLANE` env var
@@ -477,9 +477,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 ### NGC Container Images
 All examples use official NVIDIA NGC prebuilt containers with full source code:
-- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1`
-- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.0.post1`
-- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.0.post1`
+- `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1`
+- `nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1`
+- `nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.1`
 
 **Key Features:**
 - ✅ **Full Source Included**: All Python code available at `/workspace/`
@@ -545,7 +545,7 @@ args: ["--router-mode kv --kv-overlap-score-weight 1.0"]
 Dynamo supports mixing different inference backends:
 - **Cross-Discovery**: SGLang frontend can serve vLLM models
 - **Model Aggregation**: Single API serving multiple backends
-- **Namespace Isolation**: Use `dynamoNamespace` for logical separation (⚠️ deprecated in v0.7.0+)
+- **Namespace Isolation**: Use `dynamoNamespace` for logical separation (⚠️ deprecated in v0.7.1+)
 
 ### Multi-Node Inference Options
 
@@ -592,7 +592,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -610,7 +610,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           args: ["python3", "-m", "dynamo.vllm", "--model", "Qwen/Qwen3-0.6B"]
 ```
 
@@ -849,7 +849,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: cpu-karpenter  # CPU-only frontend
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.frontend", "--http-port", "8000"]
 
@@ -871,7 +871,7 @@ spec:
           operator: Exists
           effect: NoSchedule
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.vllm", "--model", "your-model-here"]
 ```
@@ -1341,7 +1341,7 @@ Modified `blueprints/inference/nvidia-dynamo/trtllm/trtllm-disaggregated-default
 
 ### `dynamoNamespace` Field Deprecation Notice
 
-**Status**: ⚠️ Deprecated in v0.7.0+
+**Status**: ⚠️ Deprecated in v0.7.1+
 
 The `dynamoNamespace` field in DynamoGraphDeployment specs is officially deprecated. From the CRD schema:
 

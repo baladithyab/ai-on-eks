@@ -118,11 +118,11 @@ See the [Infrastructure Guide](https://awslabs.github.io/ai-on-eks/docs/infra/nv
 
 ```bash
 # Override version via environment variable
-export DYNAMO_VERSION=v0.7.0
+export DYNAMO_VERSION=v0.7.1
 ./deploy.sh vllm-aggregated-default
 
 # Or inline
-DYNAMO_VERSION=v0.7.0 ./deploy.sh sglang-aggregated-default
+DYNAMO_VERSION=v0.7.1 ./deploy.sh sglang-aggregated-default
 ```
 
 **Key Benefits of Prebuilt Containers:**
@@ -130,7 +130,7 @@ DYNAMO_VERSION=v0.7.0 ./deploy.sh sglang-aggregated-default
 - **Faster Deployment**: Skip 20+ minute build process
 - **Consistent Experience**: NVIDIA-tested and validated images
 - **Version Management**: Automatic version detection from `blueprint.tfvars`
-- **Override Support**: Use `DYNAMO_VERSION=v0.7.0 ./deploy.sh` to override version
+- **Override Support**: Use `DYNAMO_VERSION=v0.7.1 ./deploy.sh` to override version
 
 </CollapsibleContent>
 
@@ -240,7 +240,7 @@ spec:
           memory: "2Gi"
       extraPodSpec:                 # Additional pod configuration
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.frontend"]
           args: ["--http-port", "8000"]
@@ -275,7 +275,7 @@ spec:
         nodeSelector:               # Node selection
           karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args:
@@ -449,7 +449,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.frontend"]
           args: ["--http-port", "8000"]
@@ -485,7 +485,7 @@ spec:
           karpenter.sh/nodepool: g5-gpu-karpenter
           node.kubernetes.io/instance-type: g5.48xlarge  # 8x A10G GPUs
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args:
@@ -535,7 +535,7 @@ The `deploy.sh` script automates the deployment process:
 ./deploy.sh vllm-aggregated-default
 
 # With version override
-DYNAMO_VERSION=v0.7.0 ./deploy.sh sglang-aggregated-default
+DYNAMO_VERSION=v0.7.1 ./deploy.sh sglang-aggregated-default
 
 # Skip ServiceMonitor creation
 SKIP_SERVICE_MONITOR=true ./deploy.sh trtllm-aggregated-default
@@ -686,21 +686,21 @@ The deployment automatically creates:
 The deployment automatically manages Dynamo versions with flexible override options:
 
 **Default Behavior:**
-- Reads version from `terraform/blueprint.tfvars` (`dynamo_stack_version = "v0.7.0"`)
+- Reads version from `terraform/blueprint.tfvars` (`dynamo_stack_version = "v0.7.1"`)
 - Automatically updates container image tags in YAML manifests
 - Creates temporary manifests without modifying source files
 
 **Override Options:**
 ```bash
 # Environment variable (highest priority)
-export DYNAMO_VERSION=v0.7.0
+export DYNAMO_VERSION=v0.7.1
 ./deploy.sh vllm
 
 # Inline override
-DYNAMO_VERSION=v0.7.0 ./deploy.sh sglang
+DYNAMO_VERSION=v0.7.1 ./deploy.sh sglang
 
 # Update terraform/blueprint.tfvars (persistent)
-dynamo_stack_version = "v0.7.0"
+dynamo_stack_version = "v0.7.1"
 ```
 
 **Version Management:**
@@ -1257,7 +1257,7 @@ spec:
   backend: vllm
 
   profilingConfig:
-    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0"
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
     config:
       deployment:
         timeout: 2400  # Model loading timeout (seconds)
@@ -1274,7 +1274,7 @@ spec:
         itl: 30.0      # Inter-Token Latency (ms)
 
   deploymentOverrides:
-    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0"
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
 
   autoApply: true  # Auto-deploy after profiling
 ```

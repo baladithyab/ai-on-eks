@@ -39,7 +39,7 @@ spec:
           memory: "2Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
@@ -81,7 +81,7 @@ spec:
             operator: Exists
             effect: NoSchedule
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.0.post1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
           workingDir: /workspace/components/backends/trtllm
           startupProbe:
             httpGet:

@@ -100,7 +100,7 @@ Frontend:
     nodeSelector:
       karpenter.sh/nodepool: cpu-karpenter  # CPU-only nodes
     mainContainer:
-      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
       workingDir: /workspace/examples/runtime/hello_world/
       args: ["python3", "client.py"]
   livenessProbe:
@@ -133,7 +133,7 @@ HelloWorldWorker:
     nodeSelector:
       karpenter.sh/nodepool: cpu-karpenter  # CPU-only nodes
     mainContainer:
-      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1
+      image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
       workingDir: /workspace/examples/runtime/hello_world/
       args: ["python3", "hello_world.py", "2>&1", "|", "tee", "/tmp/hello_world.log"]
   readinessProbe:

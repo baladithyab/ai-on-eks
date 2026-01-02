@@ -1,8 +1,8 @@
-# DGDR EFS Storage Workaround for v0.7.0
+# DGDR EFS Storage Workaround for v0.7.1
 
 ## Problem
 
-The Dynamo v0.7.0 Kubernetes operator uses `emptyDir` volumes for DGDR profiling output, which consumes ephemeral storage on the node. For large models like Qwen2.5-Coder-32B that require 3-4+ hours of profiling, this can lead to ephemeral storage exhaustion and pod eviction.
+The Dynamo v0.7.1 Kubernetes operator uses `emptyDir` volumes for DGDR profiling output, which consumes ephemeral storage on the node. For large models like Qwen2.5-Coder-32B that require 3-4+ hours of profiling, this can lead to ephemeral storage exhaustion and pod eviction.
 
 **Error observed:**
 ```
@@ -12,10 +12,10 @@ Threshold quantity: 3210844697, available: 1303256Ki
 
 ## Root Cause
 
-The v0.7.0 operator hardcodes `emptyDir` volumes in the profiler job:
+The v0.7.1 operator hardcodes `emptyDir` volumes in the profiler job:
 
 ```go
-// v0.7.0 code in dynamographdeploymentrequest_controller.go
+// v0.7.1 code in dynamographdeploymentrequest_controller.go
 volumes := []corev1.Volume{{
     Name: VolumeNameProfilingOutput,
     VolumeSource: corev1.VolumeSource{
@@ -24,7 +24,7 @@ volumes := []corev1.Volume{{
 }}
 ```
 
-The `outputPVC` field that allows specifying a PVC was added in later commits (after v0.7.0):
+The `outputPVC` field that allows specifying a PVC was added in later commits (after v0.7.1):
 - `36f58e365` - "feat: add an optional PVC mounting option to DGDR for profiling (#4503)"
 - `0bfbfb95c` - "feat: use PVC if specified in profiling job"
 
@@ -105,7 +105,7 @@ kubectl exec -n dynamo <profiler-pod> -c profiler -- df -h /data
 
 ## Future
 
-When upgrading to a Dynamo operator version > v0.7.0, you can use the native `outputPVC` field:
+When upgrading to a Dynamo operator version > v0.7.1, you can use the native `outputPVC` field:
 
 ```yaml
 apiVersion: nvidia.com/v1alpha1

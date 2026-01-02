@@ -3,19 +3,19 @@
 **Date:** December 22, 2025
 **Author:** Kilo Code (Architect)
 **Target Version:** Dynamo v0.8.0
-**Current Version:** Dynamo v0.7.0.post1
+**Current Version:** Dynamo v0.7.1
 
 ## 1. Executive Summary
 
-The upgrade from Dynamo v0.7.0.post1 to v0.8.0 represents a significant architectural evolution, focusing on simplification and Kubernetes-native integration. The most critical changes are the shift to **TCP as the default request plane** (replacing NATS for data plane traffic) and **Kubernetes-backed service discovery** (replacing etcd for control plane discovery). These changes reduce the infrastructure footprint and complexity, making Dynamo more robust and easier to operate on EKS.
+The upgrade from Dynamo v0.7.1 to v0.8.0 represents a significant architectural evolution, focusing on simplification and Kubernetes-native integration. The most critical changes are the shift to **TCP as the default request plane** (replacing NATS for data plane traffic) and **Kubernetes-backed service discovery** (replacing etcd for control plane discovery). These changes reduce the infrastructure footprint and complexity, making Dynamo more robust and easier to operate on EKS.
 
 **Recommendation:** **GO**.
 The architectural simplifications align perfectly with the `ai-on-eks` goals of providing a scalable, cloud-native AI platform. The removal of strict dependencies on etcd and NATS for core operations reduces failure domains.
 
 ### Key Version Changes
-| Component | v0.7.0.post1 | v0.8.0 | Notes |
+| Component | v0.7.1 | v0.8.0 | Notes |
 |-----------|--------------|--------|-------|
-| **Dynamo Core** | 0.7.0.post1 | 0.8.0 | TCP default, K8s discovery default |
+| **Dynamo Core** | 0.7.1 | 0.8.0 | TCP default, K8s discovery default |
 | **vLLM** | 0.6.3 (approx) | 0.12.0 | Major version bump |
 | **SGLang** | 0.3.x | 0.5.6.post2 | Significant update |
 | **TensorRT-LLM** | 0.15.x | 1.2.0rc4 | Major version bump |
@@ -58,8 +58,8 @@ The architectural simplifications align perfectly with the `ai-on-eks` goals of 
 ## 4. Blueprint Compatibility Assessment
 
 ### 4.1. Image Tags
-**CRITICAL:** All 48 blueprint examples currently hardcode the image tag `0.7.0.post1`.
-*   **Action:** A bulk update is required to change `image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post1` (and similar) to `image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0`.
+**CRITICAL:** All 48 blueprint examples currently hardcode the image tag `0.7.1`.
+*   **Action:** A bulk update is required to change `image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1` (and similar) to `image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0`.
 
 ### 4.2. Configuration
 *   **Resources:** Existing blueprints already use the nested `resources: { requests: ..., limits: ... }` structure, so they are compatible with the updated Helm chart templates.
@@ -95,7 +95,7 @@ The architectural simplifications align perfectly with the `ai-on-eks` goals of 
 ### Phase 3: Blueprint Migration
 1.  **Bulk Update Script:**
     ```bash
-    find ai-on-eks/blueprints -name "*.yaml" -exec sed -i 's/0.7.0.post1/0.8.0/g' {} +
+    find ai-on-eks/blueprints -name "*.yaml" -exec sed -i 's/0.7.1/0.8.0/g' {} +
     ```
 2.  **Validation:**
     *   Deploy `01-core/hello-world`.

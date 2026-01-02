@@ -460,9 +460,9 @@ variable "enable_dynamo_stack" {
 }
 
 variable "dynamo_stack_version" {
-  description = "NVIDIA Dynamo Stack version for platform Helm charts. Note: Container images may use different versions (e.g., 0.7.0.post1)"
+  description = "NVIDIA Dynamo Stack version for platform Helm charts. Note: Container images may use different versions (e.g., 0.7.1)"
   type        = string
-  default     = "v0.7.0"
+  default     = "v0.7.1"
 }
 
 # NVIDIA Dynamo Platform-Level Features

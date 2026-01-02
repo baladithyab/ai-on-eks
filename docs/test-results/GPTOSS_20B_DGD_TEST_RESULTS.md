@@ -188,7 +188,7 @@ This is the **same issue** observed in the DeepSeek-70B DGD test:
 - Workers load models successfully
 - Workers stuck on "No available shared memory broadcast block found"
 - Frontend never receives worker registrations
-- This appears to be a systemic issue with disaggregated deployment mode in Dynamo v0.7.0.post1
+- This appears to be a systemic issue with disaggregated deployment mode in Dynamo v0.7.1
 
 ### Recommendations
 

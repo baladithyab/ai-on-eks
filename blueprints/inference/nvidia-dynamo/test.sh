@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# NVIDIA Dynamo v0.7.0 Modular Testing Script
+# NVIDIA Dynamo v0.7.1 Modular Testing Script
 #
 # A modular test router that runs general tests by default and supports
 # targeted tests via flags for specific features.
@@ -69,7 +69,7 @@ error() {
 
 show_help() {
     cat <<'HELP'
-NVIDIA Dynamo v0.7.0 Modular Testing Script
+NVIDIA Dynamo v0.7.1 Modular Testing Script
 
 A modular test router that runs general tests by default and supports
 targeted tests via flags for specific features.
@@ -314,7 +314,7 @@ run_performance_tests() {
 main() {
     echo ""
     echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║        NVIDIA Dynamo v0.7.0 Modular Testing                  ║${NC}"
+    echo -e "${BLUE}║        NVIDIA Dynamo v0.7.1 Modular Testing                  ║${NC}"
     echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
