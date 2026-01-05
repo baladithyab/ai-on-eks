@@ -1,0 +1,385 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo Blueprint Validation - GitHub Actions Workflow Template
+# =============================================================================
+#
+# This workflow template validates NVIDIA Dynamo blueprints on PR creation
+# and updates. It runs YAML linting, standards validation, and reports
+# results as PR comments.
+#
+# INSTALLATION:
+#   1. Copy this file to your repository's .github/workflows/ directory
+#   2. Remove the .template extension
+#   3. Adjust paths and settings as needed
+#
+# REQUIREMENTS:
+#   - Repository must have the scripts/validate-blueprint.sh script
+#   - Repository must have the .yamllint.yml configuration
+#
+# =============================================================================
+
+name: Validate Dynamo Blueprints
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'ai-on-eks/blueprints/inference/nvidia-dynamo/**/*.yaml'
+      - 'ai-on-eks/blueprints/inference/nvidia-dynamo/**/*.yml'
+      - 'ai-on-eks/blueprints/inference/nvidia-dynamo/scripts/*.sh'
+  push:
+    branches:
+      - main
+    paths:
+      - 'ai-on-eks/blueprints/inference/nvidia-dynamo/**/*.yaml'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: 'Tier to validate (core, standard, advanced, all)'
+        required: false
+        default: 'all'
+
+env:
+  BLUEPRINT_DIR: ai-on-eks/blueprints/inference/nvidia-dynamo
+
+jobs:
+  # ===========================================================================
+  # YAML Linting Job
+  # ===========================================================================
+  yamllint:
+    name: YAML Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for changed file detection
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Get Changed Files
+        id: changed-files
+        uses: tj-actions/changed-files@v42
+        with:
+          files: |
+            ${{ env.BLUEPRINT_DIR }}/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/**/*.yml
+          files_ignore: |
+            ${{ env.BLUEPRINT_DIR }}/test-logs/**
+            ${{ env.BLUEPRINT_DIR }}/test-results/**
+
+      - name: Run yamllint on Changed Files
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          echo "::group::Changed YAML files"
+          echo "${{ steps.changed-files.outputs.all_changed_files }}"
+          echo "::endgroup::"
+          
+          yamllint -c ${{ env.BLUEPRINT_DIR }}/.yamllint.yml \
+            ${{ steps.changed-files.outputs.all_changed_files }}
+        continue-on-error: true
+
+      - name: Run yamllint on All Files (if workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          yamllint -c ${{ env.BLUEPRINT_DIR }}/.yamllint.yml \
+            ${{ env.BLUEPRINT_DIR }}/01-core \
+            ${{ env.BLUEPRINT_DIR }}/02-standard \
+            ${{ env.BLUEPRINT_DIR }}/03-advanced \
+            ${{ env.BLUEPRINT_DIR }}/04-experimental \
+            ${{ env.BLUEPRINT_DIR }}/05-model-showcase \
+            ${{ env.BLUEPRINT_DIR }}/examples
+
+  # ===========================================================================
+  # Blueprint Standards Validation Job
+  # ===========================================================================
+  validate-standards:
+    name: Blueprint Standards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install yamllint pyyaml
+          # Install yq for YAML parsing
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Get Changed Blueprint Files
+        id: changed-blueprints
+        uses: tj-actions/changed-files@v42
+        with:
+          files: |
+            ${{ env.BLUEPRINT_DIR }}/01-core/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/02-standard/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/03-advanced/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/04-experimental/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/05-model-showcase/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/examples/**/*.yaml
+
+      - name: Make Validation Script Executable
+        run: chmod +x ${{ env.BLUEPRINT_DIR }}/scripts/validate-blueprint.sh
+
+      - name: Validate Changed Blueprints
+        if: steps.changed-blueprints.outputs.any_changed == 'true'
+        id: validate
+        run: |
+          echo "## Blueprint Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          FAILED=0
+          TOTAL=0
+          
+          for file in ${{ steps.changed-blueprints.outputs.all_changed_files }}; do
+            TOTAL=$((TOTAL + 1))
+            echo "::group::Validating $file"
+            
+            if ${{ env.BLUEPRINT_DIR }}/scripts/validate-blueprint.sh "$file"; then
+              echo "| ✅ | \`$file\` |" >> $GITHUB_STEP_SUMMARY
+            else
+              FAILED=$((FAILED + 1))
+              echo "| ❌ | \`$file\` |" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "::endgroup::"
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Total: $TOTAL files, $FAILED failed**" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $FAILED -gt 0 ]; then
+            echo "validation_failed=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Validate by Tier (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TIER="${{ github.event.inputs.tier }}"
+          
+          if [ "$TIER" = "all" ]; then
+            ${{ env.BLUEPRINT_DIR }}/scripts/lint-all-blueprints.sh --ci
+          else
+            ${{ env.BLUEPRINT_DIR }}/scripts/lint-all-blueprints.sh --ci --tier "$TIER"
+          fi
+
+  # ===========================================================================
+  # Kubernetes Manifest Validation Job
+  # ===========================================================================
+  kubernetes-validation:
+    name: Kubernetes Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Kubernetes Tools
+        uses: azure/setup-kubectl@v4
+
+      - name: Get Changed Blueprint Files
+        id: changed-k8s
+        uses: tj-actions/changed-files@v42
+        with:
+          files: |
+            ${{ env.BLUEPRINT_DIR }}/01-core/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/02-standard/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/03-advanced/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/04-experimental/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/05-model-showcase/**/*.yaml
+
+      - name: Validate Kubernetes Manifests (dry-run)
+        if: steps.changed-k8s.outputs.any_changed == 'true'
+        run: |
+          echo "## Kubernetes Validation" >> $GITHUB_STEP_SUMMARY
+          
+          for file in ${{ steps.changed-k8s.outputs.all_changed_files }}; do
+            echo "::group::Dry-run $file"
+            
+            # Skip files that aren't DynamoGraphDeployment
+            if grep -q "kind: DynamoGraphDeployment" "$file" 2>/dev/null; then
+              echo "Skipping DynamoGraphDeployment (CRD not available in CI)"
+              echo "| ⏭️ | \`$file\` (CRD validation skipped) |" >> $GITHUB_STEP_SUMMARY
+            elif grep -q "^kind:" "$file" 2>/dev/null; then
+              # Validate standard Kubernetes resources
+              if kubectl apply --dry-run=client -f "$file" 2>&1; then
+                echo "| ✅ | \`$file\` |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| ❌ | \`$file\` |" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+            
+            echo "::endgroup::"
+          done
+
+  # ===========================================================================
+  # Security Check Job
+  # ===========================================================================
+  security-check:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Changed Files
+        id: changed-files
+        uses: tj-actions/changed-files@v42
+        with:
+          files: |
+            ${{ env.BLUEPRINT_DIR }}/**/*.yaml
+            ${{ env.BLUEPRINT_DIR }}/**/*.yml
+
+      - name: Check for Hardcoded Secrets
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          echo "## Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          
+          ISSUES=0
+          
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            echo "::group::Scanning $file"
+            
+            # Check for NGC API keys
+            if grep -iE "(NGC_API_KEY|ngc-api-key)\s*[:=]\s*['\"]?[a-zA-Z0-9]+" "$file" 2>/dev/null; then
+              echo "::error file=$file::Hardcoded NGC API key detected!"
+              ISSUES=$((ISSUES + 1))
+            fi
+            
+            # Check for HuggingFace tokens
+            if grep -iE "(HF_TOKEN|HUGGING_FACE_TOKEN)\s*[:=]\s*['\"]?hf_" "$file" 2>/dev/null; then
+              echo "::error file=$file::Hardcoded HuggingFace token detected!"
+              ISSUES=$((ISSUES + 1))
+            fi
+            
+            # Check for AWS credentials
+            if grep -iE "(AWS_SECRET_ACCESS_KEY|aws_secret)\s*[:=]\s*['\"]?[a-zA-Z0-9+/]+" "$file" 2>/dev/null; then
+              echo "::error file=$file::Hardcoded AWS credentials detected!"
+              ISSUES=$((ISSUES + 1))
+            fi
+            
+            echo "::endgroup::"
+          done
+          
+          if [ $ISSUES -gt 0 ]; then
+            echo "❌ **$ISSUES security issue(s) found**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ **No hardcoded secrets found**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # Optional: Run trivy for YAML security scanning
+      - name: Run Trivy Config Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '${{ env.BLUEPRINT_DIR }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Upload Trivy Results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true
+
+  # ===========================================================================
+  # PR Comment Job
+  # ===========================================================================
+  pr-comment:
+    name: PR Report
+    needs: [yamllint, validate-standards, kubernetes-validation, security-check]
+    runs-on: ubuntu-latest
+    if: always() && github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Create PR Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const yamllint = '${{ needs.yamllint.result }}';
+            const validate = '${{ needs.validate-standards.result }}';
+            const k8s = '${{ needs.kubernetes-validation.result }}';
+            const security = '${{ needs.security-check.result }}';
+            
+            const statusEmoji = (status) => {
+              switch(status) {
+                case 'success': return '✅';
+                case 'failure': return '❌';
+                case 'skipped': return '⏭️';
+                default: return '⚠️';
+              }
+            };
+            
+            const body = `## 🔍 Blueprint Validation Results
+            
+            | Check | Status |
+            |-------|--------|
+            | YAML Lint | ${statusEmoji(yamllint)} ${yamllint} |
+            | Blueprint Standards | ${statusEmoji(validate)} ${validate} |
+            | Kubernetes Manifests | ${statusEmoji(k8s)} ${k8s} |
+            | Security Scan | ${statusEmoji(security)} ${security} |
+            
+            ### 📚 Documentation
+            - [Blueprint Standards](docs/blueprint-standards.md)
+            - [Monitoring Setup](docs/monitoring-setup.md)
+            - [Validation Script](scripts/validate-blueprint.sh)
+            
+            ### 🛠️ Local Validation
+            \`\`\`bash
+            # Validate single file
+            ./scripts/validate-blueprint.sh <path/to/blueprint.yaml>
+            
+            # Validate all blueprints
+            ./scripts/lint-all-blueprints.sh
+            \`\`\`
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ===========================================================================
+  # Summary Job
+  # ===========================================================================
+  summary:
+    name: Validation Summary
+    needs: [yamllint, validate-standards, kubernetes-validation, security-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check Results
+        run: |
+          if [[ "${{ needs.yamllint.result }}" == "failure" ]] || \
+             [[ "${{ needs.validate-standards.result }}" == "failure" ]] || \
+             [[ "${{ needs.security-check.result }}" == "failure" ]]; then
+            echo "❌ Blueprint validation failed"
+            exit 1
+          else
+            echo "✅ Blueprint validation passed"
+          fi

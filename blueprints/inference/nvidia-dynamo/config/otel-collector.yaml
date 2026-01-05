@@ -1,0 +1,592 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - OpenTelemetry Collector Configuration
+# =============================================================================
+#
+# This file deploys the OpenTelemetry Collector for comprehensive observability
+# in NVIDIA Dynamo deployments. It collects traces, metrics, and logs from all
+# Dynamo components (frontends, workers, routers, planners).
+#
+# Components:
+#   - Receivers: OTLP (gRPC/HTTP), Prometheus scraping
+#   - Processors: Batch processing, resource detection, memory limiting
+#   - Exporters: Jaeger (traces), Prometheus (metrics), CloudWatch (optional)
+#
+# Prerequisites:
+#   - Kubernetes namespace: dynamo
+#   - Jaeger (for traces): tempo.monitoring.svc.cluster.local:4317 or Jaeger collector
+#   - Prometheus (for metrics): kube-prometheus-stack installed
+#
+# Usage:
+#   kubectl apply -f config/otel-collector.yaml -n dynamo
+#
+# =============================================================================
+
+---
+# ConfigMap containing the OpenTelemetry Collector configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+data:
+  otel-collector-config.yaml: |
+    # ==========================================================================
+    # OpenTelemetry Collector Configuration for NVIDIA Dynamo
+    # ==========================================================================
+    
+    receivers:
+      # ========================================================================
+      # OTLP Receiver - Primary receiver for Dynamo components
+      # ========================================================================
+      # Accepts traces from Dynamo services via gRPC and HTTP
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+            # Maximum message size for large trace batches
+            max_recv_msg_size_mib: 8
+          http:
+            endpoint: 0.0.0.0:4318
+            cors:
+              allowed_origins:
+                - "*"  # Allows browser-based applications
+      
+      # ========================================================================
+      # Prometheus Receiver - Scrapes metrics from Dynamo components
+      # ========================================================================
+      prometheus:
+        config:
+          scrape_configs:
+            # Frontend metrics (TTFT, ITL, request metrics)
+            - job_name: 'dynamo-frontends'
+              scrape_interval: 15s
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names:
+                      - dynamo
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_component_type]
+                  regex: frontend
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_label_nvidia_com_metrics_enabled]
+                  regex: "true"
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: pod
+                - source_labels: [__meta_kubernetes_namespace]
+                  target_label: namespace
+                - source_labels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_namespace]
+                  target_label: dynamo_namespace
+                - source_labels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_component]
+                  target_label: dynamo_component
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: 'dynamo_.*'
+                  action: keep
+            
+            # Worker metrics (backend-specific, KV cache stats)
+            - job_name: 'dynamo-workers'
+              scrape_interval: 15s
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names:
+                      - dynamo
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_component_type]
+                  regex: worker
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_label_nvidia_com_metrics_enabled]
+                  regex: "true"
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+                  target_label: __address__
+                  regex: (.+)
+                  replacement: ${1}:8081
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: pod
+                - source_labels: [__meta_kubernetes_namespace]
+                  target_label: namespace
+            
+            # KVBM metrics (disaggregated deployments)
+            - job_name: 'dynamo-kvbm'
+              scrape_interval: 30s
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names:
+                      - dynamo
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_annotation_dynamo_nvidia_com_kvbm_enabled]
+                  regex: "true"
+                  action: keep
+                - source_labels: [__address__]
+                  target_label: __address__
+                  regex: (.+):.*
+                  replacement: ${1}:6880
+    
+    processors:
+      # ========================================================================
+      # Batch Processor - Batches telemetry data for efficient export
+      # ========================================================================
+      batch:
+        timeout: 5s
+        send_batch_size: 256
+        send_batch_max_size: 512
+      
+      # ========================================================================
+      # Memory Limiter - Prevents OOM conditions
+      # ========================================================================
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 1536
+        spike_limit_mib: 512
+      
+      # ========================================================================
+      # Resource Detection - Adds Kubernetes metadata
+      # ========================================================================
+      resourcedetection:
+        detectors:
+          - env
+          - system
+        timeout: 5s
+        override: false
+      
+      # ========================================================================
+      # K8s Attributes - Enriches with Kubernetes context
+      # ========================================================================
+      k8sattributes:
+        auth_type: "serviceAccount"
+        passthrough: false
+        extract:
+          metadata:
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.deployment.name
+            - k8s.namespace.name
+            - k8s.node.name
+          labels:
+            - tag_name: dynamo_namespace
+              key: nvidia.com/dynamo-namespace
+              from: pod
+            - tag_name: dynamo_component
+              key: nvidia.com/dynamo-component
+              from: pod
+            - tag_name: backend_framework
+              key: dynamo.nvidia.com/backend
+              from: pod
+      
+      # ========================================================================
+      # Resource Processor - Adds standard resource attributes
+      # ========================================================================
+      resource:
+        attributes:
+          - key: service.namespace
+            value: "nvidia-dynamo"
+            action: upsert
+          - key: deployment.environment
+            value: "${DEPLOYMENT_ENVIRONMENT:-production}"
+            action: insert
+      
+      # ========================================================================
+      # Filter Processor - Removes noisy or unwanted telemetry
+      # ========================================================================
+      filter:
+        traces:
+          span:
+            # Filter out health check spans to reduce noise
+            - 'attributes["http.target"] == "/health"'
+            - 'attributes["http.target"] == "/live"'
+            - 'attributes["http.target"] == "/ready"'
+    
+    exporters:
+      # ========================================================================
+      # Debug Exporter - For troubleshooting (low verbosity in production)
+      # ========================================================================
+      debug:
+        verbosity: basic
+        sampling_initial: 5
+        sampling_thereafter: 200
+      
+      # ========================================================================
+      # OTLP Exporter - Primary trace export to Tempo/Jaeger
+      # ========================================================================
+      otlp:
+        endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT:-tempo.monitoring.svc.cluster.local:4317}"
+        tls:
+          insecure: true
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+      
+      # ========================================================================
+      # Prometheus Exporter - Exposes metrics for Prometheus scraping
+      # ========================================================================
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        namespace: dynamo
+        const_labels:
+          cluster: "${EKS_CLUSTER_NAME:-default}"
+        resource_to_telemetry_conversion:
+          enabled: true
+        enable_open_metrics: true
+      
+      # ========================================================================
+      # Prometheus Remote Write - Push metrics to central Prometheus
+      # ========================================================================
+      prometheusremotewrite:
+        endpoint: "${PROMETHEUS_REMOTE_WRITE_ENDPOINT:-http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090/api/v1/write}"
+        tls:
+          insecure: true
+        resource_to_telemetry_conversion:
+          enabled: true
+      
+      # ========================================================================
+      # AWS CloudWatch Exporter (Optional) - For AWS-native observability
+      # ========================================================================
+      # Uncomment to enable CloudWatch export
+      # awscloudwatchlogs:
+      #   log_group_name: "/aws/eks/dynamo/traces"
+      #   log_stream_name: "${K8S_POD_NAME:-otel-collector}"
+      #   region: "${AWS_REGION:-us-west-2}"
+      #   raw_log: true
+    
+    extensions:
+      # Health check endpoint for collector monitoring
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: /health
+      
+      # Performance profiling (optional, disable in production)
+      pprof:
+        endpoint: 0.0.0.0:1777
+      
+      # Zpages for debugging (disable in production)
+      zpages:
+        endpoint: 0.0.0.0:55679
+    
+    service:
+      extensions:
+        - health_check
+        - pprof
+        - zpages
+      
+      telemetry:
+        logs:
+          level: info
+          encoding: json
+        metrics:
+          level: detailed
+          address: 0.0.0.0:8888
+      
+      pipelines:
+        # ======================================================================
+        # Traces Pipeline - Full distributed tracing
+        # ======================================================================
+        traces:
+          receivers:
+            - otlp
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - resource
+            - filter
+            - batch
+          exporters:
+            - otlp
+            - debug
+        
+        # ======================================================================
+        # Metrics Pipeline - Prometheus metrics collection
+        # ======================================================================
+        metrics:
+          receivers:
+            - otlp
+            - prometheus
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - resource
+            - batch
+          exporters:
+            - prometheus
+            - prometheusremotewrite
+
+---
+# ServiceAccount for the OTEL Collector
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+
+---
+# ClusterRole for Kubernetes metadata access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - namespaces
+      - nodes
+      - endpoints
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources:
+      - endpointslices
+    verbs: ["get", "list", "watch"]
+
+---
+# ClusterRoleBinding for OTEL Collector
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector
+    namespace: dynamo
+roleRef:
+  kind: ClusterRole
+  name: otel-collector
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Deployment for the OpenTelemetry Collector
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-collector
+        app.kubernetes.io/component: observability
+        app.kubernetes.io/part-of: nvidia-dynamo
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8888"
+    spec:
+      serviceAccountName: otel-collector
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.96.0
+          args:
+            - "--config=/etc/otel-collector-config.yaml"
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: prometheus
+              containerPort: 8889
+              protocol: TCP
+            - name: metrics
+              containerPort: 8888
+              protocol: TCP
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+          env:
+            # Environment variables for configuration templating
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "tempo.monitoring.svc.cluster.local:4317"
+            - name: PROMETHEUS_REMOTE_WRITE_ENDPOINT
+              value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090/api/v1/write"
+            - name: DEPLOYMENT_ENVIRONMENT
+              value: "production"
+            - name: EKS_CLUSTER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: cluster-info
+                  key: cluster-name
+                  optional: true
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+          volumeMounts:
+            - name: otel-collector-config
+              mountPath: /etc/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 13133
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 13133
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: otel-collector-config
+          configMap:
+            name: otel-collector-config
+      # Run on CPU nodes to avoid competing with inference workloads
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      tolerations:
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+---
+# Service for the OpenTelemetry Collector
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+    - name: prometheus
+      port: 8889
+      targetPort: 8889
+      protocol: TCP
+    - name: metrics
+      port: 8888
+      targetPort: 8888
+      protocol: TCP
+    - name: health
+      port: 13133
+      targetPort: 13133
+      protocol: TCP
+
+---
+# ServiceMonitor for Prometheus to scrape OTEL Collector metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: otel-collector
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+  namespaceSelector:
+    matchNames:
+      - dynamo
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+
+---
+# PodMonitor for scraping Dynamo inference metrics via OTEL Collector
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: dynamo-inference-otel
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-inference-otel
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+spec:
+  selector:
+    matchLabels:
+      nvidia.com/metrics-enabled: "true"
+  namespaceSelector:
+    matchNames:
+      - dynamo
+  podMetricsEndpoints:
+    # Frontend metrics (HTTP API metrics)
+    - port: http
+      path: /metrics
+      interval: 15s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_namespace]
+          targetLabel: dynamo_namespace
+        - sourceLabels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_component]
+          targetLabel: dynamo_component
+    # Worker metrics (system metrics)
+    - port: system
+      path: /metrics
+      interval: 15s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_namespace]
+          targetLabel: dynamo_namespace
+        - sourceLabels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_component]
+          targetLabel: dynamo_component

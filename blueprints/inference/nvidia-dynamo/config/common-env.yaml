@@ -1,0 +1,259 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - Common Environment Variables ConfigMap
+# =============================================================================
+#
+# This ConfigMap provides standardized environment variables used across
+# all Dynamo blueprint deployments. Reference this ConfigMap in your
+# blueprints using envFrom.configMapRef.
+#
+# Usage in DynamoGraphDeployment:
+#   spec:
+#     envs:
+#       - configMapRef:
+#           name: dynamo-common-env
+#
+# Or via pod spec:
+#   spec:
+#     containers:
+#       - envFrom:
+#           - configMapRef:
+#               name: dynamo-common-env
+#
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-common-env
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-common-env
+    app.kubernetes.io/component: configuration
+    app.kubernetes.io/part-of: nvidia-dynamo
+  annotations:
+    description: "Common environment variables for NVIDIA Dynamo deployments"
+    config.kubernetes.io/local-config: "false"
+data:
+  # ===========================================================================
+  # UCX Configuration - NVIDIA Unified Communication X Library
+  # ===========================================================================
+  # Controls inter-process communication for multi-GPU workloads
+  
+  # Transport Layer Security - defines which transports UCX should use
+  # cuda_copy: GPU-to-Host memory copies
+  # cuda_ipc: GPU-to-GPU direct (same node, requires NVLink or PCIe P2P)
+  # tcp: TCP/IP for cross-node communication
+  UCX_TLS: "cuda_copy,cuda_ipc,tcp"
+  
+  # Network interface for UCX TCP transport
+  # eth0 is standard for EKS nodes; adjust if using custom network configs
+  UCX_NET_DEVICES: "eth0"
+  
+  # Memory allocation pool configuration
+  # Enables memory pooling for better allocation performance
+  UCX_MEMTYPE_CACHE: "y"
+  
+  # ===========================================================================
+  # HuggingFace Configuration
+  # ===========================================================================
+  # Controls model downloading and caching behavior
+  
+  # Root directory for HuggingFace model cache
+  # Should match the mount point of your PVC
+  HF_HOME: "/model-cache"
+  
+  # Offline mode control
+  # "0" = Allow network access (required for first model download)
+  # "1" = Offline mode (models must be pre-cached)
+  HF_HUB_OFFLINE: "0"
+  
+  # Enable download progress
+  HF_HUB_DISABLE_PROGRESS_BARS: "0"
+  
+  # Token will be injected from secret (hf-token-secret)
+  # HF_TOKEN should be provided via envFromSecret, not ConfigMap
+  
+  # ===========================================================================
+  # NCCL Configuration - NVIDIA Collective Communication Library
+  # ===========================================================================
+  # Optimizes multi-GPU communication patterns
+  
+  # Debug level for troubleshooting
+  # Options: TRACE, INFO, WARN, ERROR
+  # Use WARN for production, INFO or TRACE for debugging
+  NCCL_DEBUG: "WARN"
+  
+  # Network interface for NCCL socket communication
+  NCCL_SOCKET_IFNAME: "eth0"
+  
+  # Disable IB Verbs (not available on AWS GPU instances)
+  NCCL_IB_DISABLE: "1"
+  
+  # P2P (Peer-to-Peer) configuration
+  # Level 0: Disable P2P
+  # Level 1: Enable P2P only between GPUs on same PCI switch
+  # Level 2: Enable P2P through PIX (same PCI switch), PXB (different switch same node)
+  # Level 5: Enable all P2P including NVLink
+  # For NVLink (p4d, p5): Use "5"
+  # For PCIe (g5, g6): Use "2" or "1"
+  NCCL_P2P_LEVEL: "5"
+  
+  # Cross-memory attach operations (host memory)
+  NCCL_NET_GDR_LEVEL: "0"
+  
+  # ===========================================================================
+  # Python Runtime Configuration
+  # ===========================================================================
+  
+  # Disable output buffering for real-time logging
+  PYTHONUNBUFFERED: "1"
+  
+  # Hash seed for reproducibility (optional)
+  # PYTHONHASHSEED: "0"
+  
+  # Warning filter configuration
+  # Suppress verbose warnings in production
+  PYTHONWARNINGS: "ignore::DeprecationWarning"
+  
+  # ===========================================================================
+  # CUDA Configuration
+  # ===========================================================================
+  
+  # Device order - ensures consistent GPU ordering by PCI bus ID
+  CUDA_DEVICE_ORDER: "PCI_BUS_ID"
+  
+  # Caching behavior for compiled kernels
+  # Reduces first-run latency for repeated model loads
+  CUDA_CACHE_DISABLE: "0"
+  
+  # Memory allocator configuration
+  # Use native async allocator for better performance
+  PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+  
+  # ===========================================================================
+  # OpenTelemetry Configuration (Observability)
+  # ===========================================================================
+  # Correct variable name per Dynamo spec (NOT OTEL_EXPORT_ENDPOINT)
+  
+  # OTEL endpoint - uncomment and configure for your deployment
+  # OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://tempo.monitoring.svc.cluster.local:4317"
+  
+  # Service name for trace identification
+  OTEL_SERVICE_NAME: "dynamo-inference"
+  
+  # Resource attributes
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nvidia-dynamo"
+  
+  # ===========================================================================
+  # Dynamo-Specific Configuration
+  # ===========================================================================
+  
+  # KVBM metrics toggle (for disaggregated architectures)
+  # Set to "true" to enable metrics endpoint on KVBM server
+  DYN_KVBM_METRICS: "true"
+  
+  # Log level for Dynamo components
+  # Options: DEBUG, INFO, WARNING, ERROR
+  DYN_LOG_LEVEL: "INFO"
+  
+  # Frontend HTTP port (standard)
+  DYN_HTTP_PORT: "8000"
+  
+  # Backend system port (for health checks)
+  DYN_SYSTEM_PORT: "9090"
+
+---
+# =============================================================================
+# Environment-Specific ConfigMaps
+# =============================================================================
+# These can be applied as overlays or additives to the common config
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-env-development
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-env-development
+    app.kubernetes.io/component: configuration
+    app.kubernetes.io/part-of: nvidia-dynamo
+    environment: development
+data:
+  # Development overrides
+  NCCL_DEBUG: "INFO"
+  DYN_LOG_LEVEL: "DEBUG"
+  HF_HUB_DISABLE_PROGRESS_BARS: "0"
+  PYTHONWARNINGS: "default"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-env-production
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-env-production
+    app.kubernetes.io/component: configuration
+    app.kubernetes.io/part-of: nvidia-dynamo
+    environment: production
+data:
+  # Production optimizations
+  NCCL_DEBUG: "WARN"
+  DYN_LOG_LEVEL: "WARNING"
+  HF_HUB_DISABLE_PROGRESS_BARS: "1"
+  PYTHONWARNINGS: "ignore"
+  # Enable offline mode in production (models should be pre-cached)
+  HF_HUB_OFFLINE: "1"
+
+---
+# =============================================================================
+# PCIe-Specific ConfigMap (g5, g6, g6e instances)
+# =============================================================================
+# Use this overlay for non-NVLink GPU topologies
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-env-pcie
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-env-pcie
+    app.kubernetes.io/component: configuration
+    app.kubernetes.io/part-of: nvidia-dynamo
+    gpu-topology: pcie
+data:
+  # PCIe-optimized NCCL settings
+  NCCL_P2P_LEVEL: "2"
+  # Disable direct RDMA for PCIe topologies
+  NCCL_NET_GDR_LEVEL: "0"
+  # Use tree reduction algorithm (better for PCIe)
+  NCCL_ALGO: "Tree"
+
+---
+# =============================================================================
+# NVLink-Specific ConfigMap (p4d, p5 instances)
+# =============================================================================
+# Use this overlay for NVLink-connected GPU topologies
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-env-nvlink
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-env-nvlink
+    app.kubernetes.io/component: configuration
+    app.kubernetes.io/part-of: nvidia-dynamo
+    gpu-topology: nvlink
+data:
+  # NVLink-optimized settings
+  NCCL_P2P_LEVEL: "5"
+  # Enable GPU Direct RDMA for NVLink
+  NCCL_NET_GDR_LEVEL: "5"
+  # Use ring algorithm (optimal for NVLink)
+  NCCL_ALGO: "Ring"
+  # Enable NVLink direct paths
+  NCCL_P2P_DISABLE: "0"

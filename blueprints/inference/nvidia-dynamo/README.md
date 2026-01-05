@@ -87,6 +87,145 @@ cd infra/nvidia-dynamo
 ./cleanup.sh
 ```
 
+## Enhanced Deployment Workflow (v0.7.1+)
+
+The deployment scripts now support integrated observability and centralized configuration management. All new features are **opt-in** and preserve backwards compatibility.
+
+### New Script Features
+
+| Script | New Flags | Description |
+|--------|-----------|-------------|
+| `deploy.sh` | `--apply-configs`, `--enable-monitoring`, `--enable-tracing` | Deploy with full observability |
+| `test.sh` | `--check-metrics`, `--check-traces`, `--validate` | Verify observability is working |
+| `cleanup.sh` | `--remove-otel`, `--remove-monitoring`, `--remove-configs` | Clean infrastructure |
+
+### Quick Reference
+
+```bash
+# Traditional workflow (unchanged - still works)
+./deploy.sh vllm-aggregated-default
+./test.sh vllm-aggregated-default
+./cleanup.sh vllm-aggregated-default
+
+# Enhanced workflow with full observability
+./deploy.sh vllm-aggregated-default --apply-configs --enable-monitoring --enable-tracing
+./test.sh vllm-aggregated-default --check-metrics --check-traces
+./cleanup.sh vllm-aggregated-default --remove-all-infra
+```
+
+### Step-by-Step Enhanced Workflow
+
+```bash
+# 1. Apply centralized configurations (one-time setup)
+./scripts/apply-config.sh dynamo
+
+# 2. Deploy infrastructure (one-time setup)
+kubectl apply -f config/otel-collector.yaml -n dynamo
+kubectl apply -f podmonitor-template.yaml -n dynamo
+
+# 3. Validate blueprint before deployment
+./scripts/validate-blueprint.sh 01-core/vllm/vllm-aggregated-default.yaml
+
+# 4. Deploy with monitoring enabled
+./deploy.sh vllm-aggregated-default --enable-monitoring
+
+# 5. Test deployment with metrics verification
+./test.sh vllm-aggregated-default --check-metrics
+
+# 6. Cleanup
+./cleanup.sh vllm-aggregated-default
+```
+
+### Observability Features
+
+#### Metrics Collection (PodMonitor/ServiceMonitor)
+```bash
+# Enable Prometheus metrics scraping
+./deploy.sh vllm-aggregated-default --enable-monitoring
+
+# Verify metrics are being scraped
+./test.sh vllm-aggregated-default --check-metrics
+```
+
+#### Distributed Tracing (OTEL)
+```bash
+# Enable OpenTelemetry tracing
+./deploy.sh vllm-aggregated-default --enable-tracing
+
+# Verify traces are being collected
+./test.sh vllm-aggregated-default --check-traces
+```
+
+#### Full Observability
+```bash
+# Enable both metrics AND tracing
+./deploy.sh vllm-aggregated-default --enable-monitoring --enable-tracing
+
+# Verify everything is working
+./test.sh vllm-aggregated-default --check-metrics --check-traces
+```
+
+### Infrastructure Management
+
+#### Deploy Observability Infrastructure
+```bash
+# Deploy OTEL Collector (required for tracing)
+kubectl apply -f config/otel-collector.yaml -n dynamo
+
+# Deploy PodMonitor template (required for metrics)
+kubectl apply -f podmonitor-template.yaml -n dynamo
+
+# Apply OTEL instrumentation ConfigMaps
+kubectl apply -f config/otel-instrumentation.yaml -n dynamo
+```
+
+#### Remove Observability Infrastructure
+```bash
+# Remove OTEL Collector only
+./cleanup.sh --remove-otel
+
+# Remove PodMonitors/ServiceMonitors only
+./cleanup.sh --remove-monitoring
+
+# Remove ConfigMaps only
+./cleanup.sh --remove-configs
+
+# Remove all observability infrastructure
+./cleanup.sh --remove-all-infra
+
+# Full cleanup (deployments + infrastructure)
+./cleanup.sh --all --remove-all-infra
+```
+
+### Integration Testing
+
+```bash
+# Run quick validation tests (no cluster required)
+./scripts/test-integration.sh dynamo --quick
+
+# Run full integration tests (requires cluster)
+./scripts/test-integration.sh dynamo --full
+
+# Test specific blueprint
+./scripts/test-integration.sh dynamo --full --blueprint examples/vllm-with-full-observability.yaml
+
+# Preview what would happen (dry-run)
+./scripts/test-integration.sh dynamo --full --dry-run
+```
+
+### Script Help
+
+```bash
+# Get help for each script
+./deploy.sh --help
+./test.sh --help
+./cleanup.sh --help
+./scripts/test-integration.sh --help
+./scripts/validate-blueprint.sh --help
+```
+
+**See [INTEGRATION_VALIDATION_REPORT.md](INTEGRATION_VALIDATION_REPORT.md) for detailed documentation of all new features.**
+
 ## Showcase Catalog
 
 > **📘 See [catalog/README.md](catalog/README.md) for the full catalog of tiered examples.**
@@ -451,7 +590,7 @@ kubectl create secret generic hf-token-secret \
 kubectl apply -f vllm/vllm-aggregated-default.yaml -n dynamo
 
 # Monitor deployment
-kubectl get pods -n dynamo -l app=vllm-agg -w
+kubectl get pods -n dynamo -l app=vllm-frontend -w
 ```
 
 ### Testing Deployments
@@ -870,7 +1009,7 @@ spec:
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
-        mainContainer:
+      mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
           workingDir: /workspace/components/backends/vllm
           args: ["python3", "-m", "dynamo.vllm", "--model", "your-model-here"]
@@ -1061,42 +1200,6 @@ resources:
     memory: "16-20Gi" # Model + KV cache requirements
 ```
 
-## Monitoring and Observability
-
-### Health Checks
-All deployments include comprehensive health monitoring:
-```yaml
-livenessProbe:
-  httpGet:
-    path: /health    # Dynamo health endpoint
-    port: 8000
-  initialDelaySeconds: 60
-  periodSeconds: 60
-
-readinessProbe:
-  httpGet:
-    path: /health
-    port: 9090      # Worker health endpoint
-  periodSeconds: 10
-  failureThreshold: 60
-```
-
-### Logging
-Enable debug logging for troubleshooting:
-```yaml
-envs:
-  - name: DYN_LOG
-    value: "debug"  # info, debug, trace
-```
-
-### Metrics Collection
-Workers expose Prometheus-compatible metrics:
-```bash
-# Check worker metrics
-kubectl port-forward vllm-worker-xxx 9090:9090 -n dynamo
-curl http://localhost:9090/metrics
-```
-
 ## External Access
 
 The deploy script automatically creates a Kubernetes Service for each deployment, enabling both API access and Prometheus metrics collection. For production external access, you have several options:
@@ -1271,473 +1374,6 @@ kubectl describe service ${EXAMPLE}-frontend -n dynamo
 curl http://<load-balancer-url>/metrics
 ```
 
-## Known Issues and Workarounds
-
-### SGLang Disaggregated NIXL Issue (v0.6.0)
-
-**Issue**: SGLang disaggregated serving with NIXL backend fails inference requests despite successful deployment.
-
-**Symptoms**:
-- All pods deploy successfully and become Ready (frontend, prefill worker, decode worker)
-- Health checks pass and show both prefill and backend endpoints available
-- Model listing works correctly via `/v1/models`
-- Chat completion requests fail with "Stream ended before generation completed" error or timeout
-
-**Root Cause**:
-SGLang-specific bug in disaggregated implementation with NIXL backend. This is **NOT a NIXL issue** - comprehensive testing proves NIXL works correctly:
-- ✅ vLLM disaggregated with NIXL: Fully functional
-- ✅ TensorRT-LLM disaggregated with DEFAULT (UCX): Fully functional
-- ❌ SGLang disaggregated with NIXL: Fails inference
-
-**Evidence from Testing**:
-All three engines successfully initialize NIXL with UCX backend, but only SGLang fails during inference. This isolates the issue to SGLang's NIXL implementation, not the NIXL communication layer itself.
-
-**Workaround**:
-Use **SGLang Aggregated** deployment instead, which is fully functional and production-ready:
-```bash
-./deploy.sh sglang-aggregated-default
-```
-
-**Alternative Backends**:
-SGLang disaggregated supports these transfer backends:
-- `nixl` - ❌ Fails in v0.6.0
-- `mooncake` - Default when flag omitted (not tested)
-- `ascend` - For Ascend NPUs
-- `fake` - For testing only
-
-**Status**:
-- ⚠️ **Not documented** as a known issue in v0.6.0 release notes
-- 🐛 **Recommended**: Report to NVIDIA with comprehensive test results
-- ✅ **Production Alternative**: Use SGLang Aggregated (fully working)
-
-**See Also**: [TESTING_RESULTS.md](TESTING_RESULTS.md) for comprehensive NIXL backend testing across all three inference engines.
-
----
-
-### TensorRT-LLM Disaggregated Case Sensitivity Bug (Fixed)
-
-**Issue**: TensorRT-LLM disaggregated workers crash with validation error in v0.6.0 manifest.
-
-**Error Message**:
-```
-pydantic_core._pydantic_core.ValidationError: cache_transceiver_config.backend
-Input should be 'DEFAULT', 'UCX', 'NIXL' or 'MPI' [type=literal_error, input_value='default']
-```
-
-**Root Cause**:
-Configuration bug in v0.6.0 manifest - `backend: default` (lowercase) should be `backend: DEFAULT` (uppercase).
-
-**Fix Applied**:
-Modified `blueprints/inference/nvidia-dynamo/trtllm/trtllm-disaggregated-default.yaml`:
-- Line 32 (decode worker): Changed `backend: default` to `backend: DEFAULT`
-- Line 53 (prefill worker): Changed `backend: default` to `backend: DEFAULT`
-
-**Status**:
-- ✅ **Fixed** in this repository
-- ✅ **Fully functional** after fix
-- 📝 **Recommended**: NVIDIA should update official manifests
-
----
-
-### `dynamoNamespace` Field Deprecation Notice
-
-**Status**: ⚠️ Deprecated in v0.7.1+
-
-The `dynamoNamespace` field in DynamoGraphDeployment specs is officially deprecated. From the CRD schema:
-
-> *"dynamoNamespace is deprecated and will be removed in a future version. The DGD Kubernetes namespace and DynamoGraphDeployment name are used to construct the Dynamo namespace for each component."*
-
-**Impact**: The field still works but generates warnings. All 103 usages in existing blueprints will be removed in a future update.
-
-**Migration**: No action required - the system auto-derives namespace from `{k8s-namespace}/{dgd-name}`.
-
----
-
-### Dynamo Namespace Collision Issue
-
-**Issue**: When deploying multiple DynamoGraphDeployments (e.g., vllm and sglang) in the same Kubernetes namespace, workers may not properly isolate their Dynamo logical namespaces, leading to cross-contamination between deployments.
-
-**Symptoms**:
-- Frontend discovering models from other deployments (e.g., vllm frontend seeing sglang's DeepSeek model)
-- Health endpoints showing workers from multiple namespaces with namespace "dynamo" instead of their specific namespace
-- Duplicate metrics collector registration errors
-- Stream routing failures and generation timeouts
-
-**Root Cause**:
-Workers read `DYNAMO_NAMESPACE` environment variable, but the Dynamo operator was setting `DYN_NAMESPACE`. This caused all workers to default to the fallback namespace "dynamo", creating cross-contamination.
-
-**Current Workaround Applied**:
-
-1. **Environment Variable Fix**: All worker components now explicitly set `DYNAMO_NAMESPACE`:
-
-```yaml
-# Applied to all worker components
-envs:
-  - name: DYNAMO_NAMESPACE
-    value: "deployment-name"  # Matches dynamoNamespace field
-```
-
-2. **Namespace Clearing**: Frontend components clear their namespace cache on startup:
-
-```yaml
-# Applied to sglang frontend (vllm was missing this)
-args:
-  - "python3 -m dynamo.sglang.utils.clear_namespace --namespace deployment-name && python3 -m dynamo.frontend --http-port=8000"
-```
-
-3. **Model Filtering** (Additional isolation):
-
-```yaml
-# Optional: Restrict frontend to specific models
-envs:
-  - name: DYN_MODEL_FILTER
-    value: "specific-model-name"
-  - name: DYN_NAMESPACE_ISOLATION
-    value: "true"
-```
-
-**Verification**:
-```bash
-# Check namespace isolation is working
-kubectl port-forward svc/vllm-frontend 8001:8000 -n dynamo &
-kubectl port-forward svc/sglang-frontend 8002:8000 -n dynamo &
-
-# vllm should only show Qwen model
-curl http://localhost:8001/health | jq '.instances[].namespace' | sort -u
-
-# sglang should only show DeepSeek model
-curl http://localhost:8002/health | jq '.instances[].namespace' | sort -u
-```
-
-**Status**:
-- ✅ **Fixed in**: vllm, sglang, hello-world deployments
-- ⚠️ **Pending**: Other blueprint deployments may need the same DYNAMO_NAMESPACE fix
-- 🔍 **Under Investigation**: Complete namespace isolation across all deployment types
-
-## Deployment Components
-
-### What deploy.sh Creates
-
-The `deploy.sh` script creates three Kubernetes resources for each deployment:
-
-1. **DynamoGraphDeployment** (DGD): The main inference deployment
-2. **Kubernetes Service**: LoadBalancer service for API access and service discovery
-3. **ServiceMonitor**: Prometheus monitoring configuration for metrics collection
-
-```bash
-./deploy.sh vllm
-# Creates:
-# - DynamoGraphDeployment: vllm
-# - Service: vllm-frontend (port 8000)
-# - ServiceMonitor: vllm-frontend-monitor (scrapes port 8000/metrics)
-```
-
-### Service and Monitoring Integration
-
-Each deployment gets a Kubernetes Service that enables:
-
-- **API Access**: Port 8000 for OpenAI-compatible endpoints
-- **Metrics Collection**: Port 8000/metrics for Prometheus scraping
-- **Service Discovery**: DNS resolution within cluster
-- **Load Balancing**: Across multiple frontend replicas (if scaled)
-
-**Service Template**:
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: ${EXAMPLE}-frontend
-  namespace: dynamo
-  labels:
-    app: ${EXAMPLE}-frontend
-spec:
-  selector:
-    nvidia.com/dynamo-namespace: ${EXAMPLE}
-    nvidia.com/dynamo-component: Frontend
-  ports:
-  - name: http
-    port: 8000
-    targetPort: 8000
-  type: ClusterIP
-```
-
-**ServiceMonitor for Prometheus**:
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: ${EXAMPLE}-frontend-monitor
-  namespace: dynamo
-spec:
-  selector:
-    matchLabels:
-      app: ${EXAMPLE}-frontend
-  endpoints:
-  - port: http
-    path: /metrics
-    interval: 30s
-```
-
-## Testing Deployments
-
-### test.sh - Modular Test Router
-
-The `test.sh` script provides a modular approach to testing with support for both general tests (any deployment) and targeted tests (specific features).
-
-#### Basic Usage
-```bash
-./test.sh <example-id>                    # Runs general tests only
-./test.sh <example-id> --multimodal       # Adds multimodal tests
-./test.sh <example-id> --kv-routing       # Adds KV routing tests
-./test.sh <example-id> --otel             # Adds OTEL tracing tests
-./test.sh <example-id> --performance      # Adds performance benchmarks
-./test.sh <example-id> --full             # Runs all applicable tests
-```
-
-#### Examples by Deployment Type
-```bash
-# Standard aggregated deployment (general tests)
-./test.sh vllm-aggregated-default
-
-# Vision-language model (general + multimodal)
-./test.sh qwen2.5-vl-7b --multimodal
-
-# Router deployment (general + KV routing)
-./test.sh vllm-router --kv-routing
-
-# OTEL-enabled deployment (general + observability)
-./test.sh vllm-otel-tracing --otel
-
-# Full test suite for feature-rich deployment
-./test.sh vllm-disaggregated-default --full
-```
-
-### Test Categories
-
-| Category | Tests | When to Use |
-|----------|-------|-------------|
-| **General** | Health check, model list, chat completion | Every deployment |
-| **Multimodal** | Image/video understanding | VLM deployments (LLaVA, Qwen-VL) |
-| **KV Routing** | Cache metrics, routing validation | Router deployments |
-| **Observability** | OTEL trace generation/query | OTEL-enabled deployments |
-| **Performance** | TTFT, throughput benchmarks | Performance validation |
-
-### Test Organization
-
-Tests are organized in the `tests/` directory:
-
-```
-tests/
-├── README.md                         # Full test documentation
-├── lib/
-│   └── test-lib.sh                   # Shared test library
-├── general/
-│   └── basic-inference.sh            # General tests (health, models, chat)
-└── targeted/
-    ├── multimodal-tests/
-    │   ├── test-image.sh             # Image understanding tests
-    │   └── test-video.sh             # Video understanding tests
-    ├── kv-routing-tests/
-    │   └── test-kv-routing.sh        # KV cache routing tests
-    ├── observability-tests/
-    │   └── test-otel.sh              # OTEL tracing tests
-    └── performance-tests/
-        └── test-performance.sh       # Throughput and latency benchmarks
-```
-
-### Running Individual Tests
-
-Each test script can be run directly:
-
-```bash
-# General tests
-./tests/general/basic-inference.sh <deployment-name>
-
-# Targeted tests
-./tests/targeted/multimodal-tests/test-image.sh <deployment-name>
-./tests/targeted/kv-routing-tests/test-kv-routing.sh <deployment-name>
-./tests/targeted/observability-tests/test-otel.sh <deployment-name>
-./tests/targeted/performance-tests/test-performance.sh <deployment-name>
-```
-
-**See [tests/README.md](tests/README.md) for comprehensive test documentation.**
-
-### Test Script Features
-
-- 🔍 **Auto-Detection**: Detects deployment features (multimodal, router, OTEL)
-- 🌐 **Port Forwarding**: Automatic kubectl port-forward setup
-- 🏥 **Health Checking**: Validates /health and /v1/models endpoints
-- 💬 **Chat Testing**: OpenAI-compatible chat completion tests
-- 📊 **Performance Metrics**: TTFT, tokens/second, requests/second
-- 🎯 **Modular Design**: Reusable test library for custom tests
-
-
-
-## Troubleshooting
-
-### Common Issues
-
-**1. Pod Stuck in Pending - Node Selection Issues**
-```bash
-# Check pod events and node availability
-kubectl describe pod <pod-name> -n dynamo
-kubectl get nodes -l karpenter.sh/nodepool=g5-gpu-karpenter
-kubectl get events -n dynamo --sort-by='.lastTimestamp' | grep -i pending
-```
-
-**Possible Solutions:**
-- **Insufficient GPU Capacity**: Switch from G6 to G5 instances
-- **No Available Nodes**: Check Karpenter node provisioning
-- **Zone Constraints**: Remove specific zone requirements
-- **Instance Type Limits**: Update Karpenter provisioner with more instance types
-
-```yaml
-# Fallback node selection
-extraPodSpec:
-  nodeSelector:
-    karpenter.sh/nodepool: g5-gpu-karpenter
-    # Remove specific instance type constraints
-  affinity:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:  # Use preferred instead of required
-      - weight: 100
-        preference:
-          matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values: ["g5.2xlarge", "g5.4xlarge"]
-```
-
-**2. Karpenter Node Provisioning Failures**
-```bash
-# Check Karpenter logs and node provisioning
-kubectl logs -n karpenter-system -l app.kubernetes.io/name=karpenter -f
-kubectl get nodepool g5-gpu-karpenter -o yaml
-kubectl get nodeclaims -l karpenter.sh/nodepool=g5-gpu-karpenter
-```
-
-**Possible Solutions:**
-- **Regional Capacity Issues**: Add multiple availability zones
-- **Instance Type Unavailable**: Expand instance type list in NodePool
-- **Spot Instance Interruptions**: Add on-demand capacity type
-
-```yaml
-# Robust NodePool configuration
-spec:
-  template:
-    spec:
-      requirements:
-        - key: node.kubernetes.io/instance-type
-          operator: In
-          values: ["g5.xlarge", "g5.2xlarge", "g5.4xlarge", "g4dn.xlarge"]  # Add fallbacks
-        - key: karpenter.sh/capacity-type
-          operator: In
-          values: ["spot", "on-demand"]  # Mix for reliability
-        - key: topology.kubernetes.io/zone
-          operator: In
-          values: ["us-west-2a", "us-west-2b", "us-west-2c"]  # Multiple AZs
-```
-
-**3. GPU Not Detected by Pod**
-```bash
-# Check GPU availability and drivers
-kubectl get nodes -o json | jq '.items[].status.allocatable."nvidia.com/gpu"'
-kubectl describe node <gpu-node-name> | grep -i gpu
-```
-
-**Possible Solutions:**
-- **NVIDIA Driver Issues**: Check node initialization logs
-- **Device Plugin Not Running**: Verify nvidia-device-plugin DaemonSet
-- **Toleration Missing**: Add GPU node tolerations
-
-```yaml
-# Proper GPU tolerations
-extraPodSpec:
-  tolerations:
-  - key: nvidia.com/gpu
-    operator: Exists
-    effect: NoSchedule
-  - key: node.kubernetes.io/not-ready
-    operator: Exists
-    effect: NoExecute
-    tolerationSeconds: 60
-```
-
-**4. Model Download Failures**
-```bash
-# Check HuggingFace token secret and network access
-kubectl get secret hf-token-secret -n dynamo -o yaml
-kubectl logs <worker-pod> -n dynamo | grep -i "download\|token\|auth"
-```
-
-**Possible Solutions:**
-- **Invalid Token**: Regenerate HuggingFace token with model access
-- **Network Connectivity**: Check VPC/security group settings
-- **Rate Limiting**: Implement retry mechanisms
-
-**5. Frontend Not Finding Workers**
-```bash
-# Check service discovery and namespace configuration
-kubectl logs <frontend-pod> -n dynamo | grep -i discover
-kubectl get pods -n dynamo -l componentType=worker
-etcdctl get --prefix /dynamo/ --keys-only  # If etcd is accessible
-```
-
-**Possible Solutions:**
-- **Namespace Mismatch**: Ensure `dynamoNamespace` matches between frontend and workers
-- **Worker Not Ready**: Check worker health probes and initialization
-- **etcd Connectivity**: Verify etcd service accessibility
-
-**6. API 503 Errors**
-```bash
-# Check worker readiness and health
-kubectl get pods -n dynamo -l componentType=worker
-kubectl logs <worker-pod> -n dynamo --tail=100 | grep -i "ready\|health\|error"
-```
-
-**Possible Solutions:**
-- **Model Loading**: Wait for initialization (5-15 minutes for large models)
-- **Insufficient Resources**: Check CPU/memory limits vs model requirements
-- **Health Probe Timing**: Adjust probe timeouts for large models
-
-```yaml
-# Generous health probe settings for large models
-readinessProbe:
-  httpGet:
-    path: /health
-    port: 9090
-  initialDelaySeconds: 300    # 5 minutes for model loading
-  periodSeconds: 30
-  timeoutSeconds: 10
-  failureThreshold: 10        # Allow multiple failures during startup
-```
-
-### Cleanup and Reset
-```bash
-# Remove specific deployment
-kubectl delete dynamographdeployment <name> -n dynamo
-
-# Full cleanup (removes all infrastructure)
-cd infra/nvidia-dynamo && ./cleanup.sh
-
-# Reset just the examples (keep platform)
-kubectl delete dynamographdeployment --all -n dynamo
-```
-
-## Documentation and Resources
-
-### NVIDIA Dynamo Documentation
-- **Official Docs**: [NVIDIA Dynamo Documentation](https://docs.nvidia.com/dynamo/)
-- **NGC Containers**: [NVIDIA NGC Catalog](https://catalog.ngc.nvidia.com/)
-- **Model Support**: Check each backend's supported models and configuration options
-- **Performance Tuning**: Refer to backend-specific optimization guides
-
-### Additional Examples
-Explore the `/workspace/` directory in containers for more examples:
-```bash
-kubectl exec -it <pod-name> -n dynamo -- find /workspace/examples -type f -name "*.py"
-```
-
 ---
 
 ## Production Considerations
@@ -1759,3 +1395,158 @@ kubectl exec -it <pod-name> -n dynamo -- find /workspace/examples -type f -name 
 - Implement autoscaling based on request volume
 - Consider multi-tenancy with namespace isolation
 - Monitor GPU utilization and right-size instances
+
+---
+
+## Blueprint Quality and Standards
+
+All blueprints in this repository follow defined standards to ensure consistency, reliability, and maintainability. See [docs/blueprint-standards.md](docs/blueprint-standards.md) for complete documentation.
+
+### Quick Reference
+
+| Standard | Requirement | Documentation |
+|----------|------------|---------------|
+| **Naming** | `<backend>-<pattern>-<variant>.yaml` | [Standards](docs/blueprint-standards.md#naming-conventions) |
+| **Labels** | Required Kubernetes + Dynamo labels | [Standards](docs/blueprint-standards.md#required-metadata) |
+| **Resources** | Must specify requests AND limits | [Standards](docs/blueprint-standards.md#resource-specifications) |
+| **Secrets** | No hardcoded credentials | [Standards](docs/blueprint-standards.md#security-practices) |
+| **Observability** | Metrics labels required | [Standards](docs/blueprint-standards.md#observability-requirements) |
+| **Testing** | Every blueprint has test case | [Standards](docs/blueprint-standards.md#testing-requirements) |
+
+### Validation Tools
+
+```bash
+# Validate a single blueprint
+./scripts/validate-blueprint.sh 01-core/vllm/vllm-aggregated-default.yaml
+
+# Validate all blueprints in a tier
+./scripts/validate-blueprint.sh --tier core
+
+# Run YAML linting on all blueprints
+./scripts/lint-all-blueprints.sh
+
+# Strict mode (warnings = errors)
+./scripts/lint-all-blueprints.sh --strict
+```
+
+### CI/CD Integration
+
+A GitHub Actions workflow template is provided for automated validation:
+
+```bash
+# Copy to your repository
+cp .github/workflows/validate-blueprints.yml.template \
+   /path/to/repo/.github/workflows/validate-blueprints.yml
+```
+
+The workflow automatically:
+- Runs YAML linting on changed files
+- Validates blueprint standards compliance
+- Scans for hardcoded secrets
+- Comments results on PRs
+
+---
+
+## OpenTelemetry Integration
+
+Comprehensive distributed tracing is available via the OpenTelemetry integration. See [docs/monitoring-setup.md](docs/monitoring-setup.md) for detailed setup.
+
+### Quick Setup
+
+```bash
+# 1. Deploy OTEL Collector
+kubectl apply -f config/otel-collector.yaml -n dynamo
+
+# 2. Apply instrumentation ConfigMaps
+kubectl apply -f config/otel-instrumentation.yaml -n dynamo
+
+# 3. Deploy a blueprint with observability enabled
+kubectl apply -f examples/vllm-with-full-observability.yaml -n dynamo
+```
+
+### OTEL ConfigMaps
+
+| ConfigMap | Description | Use Case |
+|-----------|-------------|----------|
+| `dynamo-otel-common` | Base configuration | All deployments |
+| `dynamo-otel-vllm` | vLLM optimized | vLLM workers |
+| `dynamo-otel-sglang` | SGLang optimized | SGLang workers |
+| `dynamo-otel-trtllm` | TRT-LLM optimized | TRT-LLM workers |
+| `dynamo-otel-frontend` | Frontend/router | All frontends |
+| `dynamo-otel-development` | 100% sampling | Debugging |
+| `dynamo-otel-production` | Low overhead | Production |
+
+### Critical: Correct OTEL Variable
+
+```yaml
+# ✅ CORRECT
+- name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+  value: "http://otel-collector.dynamo.svc.cluster.local:4317"
+
+# ❌ WRONG (common mistake)
+- name: OTEL_EXPORT_ENDPOINT  # Will NOT work!
+```
+
+### Example Blueprint Integration
+
+See [`examples/vllm-with-full-observability.yaml`](examples/vllm-with-full-observability.yaml) for a complete example demonstrating:
+- PodMonitor for metrics scraping
+- OTEL tracing configuration
+- Audit logging
+- Health probes with annotations
+
+---
+
+## Documentation Index
+
+| Document | Description |
+|----------|-------------|
+| [Blueprint Standards](docs/blueprint-standards.md) | Naming, labels, resources, security requirements |
+| [Monitoring Setup](docs/monitoring-setup.md) | Metrics collection, Prometheus, OTEL integration |
+| [Configuration Management](docs/configuration-management.md) | Centralized config, profiles, environments |
+| [Catalog README](catalog/README.md) | Full blueprint catalog with tiers |
+| [Test Framework](tests/README.md) | Test organization and execution |
+
+### Configuration Files
+
+| File | Purpose |
+|------|---------|
+| [`config/images.yaml`](config/images.yaml) | Centralized image versions |
+| [`config/resource-profiles.yaml`](config/resource-profiles.yaml) | GPU/CPU resource profiles |
+| [`config/node-selectors.yaml`](config/node-selectors.yaml) | Environment node targeting |
+| [`config/common-env.yaml`](config/common-env.yaml) | Shared environment variables |
+| [`config/otel-collector.yaml`](config/otel-collector.yaml) | OpenTelemetry Collector |
+| [`config/otel-instrumentation.yaml`](config/otel-instrumentation.yaml) | OTEL environment ConfigMaps |
+
+### Automation Scripts
+
+| Script | Purpose |
+|--------|---------|
+| [`scripts/apply-config.sh`](scripts/apply-config.sh) | Apply centralized configuration |
+| [`scripts/validate-blueprint.sh`](scripts/validate-blueprint.sh) | Validate single blueprint |
+| [`scripts/lint-all-blueprints.sh`](scripts/lint-all-blueprints.sh) | Batch validation |
+| [`deploy.sh`](deploy.sh) | Deploy blueprints with catalog lookup |
+| [`test.sh`](test.sh) | Test deployed blueprints |
+| [`cleanup.sh`](cleanup.sh) | Remove deployments |
+
+### Deployment Options
+
+| Option | Purpose |
+|--------|---------|
+| **`--list`** | List available examples with tiers + backends |
+| **`--test <example-id>`** | Deploy specific example for testing |
+| **`--full`** | Deploy all examples in that tier |
+| **`--tier <tier>`** | Deploy all examples in a specific tier |
+| **`--interactive`** | Automatic tier selection (default: core) |
+
+### Logging Levels
+
+| Level | Purpose |
+|-------|---------|
+| **DEBUG** | All step details and errors |
+| **INFO** | Normal operations |
+| **WARN** | Optional steps and suggestions |
+| **ERROR** | Errors preventing deployment |
+| **SILENT** | Errors only via `--silent` |
+
+**See [deploy.sh](deploy.sh) for full options and usage instructions.**

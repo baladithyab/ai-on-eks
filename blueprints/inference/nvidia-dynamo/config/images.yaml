@@ -1,0 +1,185 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - Centralized Image Registry
+# =============================================================================
+#
+# This file defines the canonical image versions for all Dynamo blueprints.
+# Update version tags here to upgrade all deployments globally.
+#
+# Usage:
+#   - Reference these images in blueprints instead of hardcoding
+#   - Use with kustomize or Helm templating for injection
+#   - CI/CD pipelines should read from this file for consistency
+#
+# Version History:
+#   0.7.1 - Production-stable release with UCX fixes
+#   0.7.0 - Initial stable release with DynamoModel CRD support
+#
+# =============================================================================
+
+# Global configuration
+registry:
+  # Default registry for all NVIDIA Dynamo images
+  default: nvcr.io/nvidia/ai-dynamo
+  # Alternative mirrors if needed (for air-gapped or latency-sensitive deployments)
+  mirrors:
+    - ecr.aws/nvidia/ai-dynamo
+    - gcr.io/nvidia-ai-dynamo
+
+# Current production version
+# Change this to upgrade all runtimes globally
+version:
+  current: "0.7.1"
+  # Pin specific runtimes to different versions if needed
+  # Leave as "current" to use the global version
+  overrides:
+    vllm: "current"       # Uses version.current
+    sglang: "current"     # Uses version.current
+    trtllm: "current"     # Uses version.current
+    kvbm: "current"       # Uses version.current
+
+# Runtime images with full specification
+images:
+  # ==========================================================================
+  # vLLM Runtime - High-performance LLM inference with PagedAttention
+  # ==========================================================================
+  vllm:
+    registry: nvcr.io/nvidia/ai-dynamo
+    name: vllm-runtime
+    tag: "0.7.1"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+    # Features:
+    #   - PagedAttention for efficient memory management
+    #   - Continuous batching for throughput optimization
+    #   - Tensor parallelism for multi-GPU scaling
+    #   - NVLink-optimized for H100/A100 multi-GPU
+    digest: ""  # Optional: SHA256 digest for immutable references
+    pullPolicy: IfNotPresent
+    notes: |
+      Best for NVLink-connected multi-GPU (p4d, p5) deployments.
+      For PCIe multi-GPU (g5, g6), consider SGLang to avoid shm_broadcast issues.
+
+  # ==========================================================================
+  # SGLang Runtime - RadixAttention-based inference
+  # ==========================================================================  
+  sglang:
+    registry: nvcr.io/nvidia/ai-dynamo
+    name: sglang-runtime
+    tag: "0.7.1"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+    # Features:
+    #   - RadixAttention for prefix caching
+    #   - PCIe-friendly tensor parallelism
+    #   - Structured generation support
+    #   - Compatible with PCIe topologies (g5, g6, g6e instances)
+    digest: ""
+    pullPolicy: IfNotPresent
+    notes: |
+      Recommended for PCIe multi-GPU instances (g5, g6, g6e).
+      Avoids vLLM's shm_broadcast coordination issues on non-NVLink topologies.
+
+  # ==========================================================================
+  # TensorRT-LLM Runtime - NVIDIA optimized inference
+  # ==========================================================================
+  trtllm:
+    registry: nvcr.io/nvidia/ai-dynamo
+    name: trtllm-runtime
+    tag: "0.7.1"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.1
+    # Features:
+    #   - TensorRT-optimized kernels
+    #   - In-flight batching
+    #   - FP8 quantization support (Hopper GPUs)
+    #   - Paged KV cache
+    digest: ""
+    pullPolicy: IfNotPresent
+    notes: |
+      Best performance on Hopper (H100) and Ada (L40S) GPUs.
+      Requires pre-compiled engines or runtime compilation.
+
+  # ==========================================================================
+  # KVBM Server - KV Cache Block Manager for disaggregated inference
+  # ==========================================================================
+  kvbm:
+    registry: nvcr.io/nvidia/ai-dynamo
+    name: kvbm-server
+    tag: "0.7.1"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/kvbm-server:0.7.1
+    # Features:
+    #   - Distributed KV cache management
+    #   - GPU memory pooling across workers
+    #   - Disk-based overflow support
+    #   - Metrics endpoint for monitoring
+    digest: ""
+    pullPolicy: IfNotPresent
+    notes: |
+      Required for disaggregated architectures.
+      Enable with DYN_KVBM_METRICS=true for Prometheus metrics.
+
+  # ==========================================================================
+  # NIM Proxy - Protocol translation for NIM compatibility
+  # ==========================================================================
+  nim-proxy:
+    registry: nvcr.io/nvidia/ai-dynamo
+    name: nim-proxy
+    tag: "0.7.1"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/nim-proxy:0.7.1
+    # Features:
+    #   - OpenAI API compatibility layer
+    #   - Request routing and load balancing
+    #   - Rate limiting and authentication
+    digest: ""
+    pullPolicy: IfNotPresent
+    notes: |
+      Use for NIM API compatibility requirements.
+
+  # ==========================================================================
+  # Router - Request routing for multi-model deployments
+  # ==========================================================================
+  router:
+    registry: nvcr.io/nvidia/ai-dynamo
+    name: router
+    tag: "0.7.1"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/router:0.7.1
+    # Features:
+    #   - Intelligent request routing
+    #   - Load-aware distribution
+    #   - Multi-model endpoint support
+    digest: ""
+    pullPolicy: IfNotPresent
+    notes: |
+      Use for router-based architectures with multiple model replicas.
+
+  # ==========================================================================
+  # Planner - Request planning for disaggregated architectures
+  # ==========================================================================
+  planner:
+    registry: nvcr.io/nvidia/ai-dynamo
+    name: planner
+    tag: "0.7.1"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/planner:0.7.1
+    # Features:
+    #   - Request orchestration across prefill/decode workers
+    #   - Metrics endpoint on port 9085
+    #   - KV cache placement optimization
+    digest: ""
+    pullPolicy: IfNotPresent
+    notes: |
+      Required for disaggregated prefill/decode architectures.
+      Metrics available on port 9085 for Prometheus scraping.
+
+# =============================================================================
+# Helper Templates
+# =============================================================================
+# These can be used with envsubst or templating tools
+
+# Full image reference template:
+# ${images.<runtime>.registry}/${images.<runtime>.name}:${images.<runtime>.tag}
+
+# Example usage in kustomize:
+# images:
+#   - name: vllm-runtime
+#     newName: nvcr.io/nvidia/ai-dynamo/vllm-runtime
+#     newTag: "0.7.1"

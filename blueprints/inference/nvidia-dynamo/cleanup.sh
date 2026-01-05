@@ -6,21 +6,32 @@
 # Removes deployed DynamoGraphDeployment resources and associated pods.
 # Useful for cleaning up test deployments or resetting the environment.
 #
+# Enhanced Features (v0.7.1+):
+# - --remove-otel: Remove OTEL Collector deployment
+# - --remove-monitoring: Remove PodMonitor/ServiceMonitor resources
+# - --remove-configs: Remove centralized ConfigMaps
+#
 # Usage:
 #   ./cleanup.sh [deployment-name]  # Clean specific deployment
 #   ./cleanup.sh --all              # Clean all Dynamo deployments
 #   ./cleanup.sh                    # Interactive selection
+#   ./cleanup.sh --remove-otel      # Remove OTEL Collector
+#   ./cleanup.sh --remove-monitoring # Remove monitoring resources
+#   ./cleanup.sh --remove-configs   # Remove ConfigMaps
+#   ./cleanup.sh --remove-all-infra # Remove all infrastructure
 #
 # Examples:
 #   ./cleanup.sh vllm-agg           # Remove specific deployment
 #   ./cleanup.sh --all              # Remove all deployments
 #   ./cleanup.sh --namespace custom # Clean from custom namespace
+#   ./cleanup.sh --remove-otel --remove-monitoring  # Remove observability infra
 #
 # Safety:
 #   - Does NOT delete the dynamo namespace
 #   - Does NOT delete Dynamo platform (operator, etcd, NATS)
 #   - Does NOT delete shared model cache PVC
 #   - Only removes DynamoGraphDeployment resources and their pods
+#   - Infrastructure removal requires confirmation
 #
 # Catalog support:
 #   If a catalog id is passed, cleanup.sh resolves it to the deployed
@@ -31,6 +42,7 @@ set -euo pipefail
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_DIR="${SCRIPT_DIR}/config"
 
 # Colors for output
 RED='\033[0;31m'
@@ -46,6 +58,12 @@ NAMESPACE="dynamo"
 VERBOSE=false
 DRY_RUN=false
 FORCE=false
+
+# Infrastructure removal flags
+REMOVE_OTEL=false
+REMOVE_MONITORING=false
+REMOVE_CONFIGS=false
+REMOVE_ALL_INFRA=false
 
 #---------------------------------------------------------------
 # Catalog resolution (stable ids -> manifests)
@@ -223,6 +241,223 @@ print_banner() {
 }
 
 #---------------------------------------------------------------
+# Infrastructure Removal Functions
+#---------------------------------------------------------------
+
+remove_otel_collector() {
+    local namespace="$1"
+    local dry_run="${2:-false}"
+    
+    section "Removing OTEL Collector"
+    
+    # Check if OTEL Collector exists
+    if ! kubectl get deployment otel-collector -n "$namespace" &>/dev/null; then
+        info "OTEL Collector not found in namespace $namespace"
+        return 0
+    fi
+    
+    # Confirmation prompt (unless forced)
+    if [ "$FORCE" = false ] && [ "$dry_run" = false ]; then
+        echo ""
+        echo -e "${YELLOW}⚠ WARNING: This will remove the OTEL Collector and stop all trace collection.${NC}"
+        echo "Resources to be deleted:"
+        echo "  - Deployment: otel-collector"
+        echo "  - Service: otel-collector"
+        echo "  - ServiceAccount: otel-collector"
+        echo "  - ConfigMap: otel-collector-config"
+        echo "  - ClusterRole/ClusterRoleBinding: otel-collector"
+        echo ""
+        read -p "Continue with OTEL Collector removal? (yes/no): " confirmation
+        if [ "$confirmation" != "yes" ]; then
+            info "OTEL Collector removal cancelled"
+            return 0
+        fi
+    fi
+    
+    if [ "$dry_run" = true ]; then
+        dry_run_msg "kubectl delete deployment otel-collector -n $namespace"
+        dry_run_msg "kubectl delete service otel-collector -n $namespace"
+        dry_run_msg "kubectl delete serviceaccount otel-collector -n $namespace"
+        dry_run_msg "kubectl delete configmap otel-collector-config -n $namespace"
+        dry_run_msg "kubectl delete clusterrolebinding otel-collector"
+        dry_run_msg "kubectl delete clusterrole otel-collector"
+        return 0
+    fi
+    
+    # Delete OTEL Collector resources
+    info "Deleting OTEL Collector deployment..."
+    kubectl delete deployment otel-collector -n "$namespace" --ignore-not-found < /dev/null || warn "Failed to delete deployment"
+    
+    info "Deleting OTEL Collector service..."
+    kubectl delete service otel-collector -n "$namespace" --ignore-not-found < /dev/null || warn "Failed to delete service"
+    
+    info "Deleting OTEL Collector ServiceAccount..."
+    kubectl delete serviceaccount otel-collector -n "$namespace" --ignore-not-found < /dev/null || warn "Failed to delete serviceaccount"
+    
+    info "Deleting OTEL Collector ConfigMap..."
+    kubectl delete configmap otel-collector-config -n "$namespace" --ignore-not-found < /dev/null || warn "Failed to delete configmap"
+    
+    info "Deleting OTEL Collector ClusterRoleBinding..."
+    kubectl delete clusterrolebinding otel-collector --ignore-not-found < /dev/null || warn "Failed to delete clusterrolebinding"
+    
+    info "Deleting OTEL Collector ClusterRole..."
+    kubectl delete clusterrole otel-collector --ignore-not-found < /dev/null || warn "Failed to delete clusterrole"
+    
+    # Delete OTEL ServiceMonitor
+    kubectl delete servicemonitor otel-collector -n "$namespace" --ignore-not-found < /dev/null 2>/dev/null || true
+    
+    # Delete OTEL PodMonitor
+    kubectl delete podmonitor dynamo-inference-otel -n "$namespace" --ignore-not-found < /dev/null 2>/dev/null || true
+    
+    success "OTEL Collector removed successfully"
+}
+
+remove_monitoring_resources() {
+    local namespace="$1"
+    local dry_run="${2:-false}"
+    
+    section "Removing Monitoring Resources"
+    
+    # Get count of monitoring resources
+    local podmonitor_count=$(kubectl get podmonitor -n "$namespace" --no-headers 2>/dev/null | wc -l)
+    local servicemonitor_count=$(kubectl get servicemonitor -n "$namespace" --no-headers 2>/dev/null | wc -l)
+    
+    if [ "$podmonitor_count" -eq 0 ] && [ "$servicemonitor_count" -eq 0 ]; then
+        info "No monitoring resources found in namespace $namespace"
+        return 0
+    fi
+    
+    # Confirmation prompt (unless forced)
+    if [ "$FORCE" = false ] && [ "$dry_run" = false ]; then
+        echo ""
+        echo -e "${YELLOW}⚠ WARNING: This will remove all PodMonitors and ServiceMonitors.${NC}"
+        echo "  - PodMonitors: $podmonitor_count"
+        echo "  - ServiceMonitors: $servicemonitor_count"
+        echo ""
+        echo "Prometheus will stop scraping metrics from Dynamo pods."
+        echo ""
+        read -p "Continue with monitoring resources removal? (yes/no): " confirmation
+        if [ "$confirmation" != "yes" ]; then
+            info "Monitoring resources removal cancelled"
+            return 0
+        fi
+    fi
+    
+    if [ "$dry_run" = true ]; then
+        dry_run_msg "kubectl delete podmonitor --all -n $namespace"
+        dry_run_msg "kubectl delete servicemonitor -n $namespace -l app.kubernetes.io/part-of=nvidia-dynamo"
+        return 0
+    fi
+    
+    # Delete PodMonitors
+    info "Deleting PodMonitors..."
+    kubectl delete podmonitor --all -n "$namespace" --ignore-not-found < /dev/null || warn "Failed to delete some PodMonitors"
+    
+    # Delete ServiceMonitors (only Dynamo-related ones)
+    info "Deleting ServiceMonitors..."
+    kubectl delete servicemonitor -n "$namespace" -l "app.kubernetes.io/part-of=nvidia-dynamo" --ignore-not-found < /dev/null 2>/dev/null || true
+    
+    # Also delete frontend-metrics ServiceMonitors
+    kubectl get servicemonitor -n "$namespace" --no-headers 2>/dev/null | awk '{print $1}' | grep -E "frontend-metrics$" | while read sm; do
+        kubectl delete servicemonitor "$sm" -n "$namespace" --ignore-not-found < /dev/null 2>/dev/null || true
+    done
+    
+    success "Monitoring resources removed successfully"
+}
+
+remove_configmaps() {
+    local namespace="$1"
+    local dry_run="${2:-false}"
+    
+    section "Removing Centralized ConfigMaps"
+    
+    # List Dynamo ConfigMaps
+    local configmaps=$(kubectl get configmap -n "$namespace" \
+        -l "app.kubernetes.io/part-of=nvidia-dynamo" \
+        --no-headers 2>/dev/null | awk '{print $1}')
+    
+    # Also include common dynamo- prefixed ConfigMaps
+    local dynamo_configmaps=$(kubectl get configmap -n "$namespace" --no-headers 2>/dev/null | \
+        awk '{print $1}' | grep -E "^dynamo-" || true)
+    
+    # Combine and deduplicate
+    local all_configmaps=$(echo -e "$configmaps\n$dynamo_configmaps" | sort -u | grep -v "^$" || true)
+    
+    if [ -z "$all_configmaps" ]; then
+        info "No Dynamo ConfigMaps found in namespace $namespace"
+        return 0
+    fi
+    
+    local configmap_count=$(echo "$all_configmaps" | wc -l)
+    
+    # Confirmation prompt (unless forced)
+    if [ "$FORCE" = false ] && [ "$dry_run" = false ]; then
+        echo ""
+        echo -e "${YELLOW}⚠ WARNING: This will remove centralized configuration.${NC}"
+        echo "ConfigMaps to be deleted ($configmap_count):"
+        echo "$all_configmaps" | sed 's/^/  - /'
+        echo ""
+        echo "Note: Deployed DGDs reference these ConfigMaps. Remove DGDs first or they may fail."
+        echo ""
+        read -p "Continue with ConfigMap removal? (yes/no): " confirmation
+        if [ "$confirmation" != "yes" ]; then
+            info "ConfigMap removal cancelled"
+            return 0
+        fi
+    fi
+    
+    if [ "$dry_run" = true ]; then
+        echo "$all_configmaps" | while read cm; do
+            dry_run_msg "kubectl delete configmap $cm -n $namespace"
+        done
+        return 0
+    fi
+    
+    # Delete ConfigMaps
+    echo "$all_configmaps" | while read cm; do
+        info "Deleting ConfigMap: $cm"
+        kubectl delete configmap "$cm" -n "$namespace" --ignore-not-found < /dev/null || warn "Failed to delete $cm"
+    done
+    
+    success "Centralized ConfigMaps removed successfully"
+}
+
+remove_all_infrastructure() {
+    local namespace="$1"
+    local dry_run="${2:-false}"
+    
+    section "Removing All Observability Infrastructure"
+    
+    if [ "$FORCE" = false ] && [ "$dry_run" = false ]; then
+        echo ""
+        echo -e "${RED}⚠ DANGER: This will remove ALL observability infrastructure!${NC}"
+        echo ""
+        echo "This includes:"
+        echo "  - OTEL Collector (distributed tracing)"
+        echo "  - All PodMonitors and ServiceMonitors (metrics collection)"
+        echo "  - All Dynamo ConfigMaps (centralized configuration)"
+        echo ""
+        echo "This will disable all observability features for Dynamo deployments."
+        echo ""
+        read -p "Type 'REMOVE-ALL' to confirm: " confirmation
+        if [ "$confirmation" != "REMOVE-ALL" ]; then
+            info "Infrastructure removal cancelled"
+            return 0
+        fi
+    fi
+    
+    # Set force to avoid inner confirmations
+    local original_force=$FORCE
+    FORCE=true
+    
+    remove_otel_collector "$namespace" "$DRY_RUN"
+    remove_monitoring_resources "$namespace" "$DRY_RUN"
+    remove_configmaps "$namespace" "$DRY_RUN"
+    
+    FORCE=$original_force
+}
+
+#---------------------------------------------------------------
 # Parse Arguments
 #---------------------------------------------------------------
 
@@ -251,6 +486,22 @@ while [[ $# -gt 0 ]]; do
             FORCE=true
             shift
             ;;
+        --remove-otel)
+            REMOVE_OTEL=true
+            shift
+            ;;
+        --remove-monitoring)
+            REMOVE_MONITORING=true
+            shift
+            ;;
+        --remove-configs)
+            REMOVE_CONFIGS=true
+            shift
+            ;;
+        --remove-all-infra)
+            REMOVE_ALL_INFRA=true
+            shift
+            ;;
         -h|--help)
             cat << EOF
 NVIDIA Dynamo Cleanup Script
@@ -260,26 +511,42 @@ Usage:
   $0 --all              # Clean all deployments
   $0 --namespace <ns>   # Use custom namespace (default: dynamo)
 
-Options:
+Deployment Options:
   --all, -a             Clean all DynamoGraphDeployments
+
+Infrastructure Options:
+  --remove-otel         Remove OTEL Collector deployment
+  --remove-monitoring   Remove all PodMonitors and ServiceMonitors
+  --remove-configs      Remove centralized Dynamo ConfigMaps
+  --remove-all-infra    Remove all observability infrastructure
+
+General Options:
   --namespace <ns>      Use custom namespace (default: dynamo)
   --verbose, -v         Show detailed output including kubectl commands
   --dry-run, -n         Show what would be deleted without actually deleting
-  --force, -f           Skip confirmation prompt
+  --force, -f           Skip confirmation prompts
   -h, --help            Show this help message
 
 Examples:
-  $0 vllm-agg           # Remove vllm-agg deployment
-  $0 --all              # Remove all DGDs
-  $0 --namespace test   # Clean from 'test' namespace
-  $0 --dry-run --all    # Preview what would be deleted
-  $0 --force vllm-agg   # Delete without confirmation
+  $0 vllm-agg                      # Remove vllm-agg deployment
+  $0 --all                         # Remove all DGDs
+  $0 --namespace test              # Clean from 'test' namespace
+  $0 --dry-run --all               # Preview what would be deleted
+  $0 --force vllm-agg              # Delete without confirmation
+  
+  # Infrastructure cleanup
+  $0 --remove-otel                 # Remove OTEL Collector only
+  $0 --remove-monitoring           # Remove PodMonitors/ServiceMonitors
+  $0 --remove-configs              # Remove Dynamo ConfigMaps
+  $0 --remove-otel --remove-monitoring  # Remove observability infra
+  $0 --remove-all-infra            # Remove ALL infrastructure
+  $0 --all --remove-all-infra      # Full cleanup (deployments + infra)
 
 Safety:
   - Does NOT delete dynamo namespace
   - Does NOT delete Dynamo platform components
   - Does NOT delete shared model cache PVC
-  - Only removes DynamoGraphDeployment CRs
+  - Infrastructure removal requires confirmation (use --force to skip)
 
 EOF
             exit 0
@@ -300,6 +567,34 @@ if [ "${DRY_RUN}" = true ]; then
 fi
 
 print_banner "DYNAMO CLEANUP"
+
+#---------------------------------------------------------------
+# Infrastructure Removal (if requested)
+#---------------------------------------------------------------
+
+if [ "$REMOVE_ALL_INFRA" = true ]; then
+    remove_all_infrastructure "$NAMESPACE" "$DRY_RUN"
+else
+    if [ "$REMOVE_OTEL" = true ]; then
+        remove_otel_collector "$NAMESPACE" "$DRY_RUN"
+    fi
+    
+    if [ "$REMOVE_MONITORING" = true ]; then
+        remove_monitoring_resources "$NAMESPACE" "$DRY_RUN"
+    fi
+    
+    if [ "$REMOVE_CONFIGS" = true ]; then
+        remove_configmaps "$NAMESPACE" "$DRY_RUN"
+    fi
+fi
+
+# If only infrastructure removal was requested (no deployments), exit here
+if [ -z "$DEPLOYMENT_NAME" ] && [ "$CLEANUP_ALL" = false ]; then
+    echo ""
+    info "Infrastructure cleanup complete"
+    info "To also clean deployments, add a deployment name or --all flag"
+    exit 0
+fi
 
 #---------------------------------------------------------------
 # Get Available Deployments
@@ -624,6 +919,23 @@ echo "  ✓ Dynamo operator"
 echo "  ✓ etcd (state storage)"
 echo "  ✓ NATS (messaging)"
 echo "  ✓ Shared model cache PVC (dynamo-shared-models)"
+
+# Show observability status if infrastructure removal was requested
+if [ "$REMOVE_OTEL" = true ] || [ "$REMOVE_MONITORING" = true ] || [ "$REMOVE_CONFIGS" = true ] || [ "$REMOVE_ALL_INFRA" = true ]; then
+    echo ""
+    info "Observability infrastructure status:"
+    if kubectl get deployment otel-collector -n "${NAMESPACE}" &>/dev/null; then
+        echo "  ✓ OTEL Collector (running)"
+    else
+        echo "  ✗ OTEL Collector (removed)"
+    fi
+    pm_count=$(kubectl get podmonitor -n "${NAMESPACE}" --no-headers 2>/dev/null | wc -l)
+    sm_count=$(kubectl get servicemonitor -n "${NAMESPACE}" --no-headers 2>/dev/null | wc -l)
+    echo "  • PodMonitors: $pm_count"
+    echo "  • ServiceMonitors: $sm_count"
+fi
+
 echo ""
 info "To remove platform: kubectl delete namespace ${NAMESPACE}"
 info "To remove shared cache: kubectl delete pvc dynamo-shared-models -n ${NAMESPACE}"
+info "To remove observability: ./cleanup.sh --remove-all-infra"

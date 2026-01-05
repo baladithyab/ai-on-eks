@@ -10,6 +10,12 @@
 # - If <id> isn't in the catalog, we fall back to best-effort filename lookup
 #   (and warn) to preserve backwards compatibility.
 #
+# Enhanced Features (v0.7.1+):
+# - --apply-configs: Apply centralized ConfigMaps before deployment
+# - --enable-monitoring: Deploy PodMonitor/ServiceMonitor for metrics
+# - --enable-tracing: Deploy OTEL Collector for distributed tracing
+# - --validate: Run blueprint validation before deployment
+#
 # Notes:
 # - Many manifests have filename != metadata.name. This script uses the manifest's
 #   metadata.name for runtime operations (wait, Service/ServiceMonitor naming).
@@ -35,10 +41,21 @@ NAMESPACE="dynamo"
 # Catalog
 CATALOG_FILE="${SCRIPT_DIR}/catalog/catalog.yaml"
 
+# Config paths
+CONFIG_DIR="${SCRIPT_DIR}/config"
+SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
+
 # Dynamo version management
 TFVARS_FILE="${SCRIPT_DIR}/../../../infra/nvidia-dynamo/terraform/blueprint.tfvars"
 DEFAULT_VERSION="v0.7.1"  # Fallback if tfvars file not found
 VERSION_SOURCE=""  # Track where version came from
+
+# New feature flags (opt-in, preserve backwards compatibility)
+APPLY_CONFIGS=false
+ENABLE_MONITORING=false
+ENABLE_TRACING=false
+VALIDATE_FIRST=false
+SKIP_VALIDATION=false
 
 # Utility functions
 info() {
@@ -167,23 +184,51 @@ NVIDIA Dynamo deployment script
 
 Usage:
   ./deploy.sh --list
-  ./deploy.sh <id>
-  ./deploy.sh <relative/path.yaml>
+  ./deploy.sh <id> [OPTIONS]
+  ./deploy.sh <relative/path.yaml> [OPTIONS]
   ./deploy.sh            # interactive selection
+
+Options:
+  --apply-configs       Apply centralized ConfigMaps before deployment
+  --enable-monitoring   Deploy PodMonitor for Prometheus metrics collection
+  --enable-tracing      Deploy OTEL Collector for distributed tracing
+  --validate            Run blueprint validation before deployment
+  --skip-validation     Skip validation even if --validate is set
+  --namespace <ns>      Override target namespace (default: dynamo)
+  -h, --help            Show this help message
 
 Behavior:
   - <id> is resolved via catalog/catalog.yaml.
   - If <id> is not in the catalog, the script falls back to filename lookup
     (e.g., finds <id>.yaml under this directory) and prints a warning.
 
+Enhanced Deployment (with observability):
+  ./deploy.sh vllm-aggregated-default --apply-configs --enable-monitoring
+  ./deploy.sh vllm-aggregated-default --enable-tracing
+  ./deploy.sh vllm-aggregated-default --validate --enable-monitoring --enable-tracing
+
 Examples:
   ./deploy.sh --list
   ./deploy.sh vllm-aggregated-default
   ./deploy.sh sglang-aggregated-default
   ./deploy.sh trtllm-aggregated-default
-  ./deploy.sh vllm-full-observability
+  ./deploy.sh vllm-full-observability --enable-monitoring --enable-tracing
   ./deploy.sh llava-1.5-7b
   ./deploy.sh trtllm-dgdr-online
+
+Configuration Management:
+  # Apply centralized configs (one-time setup)
+  ./scripts/apply-config.sh dynamo
+  
+  # Then deploy with monitoring
+  ./deploy.sh vllm-aggregated-default --enable-monitoring
+
+Observability Infrastructure:
+  # Deploy OTEL Collector (one-time setup)
+  kubectl apply -f config/otel-collector.yaml -n dynamo
+  
+  # Deploy PodMonitor template (one-time setup)
+  kubectl apply -f podmonitor-template.yaml -n dynamo
 EOF
 }
 
@@ -257,6 +302,12 @@ list_catalog() {
 
     echo ""
     echo "Tip: deploy with ./deploy.sh <id>"
+    echo ""
+    echo "Enhanced deployment options:"
+    echo "  ./deploy.sh <id> --apply-configs      # Apply centralized ConfigMaps first"
+    echo "  ./deploy.sh <id> --enable-monitoring  # Deploy PodMonitor for metrics"
+    echo "  ./deploy.sh <id> --enable-tracing     # Deploy OTEL Collector"
+    echo "  ./deploy.sh <id> --validate           # Validate blueprint before deployment"
 }
 
 #---------------------------------------------------------------
@@ -318,6 +369,132 @@ manifest_detect_primary_kind() {
 }
 
 #---------------------------------------------------------------
+# New Feature Functions: Config, Monitoring, Tracing
+#---------------------------------------------------------------
+
+apply_centralized_configs() {
+    local namespace="$1"
+    
+    section "Applying Centralized Configurations"
+    
+    local apply_config_script="${SCRIPTS_DIR}/apply-config.sh"
+    
+    if [ -f "$apply_config_script" ]; then
+        info "Running apply-config.sh for namespace: $namespace"
+        if bash "$apply_config_script" "$namespace"; then
+            success "Centralized configurations applied successfully"
+        else
+            warn "Failed to apply some configurations - check output above"
+        fi
+    else
+        warn "apply-config.sh not found, applying individual configs..."
+        
+        # Fallback: Apply individual config files
+        local configs=(
+            "${CONFIG_DIR}/common-env.yaml"
+        )
+        
+        for config in "${configs[@]}"; do
+            if [ -f "$config" ]; then
+                info "Applying: $(basename "$config")"
+                kubectl apply -f "$config" -n "$namespace" || warn "Failed to apply $(basename "$config")"
+            fi
+        done
+    fi
+}
+
+deploy_monitoring_infrastructure() {
+    local namespace="$1"
+    local deployment_name="$2"
+    
+    section "Deploying Monitoring Infrastructure"
+    
+    # Apply PodMonitor template
+    local podmonitor_template="${SCRIPT_DIR}/podmonitor-template.yaml"
+    if [ -f "$podmonitor_template" ]; then
+        info "Applying PodMonitor template..."
+        # Replace namespace in template
+        sed "s/namespace: nvidia-dynamo/namespace: ${namespace}/g" "$podmonitor_template" | \
+        sed "s/- dynamo/- ${namespace}/g" | \
+        sed "s/- nvidia-dynamo/- ${namespace}/g" | \
+        kubectl apply -f - 2>/dev/null || warn "PodMonitor may already exist or CRD not installed"
+        success "PodMonitor template applied"
+    else
+        warn "PodMonitor template not found: $podmonitor_template"
+    fi
+    
+    # Check if ServiceMonitor CRD exists
+    if kubectl get crd servicemonitors.monitoring.coreos.com &>/dev/null; then
+        info "ServiceMonitor CRD available - metrics collection enabled"
+    else
+        warn "ServiceMonitor CRD not found - install prometheus-operator for metrics collection"
+    fi
+}
+
+deploy_tracing_infrastructure() {
+    local namespace="$1"
+    
+    section "Deploying Tracing Infrastructure (OTEL)"
+    
+    local otel_collector="${CONFIG_DIR}/otel-collector.yaml"
+    local otel_instrumentation="${CONFIG_DIR}/otel-instrumentation.yaml"
+    
+    # Deploy OTEL Collector
+    if [ -f "$otel_collector" ]; then
+        info "Deploying OTEL Collector..."
+        # Replace namespace in OTEL collector config
+        sed "s/namespace: dynamo/namespace: ${namespace}/g" "$otel_collector" | \
+        kubectl apply -f - 2>/dev/null || warn "OTEL Collector deployment may have failed"
+        success "OTEL Collector deployed"
+    else
+        warn "OTEL Collector config not found: $otel_collector"
+    fi
+    
+    # Deploy OTEL Instrumentation ConfigMaps
+    if [ -f "$otel_instrumentation" ]; then
+        info "Deploying OTEL Instrumentation ConfigMaps..."
+        sed "s/namespace: dynamo/namespace: ${namespace}/g" "$otel_instrumentation" | \
+        kubectl apply -f - 2>/dev/null || warn "OTEL Instrumentation deployment may have failed"
+        success "OTEL Instrumentation ConfigMaps deployed"
+    else
+        warn "OTEL Instrumentation config not found: $otel_instrumentation"
+    fi
+    
+    # Wait for OTEL Collector to be ready
+    info "Waiting for OTEL Collector to be ready..."
+    if kubectl wait --for=condition=available deployment/otel-collector -n "$namespace" --timeout=120s 2>/dev/null; then
+        success "OTEL Collector is ready"
+    else
+        warn "OTEL Collector may not be fully ready - check pod status"
+    fi
+}
+
+run_blueprint_validation() {
+    local manifest_file="$1"
+    
+    section "Blueprint Validation"
+    
+    local validate_script="${SCRIPTS_DIR}/validate-blueprint.sh"
+    
+    if [ -f "$validate_script" ]; then
+        info "Running validation on: $(basename "$manifest_file")"
+        if bash "$validate_script" "$manifest_file"; then
+            success "Blueprint validation passed"
+            return 0
+        else
+            error "Blueprint validation failed"
+            echo ""
+            echo "Fix validation errors or use --skip-validation to proceed anyway"
+            return 1
+        fi
+    else
+        warn "Validation script not found: $validate_script"
+        warn "Skipping validation"
+        return 0
+    fi
+}
+
+#---------------------------------------------------------------
 # Version Information
 #---------------------------------------------------------------
 
@@ -357,8 +534,10 @@ info "To override: export DYNAMO_VERSION=<version> or edit terraform/blueprint.t
 # Parse Arguments / Selection
 #---------------------------------------------------------------
 
-if [ $# -gt 0 ]; then
-    case "${1}" in
+EXAMPLE_ID=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --list)
             list_catalog
             exit 0
@@ -367,16 +546,46 @@ if [ $# -gt 0 ]; then
             usage
             exit 0
             ;;
+        --apply-configs)
+            APPLY_CONFIGS=true
+            shift
+            ;;
+        --enable-monitoring)
+            ENABLE_MONITORING=true
+            shift
+            ;;
+        --enable-tracing)
+            ENABLE_TRACING=true
+            shift
+            ;;
+        --validate)
+            VALIDATE_FIRST=true
+            shift
+            ;;
+        --skip-validation)
+            SKIP_VALIDATION=true
+            shift
+            ;;
+        --namespace)
+            NAMESPACE="$2"
+            shift 2
+            ;;
+        -*)
+            warn "Unknown option: $1"
+            shift
+            ;;
+        *)
+            if [ -z "$EXAMPLE_ID" ]; then
+                EXAMPLE_ID="$1"
+            fi
+            shift
+            ;;
     esac
-fi
+done
 
 section "Example Selection"
 
-EXAMPLE_ID=""
-if [ $# -gt 0 ]; then
-    EXAMPLE_ID="$1"
-    info "Selected id: ${EXAMPLE_ID}"
-else
+if [ -z "$EXAMPLE_ID" ]; then
     if [ -f "$CATALOG_FILE" ]; then
         info "No id provided; showing catalog:"
         list_catalog
@@ -390,6 +599,8 @@ else
         error "No example selected"
         exit 1
     fi
+else
+    info "Selected id: ${EXAMPLE_ID}"
 fi
 
 #---------------------------------------------------------------
@@ -483,6 +694,34 @@ info "Primary kind: ${RESOURCE_KIND}"
 info "Primary name: ${RESOURCE_NAME}"
 info "Namespace: ${TARGET_NAMESPACE}"
 
+# Show enabled features
+if [ "$APPLY_CONFIGS" = true ] || [ "$ENABLE_MONITORING" = true ] || [ "$ENABLE_TRACING" = true ] || [ "$VALIDATE_FIRST" = true ]; then
+    section "Enhanced Features Enabled"
+    [ "$APPLY_CONFIGS" = true ] && info "✓ Centralized ConfigMaps will be applied"
+    [ "$ENABLE_MONITORING" = true ] && info "✓ PodMonitor/ServiceMonitor will be deployed"
+    [ "$ENABLE_TRACING" = true ] && info "✓ OTEL Collector will be deployed"
+    [ "$VALIDATE_FIRST" = true ] && info "✓ Blueprint validation will run before deployment"
+fi
+
+#---------------------------------------------------------------
+# Blueprint Validation (if enabled)
+#---------------------------------------------------------------
+
+if [ "$VALIDATE_FIRST" = true ] && [ "$SKIP_VALIDATION" = false ]; then
+    if ! run_blueprint_validation "${MANIFEST_FILE}"; then
+        error "Deployment aborted due to validation failure"
+        exit 1
+    fi
+fi
+
+#---------------------------------------------------------------
+# Apply Centralized Configs (if enabled)
+#---------------------------------------------------------------
+
+if [ "$APPLY_CONFIGS" = true ]; then
+    apply_centralized_configs "${TARGET_NAMESPACE}"
+fi
+
 #---------------------------------------------------------------
 # Version tag patching (safe, avoids :0.7.1.post1 drift)
 #---------------------------------------------------------------
@@ -561,6 +800,14 @@ if [ "${RESOURCE_KIND}" = "DynamoGraphDeployment" ] || [ "${RESOURCE_KIND}" = "D
         error "NGC secret pre-flight check failed. Aborting deployment."
         exit 1
     fi
+fi
+
+#---------------------------------------------------------------
+# Deploy Tracing Infrastructure (if enabled, before workload)
+#---------------------------------------------------------------
+
+if [ "$ENABLE_TRACING" = true ]; then
+    deploy_tracing_infrastructure "${TARGET_NAMESPACE}"
 fi
 
 #---------------------------------------------------------------
@@ -647,6 +894,14 @@ fi
 # Clean up any temp manifests we created (kubectl has already read them)
 [ -n "${TEMP_MANIFEST}" ] && [ -f "${TEMP_MANIFEST}" ] && rm -f "${TEMP_MANIFEST}"
 [ -n "${CACHE_MANIFEST}" ] && [ -f "${CACHE_MANIFEST}" ] && rm -f "${CACHE_MANIFEST}"
+
+#---------------------------------------------------------------
+# Deploy Monitoring Infrastructure (if enabled, after workload)
+#---------------------------------------------------------------
+
+if [ "$ENABLE_MONITORING" = true ]; then
+    deploy_monitoring_infrastructure "${TARGET_NAMESPACE}" "${RESOURCE_NAME}"
+fi
 
 #---------------------------------------------------------------
 # Post-apply behavior by kind
@@ -785,6 +1040,26 @@ kubectl get pods -n "${TARGET_NAMESPACE}" -l "nvidia.com/dynamo-namespace=${DEPL
 }
 
 #---------------------------------------------------------------
+# Observability Status (if enabled)
+#---------------------------------------------------------------
+
+if [ "$ENABLE_MONITORING" = true ] || [ "$ENABLE_TRACING" = true ]; then
+    section "Observability Status"
+    
+    if [ "$ENABLE_MONITORING" = true ]; then
+        echo ""
+        info "Monitoring Resources:"
+        kubectl get podmonitor,servicemonitor -n "${TARGET_NAMESPACE}" 2>/dev/null || info "No monitors found"
+    fi
+    
+    if [ "$ENABLE_TRACING" = true ]; then
+        echo ""
+        info "Tracing Infrastructure:"
+        kubectl get deployment otel-collector -n "${TARGET_NAMESPACE}" 2>/dev/null || info "OTEL Collector not found"
+    fi
+fi
+
+#---------------------------------------------------------------
 # Next steps
 #---------------------------------------------------------------
 
@@ -807,6 +1082,19 @@ echo "  curl http://localhost:8000/metrics"
 echo ""
 echo "Test with script:"
 echo "  ./test.sh ${EXAMPLE_ID}"
+
+if [ "$ENABLE_MONITORING" = true ]; then
+    echo ""
+    echo "Verify metrics scraping:"
+    echo "  ./test.sh ${EXAMPLE_ID} --check-metrics"
+fi
+
+if [ "$ENABLE_TRACING" = true ]; then
+    echo ""
+    echo "Verify tracing:"
+    echo "  ./test.sh ${EXAMPLE_ID} --check-traces"
+fi
+
 echo ""
 echo "Cleanup when done:"
 echo "  ./cleanup.sh ${EXAMPLE_ID}"

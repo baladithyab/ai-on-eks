@@ -1,0 +1,402 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - Parameterized Node Selectors
+# =============================================================================
+#
+# This file defines node selector configurations for different environments
+# and deployment scenarios. Use these selectors in blueprints via kustomize
+# overlays or Helm values to target specific node pools.
+#
+# Usage:
+#   - Reference these selectors instead of hardcoding in blueprints
+#   - Use kustomize patchesStrategicMerge to inject selectors
+#   - Works with Karpenter NodePools or static node pools
+#
+# Integration with deploy.sh:
+#   - deploy.sh reads from config/images.yaml for version management
+#   - Node selectors can be patched at deploy time using environment vars:
+#     ENVIRONMENT=production ./deploy.sh vllm-aggregated-default
+#
+# =============================================================================
+
+# =============================================================================
+# Environment-Specific Node Selectors
+# =============================================================================
+# These map to common deployment environments
+
+environments:
+  # ---------------------------------------------------------------------------
+  # Development Environment
+  # ---------------------------------------------------------------------------
+  # Minimal resources, cost-efficient, for testing and iteration
+  development:
+    description: "Development/testing with smaller instances"
+    nodeSelector:
+      karpenter.sh/nodepool: g5-nvidia
+      node.kubernetes.io/instance-type: g5.2xlarge
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    # Recommended profiles: small-a10g-1
+    notes: |
+      Use for development and testing workflows.
+      Targets g5.2xlarge (1x A10G, 24GB VRAM).
+      Suitable for small models up to 7B parameters.
+
+  # ---------------------------------------------------------------------------
+  # Staging Environment
+  # ---------------------------------------------------------------------------
+  # Production-like but may use different instance types for cost
+  staging:
+    description: "Staging with production-like configuration"
+    nodeSelector:
+      karpenter.sh/nodepool: g5-nvidia
+      node.kubernetes.io/instance-type: g5.12xlarge
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    # Recommended profiles: medium-a10g-4
+    notes: |
+      Production-like environment for integration testing.
+      Targets g5.12xlarge (4x A10G, 96GB VRAM).
+      Suitable for models up to 30B parameters.
+
+  # ---------------------------------------------------------------------------
+  # Production G5 Environment
+  # ---------------------------------------------------------------------------
+  # Full G5 cluster resources for production workloads
+  production-g5:
+    description: "Production using A10G (G5) instances"
+    nodeSelector:
+      karpenter.sh/nodepool: g5-nvidia
+      node.kubernetes.io/instance-type: g5.48xlarge
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: nvidia.com/dynamo-component
+                    operator: In
+                    values: ["worker"]
+              topologyKey: kubernetes.io/hostname
+    # Recommended profiles: large-a10g-8
+    # Recommended backend: SGLang (PCIe topology)
+    notes: |
+      Production environment with full G5 resources.
+      Targets g5.48xlarge (8x A10G, 192GB VRAM).
+      Use SGLang backend for PCIe multi-GPU inference.
+      Suitable for models up to 70B parameters with quantization.
+
+  # ---------------------------------------------------------------------------
+  # Production G6E Environment (L40S)
+  # ---------------------------------------------------------------------------
+  # High-performance L40S instances
+  production-g6e:
+    description: "Production using L40S (G6E) instances"
+    nodeSelector:
+      karpenter.sh/nodepool: g6e-nvidia
+      node.kubernetes.io/instance-type: g6e.48xlarge
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: nvidia.com/dynamo-component
+                    operator: In
+                    values: ["worker"]
+              topologyKey: kubernetes.io/hostname
+    # Recommended profiles: large-l40s-8
+    # Recommended backend: SGLang (PCIe topology)
+    notes: |
+      Production environment with L40S GPUs.
+      Targets g6e.48xlarge (8x L40S, 384GB VRAM).
+      Use SGLang backend for PCIe multi-GPU inference.
+      Suitable for models up to 140B parameters.
+
+  # ---------------------------------------------------------------------------
+  # Production P4DE Environment (A100)
+  # ---------------------------------------------------------------------------
+  # High-performance A100 instances with NVLink
+  production-p4d:
+    description: "Production using A100 (P4D) instances with NVLink"
+    nodeSelector:
+      karpenter.sh/nodepool: p4d-nvidia
+      node.kubernetes.io/instance-type: p4d.24xlarge
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: nvidia.com/dynamo-component
+                    operator: In
+                    values: ["worker"]
+              topologyKey: kubernetes.io/hostname
+    # Recommended profiles: large-a100-8
+    # Recommended backend: vLLM (NVLink topology)
+    notes: |
+      High-performance production with A100 GPUs.
+      Targets p4d.24xlarge (8x A100 40GB, 320GB VRAM).
+      Use vLLM backend for NVLink-optimized inference.
+      Suitable for models up to 140B parameters.
+
+  # ---------------------------------------------------------------------------
+  # Production P5 Environment (H100)
+  # ---------------------------------------------------------------------------
+  # Highest performance H100 instances with NVLink
+  production-p5:
+    description: "Production using H100 (P5) instances with NVLink"
+    nodeSelector:
+      karpenter.sh/nodepool: p5-nvidia
+      node.kubernetes.io/instance-type: p5.48xlarge
+      topology.kubernetes.io/zone: us-west-2a
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: nvidia.com/dynamo-component
+                    operator: In
+                    values: ["worker"]
+              topologyKey: kubernetes.io/hostname
+    # Recommended profiles: large-h100-8
+    # Recommended backend: vLLM (NVLink topology)
+    notes: |
+      Highest performance production with H100 GPUs.
+      Targets p5.48xlarge (8x H100 80GB, 640GB VRAM).
+      Use vLLM backend for NVLink-optimized inference.
+      Suitable for models up to 400B+ parameters.
+      FP8 quantization supported for even larger models.
+
+# =============================================================================
+# Karpenter NodePool Definitions
+# =============================================================================
+# Reference NodePool definitions for Karpenter-managed clusters
+
+nodePools:
+  # ---------------------------------------------------------------------------
+  # G5 (A10G) NodePool
+  # ---------------------------------------------------------------------------
+  g5-nvidia:
+    name: g5-nvidia
+    description: "A10G GPU instances (g5 family)"
+    instanceTypes:
+      - g5.xlarge     # 1x A10G, 4 vCPU, 16GB RAM
+      - g5.2xlarge    # 1x A10G, 8 vCPU, 32GB RAM
+      - g5.4xlarge    # 1x A10G, 16 vCPU, 64GB RAM
+      - g5.8xlarge    # 1x A10G, 32 vCPU, 128GB RAM
+      - g5.12xlarge   # 4x A10G, 48 vCPU, 192GB RAM
+      - g5.16xlarge   # 1x A10G, 64 vCPU, 256GB RAM
+      - g5.24xlarge   # 4x A10G, 96 vCPU, 384GB RAM
+      - g5.48xlarge   # 8x A10G, 192 vCPU, 768GB RAM
+    accelerator:
+      type: nvidia.com/gpu
+      model: "NVIDIA A10G"
+      vramPerGpu: "24Gi"
+    topology: pcie
+    recommendedBackend: sglang
+    taints:
+      - key: nvidia.com/gpu
+        effect: NoSchedule
+    labels:
+      karpenter.sh/capacity-type: on-demand
+      node.kubernetes.io/gpu: "true"
+      node.kubernetes.io/gpu-topology: pcie
+
+  # ---------------------------------------------------------------------------
+  # G6 (L4) NodePool
+  # ---------------------------------------------------------------------------
+  g6-nvidia:
+    name: g6-nvidia
+    description: "L4 GPU instances (g6 family)"
+    instanceTypes:
+      - g6.xlarge     # 1x L4, 4 vCPU, 16GB RAM
+      - g6.2xlarge    # 1x L4, 8 vCPU, 32GB RAM
+      - g6.4xlarge    # 1x L4, 16 vCPU, 64GB RAM
+      - g6.8xlarge    # 1x L4, 32 vCPU, 128GB RAM
+      - g6.12xlarge   # 4x L4, 48 vCPU, 192GB RAM
+      - g6.16xlarge   # 1x L4, 64 vCPU, 256GB RAM
+      - g6.24xlarge   # 4x L4, 96 vCPU, 384GB RAM
+      - g6.48xlarge   # 8x L4, 192 vCPU, 768GB RAM
+    accelerator:
+      type: nvidia.com/gpu
+      model: "NVIDIA L4"
+      vramPerGpu: "24Gi"
+    topology: pcie
+    recommendedBackend: sglang
+    taints:
+      - key: nvidia.com/gpu
+        effect: NoSchedule
+    labels:
+      karpenter.sh/capacity-type: on-demand
+      node.kubernetes.io/gpu: "true"
+      node.kubernetes.io/gpu-topology: pcie
+
+  # ---------------------------------------------------------------------------
+  # G6E (L40S) NodePool
+  # ---------------------------------------------------------------------------
+  g6e-nvidia:
+    name: g6e-nvidia
+    description: "L40S GPU instances (g6e family)"
+    instanceTypes:
+      - g6e.xlarge    # 1x L40S, 4 vCPU, 32GB RAM
+      - g6e.2xlarge   # 1x L40S, 8 vCPU, 64GB RAM
+      - g6e.4xlarge   # 1x L40S, 16 vCPU, 128GB RAM
+      - g6e.8xlarge   # 1x L40S, 32 vCPU, 256GB RAM
+      - g6e.12xlarge  # 4x L40S, 48 vCPU, 384GB RAM
+      - g6e.16xlarge  # 1x L40S, 64 vCPU, 512GB RAM
+      - g6e.24xlarge  # 4x L40S, 96 vCPU, 768GB RAM
+      - g6e.48xlarge  # 8x L40S, 192 vCPU, 1536GB RAM
+    accelerator:
+      type: nvidia.com/gpu
+      model: "NVIDIA L40S"
+      vramPerGpu: "48Gi"
+    topology: pcie
+    recommendedBackend: sglang
+    taints:
+      - key: nvidia.com/gpu
+        effect: NoSchedule
+    labels:
+      karpenter.sh/capacity-type: on-demand
+      node.kubernetes.io/gpu: "true"
+      node.kubernetes.io/gpu-topology: pcie
+
+  # ---------------------------------------------------------------------------
+  # P4D (A100) NodePool
+  # ---------------------------------------------------------------------------
+  p4d-nvidia:
+    name: p4d-nvidia
+    description: "A100 GPU instances with NVLink (p4d family)"
+    instanceTypes:
+      - p4d.24xlarge  # 8x A100 40GB, 96 vCPU, 1152GB RAM
+    accelerator:
+      type: nvidia.com/gpu
+      model: "NVIDIA A100-SXM4-40GB"
+      vramPerGpu: "40Gi"
+    topology: nvlink
+    recommendedBackend: vllm
+    taints:
+      - key: nvidia.com/gpu
+        effect: NoSchedule
+    labels:
+      karpenter.sh/capacity-type: on-demand
+      node.kubernetes.io/gpu: "true"
+      node.kubernetes.io/gpu-topology: nvlink
+
+  # ---------------------------------------------------------------------------
+  # P5 (H100) NodePool
+  # ---------------------------------------------------------------------------
+  p5-nvidia:
+    name: p5-nvidia
+    description: "H100 GPU instances with NVLink (p5 family)"
+    instanceTypes:
+      - p5.48xlarge   # 8x H100 80GB, 192 vCPU, 2048GB RAM
+    accelerator:
+      type: nvidia.com/gpu
+      model: "NVIDIA H100 80GB HBM3"
+      vramPerGpu: "80Gi"
+    topology: nvlink
+    recommendedBackend: vllm
+    taints:
+      - key: nvidia.com/gpu
+        effect: NoSchedule
+    labels:
+      karpenter.sh/capacity-type: on-demand
+      node.kubernetes.io/gpu: "true"
+      node.kubernetes.io/gpu-topology: nvlink
+
+# =============================================================================
+# Topology-Based Selectors
+# =============================================================================
+# Use these when you need to select based on GPU topology rather than instance
+
+topologySelectors:
+  # For PCIe-connected GPUs (g5, g6, g6e)
+  pcie:
+    description: "Any PCIe-connected GPU instance"
+    nodeSelector:
+      node.kubernetes.io/gpu-topology: pcie
+    recommendedBackend: sglang
+  
+  # For NVLink-connected GPUs (p4d, p5)
+  nvlink:
+    description: "Any NVLink-connected GPU instance"
+    nodeSelector:
+      node.kubernetes.io/gpu-topology: nvlink
+    recommendedBackend: vllm
+
+# =============================================================================
+# Zone-Specific Selectors
+# =============================================================================
+# For workloads requiring specific availability zones
+
+zoneSelectors:
+  # Single-zone selectors for consistent latency
+  us-west-2a:
+    nodeSelector:
+      topology.kubernetes.io/zone: us-west-2a
+  
+  us-west-2b:
+    nodeSelector:
+      topology.kubernetes.io/zone: us-west-2b
+  
+  us-west-2c:
+    nodeSelector:
+      topology.kubernetes.io/zone: us-west-2c
+  
+  us-east-1a:
+    nodeSelector:
+      topology.kubernetes.io/zone: us-east-1a
+  
+  us-east-1b:
+    nodeSelector:
+      topology.kubernetes.io/zone: us-east-1b
+  
+  us-east-1c:
+    nodeSelector:
+      topology.kubernetes.io/zone: us-east-1c
+
+# =============================================================================
+# Capacity Type Selectors
+# =============================================================================
+# For selecting between on-demand and spot instances
+
+capacitySelectors:
+  on-demand:
+    description: "On-demand instances only (production workloads)"
+    nodeSelector:
+      karpenter.sh/capacity-type: on-demand
+  
+  spot:
+    description: "Spot instances for cost savings (dev/test only)"
+    nodeSelector:
+      karpenter.sh/capacity-type: spot
+    # WARNING: Spot instances can be interrupted!
+    # Only use for fault-tolerant or dev/test workloads
