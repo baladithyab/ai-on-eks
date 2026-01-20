@@ -193,7 +193,7 @@ data:
             value: "nvidia-dynamo"
             action: upsert
           - key: deployment.environment
-            value: "${DEPLOYMENT_ENVIRONMENT:-production}"
+            value: "production"
             action: insert
       
       # ========================================================================
@@ -220,7 +220,7 @@ data:
       # OTLP Exporter - Primary trace export to Tempo/Jaeger
       # ========================================================================
       otlp:
-        endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT:-tempo.monitoring.svc.cluster.local:4317}"
+        endpoint: tempo.dynamo.svc.cluster.local:4317
         tls:
           insecure: true
         retry_on_failure:
@@ -236,7 +236,7 @@ data:
         endpoint: 0.0.0.0:8889
         namespace: dynamo
         const_labels:
-          cluster: "${EKS_CLUSTER_NAME:-default}"
+          cluster: "eks-ai-dev"
         resource_to_telemetry_conversion:
           enabled: true
         enable_open_metrics: true
@@ -245,7 +245,7 @@ data:
       # Prometheus Remote Write - Push metrics to central Prometheus
       # ========================================================================
       prometheusremotewrite:
-        endpoint: "${PROMETHEUS_REMOTE_WRITE_ENDPOINT:-http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090/api/v1/write}"
+        endpoint: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090/api/v1/write
         tls:
           insecure: true
         resource_to_telemetry_conversion:
@@ -257,8 +257,8 @@ data:
       # Uncomment to enable CloudWatch export
       # awscloudwatchlogs:
       #   log_group_name: "/aws/eks/dynamo/traces"
-      #   log_stream_name: "${K8S_POD_NAME:-otel-collector}"
-      #   region: "${AWS_REGION:-us-west-2}"
+      #   log_stream_name: "otel-collector"
+      #   region: "us-west-2"
       #   raw_log: true
     
     extensions:
