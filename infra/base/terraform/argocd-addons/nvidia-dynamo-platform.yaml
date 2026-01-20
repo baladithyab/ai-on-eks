@@ -19,10 +19,60 @@ spec:
         # NGC authentication (required)
         dynamo-operator:
           imagePullSecrets:
-            - name: docker-imagepullsecret
+            - name: ngc-secret
+          %{~ if dynamo_operator_namespace_restriction_enabled ~}
+          namespaceRestriction:
+            enabled: true
+            targetNamespace: dynamo
+          %{~ endif ~}
+          %{~ if dynamo_model_express_url != "" ~}
+          modelExpressURL: ${dynamo_model_express_url}
+          %{~ endif ~}
+          %{~ if enable_prometheus_endpoint ~}
+
+          # Metrics configuration - auto-inject PROMETHEUS_ENDPOINT env var
+          # into all Dynamo services managed by the operator
+          # Enabled when enable_ai_ml_observability_stack = true
+          dynamo:
+            metrics:
+              prometheusEndpoint: "http://kube-prometheus-stack-prometheus.kube-prometheus-stack.svc.cluster.local:9090"
+          %{~ endif ~}
+
+        # Multi-node orchestration with Grove + Kai Scheduler
+        # Grove: Network topology-aware gang scheduling and auto-scaling
+        # Kai Scheduler: GPU-aware scheduler with queue management
+        #
+        # NOTE: Grove v0.1.0-alpha.3 bundled with Dynamo v0.7.1 has a bug where
+        # the cert-rotation controller triggers a pod restart on every startup,
+        # causing crash loops. This is hardcoded behavior (RestartOnSecretRefresh=true)
+        # that cannot be disabled via configuration.
+        #
+        # WORKAROUND: Disable Grove until a fixed version is released.
+        grove:
+          enabled: ${dynamo_enable_grove}
+
+        # Kai Scheduler via Dynamo (v0.9.4)
+        # Provides GPU-aware scheduling with queue management
+        kai-scheduler:
+          enabled: ${dynamo_enable_kai_scheduler}
+          global:
+            gpuSharing: true
+            clusterAutoscaling: true
+            leaderElection: false  # Single replica, no HA needed
+            nodeSelector:
+              NodeGroupType: core
+            tolerations:
+              - key: "CriticalAddonsOnly"
+                operator: "Exists"
+          defaultQueue:
+            createDefaultQueue: true
+            parentName: dynamo-default
+            childName: dynamo
 
         # NATS configuration - use EFS for JetStream persistence
         # Note: etcd inherits from global.storageClass, but NATS needs explicit setting
+        # v0.7.1 NEW: NATS can be disabled in favor of HTTP/TCP request plane
+        # Set DYN_REQUEST_PLANE=http or DYN_REQUEST_PLANE=tcp in workload deployments
         nats:
           config:
             jetstream:
@@ -31,6 +81,9 @@ spec:
                   storageClassName: efs-sc-dynamic
 
         # etcd configuration - disable JWT auth and pre-upgrade hook
+        # v0.7.1 NEW: etcd can be replaced with Kubernetes-native service discovery
+        # Use operator flag: --discovery-backend=kubernetes
+        # Or use filesystem-backed KeyValueStore for non-distributed deployments
         etcd:
           auth:
             token:
@@ -43,7 +96,7 @@ spec:
           storageClass: efs-sc-dynamic
   destination:
     server: https://kubernetes.default.svc
-    namespace: dynamo-cloud
+    namespace: dynamo
   syncPolicy:
     automated:
       prune: true

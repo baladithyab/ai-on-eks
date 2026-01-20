@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 # Configuration
 CLUSTER_NAME="dynamo-on-eks"
 REGION="us-west-2"
-NAMESPACE="dynamo-cloud"
+NAMESPACE="dynamo"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -200,7 +200,7 @@ if [ "$TERRAFORM_SUCCESS" = true ]; then
     echo "  ✓ Terraform infrastructure and working directory"
     echo ""
     if [ "$CLUSTER_ACCESSIBLE" = true ]; then
-        echo "Note: The dynamo-cloud namespace and ArgoCD applications will be"
+        echo "Note: The dynamo namespace and ArgoCD applications will be"
         echo "      automatically cleaned up by Terraform when it destroys the"
         echo "      ArgoCD applications (CreateNamespace=true handles this)."
     else

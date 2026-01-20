@@ -1,0 +1,125 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Disaggregated Deployment for DeepSeek-R1-Distill-Llama-70B
+#
+# DeepSeek-R1-Distill-Llama-70B is a dense 70B model distilled from
+# DeepSeek-R1 into the Llama-3.3-70B architecture. It offers strong
+# reasoning capabilities in a vLLM-compatible dense format.
+#
+# Hardware Requirements:
+# - 2x g6e.48xlarge (8x L40S each) or similar 8-GPU nodes
+# - ~140GB VRAM per worker for BF16 weights (TP=8)
+# - High-bandwidth interconnect recommended for TP
+#
+# Features:
+# - EFS-backed model cache for persistent storage
+# - Disaggregated architecture (separate prefill/decode)
+# - Dense architecture (compatible with vLLM profiler)
+# - Supports reasoning and long-context tasks
+#
+# Note: Model files are ~140GB, recommend pre-caching to EFS before deployment
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-deepseek-70b-disagg
+  namespace: dynamo
+spec:
+  # Use shared HF cache from EFS
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+
+  # Set HF_HOME for model caching (online download enabled for initial setup)
+  envs:
+    - name: HF_HOME
+      value: "/models"
+    # Note: Set HF_HUB_OFFLINE=1 after model is cached to EFS
+    # - name: HF_HUB_OFFLINE
+    #   value: "1"
+
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+
+    VllmDecodeWorker:
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      resources:
+        limits:
+          gpu: "8"
+      sharedMemory:
+        size: 40Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --enforce-eager
+            - --tensor-parallel-size
+            - "8"
+            - --trust-remote-code
+
+    VllmPrefillWorker:
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      envFromSecret: hf-token-secret
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      resources:
+        limits:
+          gpu: "8"
+      sharedMemory:
+        size: 40Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+            - --is-prefill-worker
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --enforce-eager
+            - --tensor-parallel-size
+            - "8"
+            - --trust-remote-code

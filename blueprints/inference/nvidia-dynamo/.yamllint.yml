@@ -1,0 +1,167 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo Blueprint - YAML Lint Configuration
+# =============================================================================
+#
+# This configuration enforces consistent YAML formatting across all Dynamo
+# blueprints. Run with: yamllint -c .yamllint.yml <file.yaml>
+#
+# Install: pip install yamllint
+#
+# =============================================================================
+
+---
+yaml-files:
+  - '*.yaml'
+  - '*.yml'
+  - '.yamllint'
+
+# Ignore certain paths
+ignore: |
+  # Test and log directories
+  test-logs/
+  test-results/
+  .tmp/
+  # Node modules (if any)
+  node_modules/
+  # Generated files
+  *.generated.yaml
+
+rules:
+  # ==========================================================================
+  # Formatting Rules
+  # ==========================================================================
+  
+  # Require consistent indentation (2 spaces)
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+  
+  # Maximum line length (allow longer lines for URLs and commands)
+  line-length:
+    max: 120
+    level: warning
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+  
+  # Require newline at end of file
+  new-line-at-end-of-file: enable
+  
+  # Disallow trailing spaces
+  trailing-spaces: enable
+  
+  # ==========================================================================
+  # Whitespace Rules
+  # ==========================================================================
+  
+  # Enforce spacing around colons
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+  
+  # Enforce spacing around commas
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: 1
+  
+  # Enforce spacing around hyphens (list items)
+  hyphens:
+    max-spaces-after: 1
+  
+  # Enforce consistent bracket spacing
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+  
+  # Enforce consistent brace spacing
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+  
+  # ==========================================================================
+  # Comment Rules
+  # ==========================================================================
+  
+  # Require space after comment marker
+  comments:
+    require-starting-space: true
+    ignore-shebangs: true
+    min-spaces-from-content: 1
+  
+  # Disallow consecutive blank lines
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+  
+  # ==========================================================================
+  # Document Rules
+  # ==========================================================================
+  
+  # Allow document start marker (---) - required for multi-doc Kubernetes YAML
+  document-start:
+    present: false  # Don't require it but allow it
+  
+  # Allow document end marker (...)
+  document-end:
+    present: false  # Don't require it but allow it
+  
+  # ==========================================================================
+  # Key Rules
+  # ==========================================================================
+  
+  # Disallow duplicate keys
+  key-duplicates: enable
+  
+  # Key ordering - disabled as Kubernetes manifests have conventional ordering
+  key-ordering: disable
+  
+  # Disallow empty values (allow for optional fields)
+  empty-values:
+    forbid-in-block-mappings: false
+    forbid-in-flow-mappings: false
+  
+  # ==========================================================================
+  # Value Rules
+  # ==========================================================================
+  
+  # Allow truthy values (yes, no, on, off) - needed for Kubernetes
+  truthy:
+    allowed-values:
+      - 'true'
+      - 'false'
+      - 'yes'
+      - 'no'
+    check-keys: false
+    level: warning
+  
+  # Require quoted strings only when necessary
+  quoted-strings:
+    quote-type: any
+    required: only-when-needed
+    extra-required: []
+    extra-allowed: []
+    allow-quoted-quotes: true
+  
+  # ==========================================================================
+  # Advanced Rules
+  # ==========================================================================
+  
+  # Allow flow style for short sequences (Kubernetes often uses this)
+  flow-style:
+    forbid-implicit: false
+    forbid-same-line: false
+  
+  # Ensure anchors are used before aliases
+  anchors:
+    forbid-undeclared-aliases: true
+    forbid-duplicated-anchors: true
+    forbid-unused-anchors: false

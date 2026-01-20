@@ -1,0 +1,188 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM DGDR - DeepSeek-R1-Distill-Llama-70B for G6 Instances (NVIDIA L4 GPUs)
+#
+# FIXES APPLIED:
+# 1. use_ai_configurator: false - L4 GPUs are NOT in AIC database, must use online profiling
+#    (AIC only supports: A100, H100, H200, B100/B200)
+# 2. Realistic SLA targets - Based on actual measured performance:
+#    - TTFT: 8000ms (was 500ms, actual observed: ~5,733ms)
+#    - ITL: 60ms (was 40ms, actual observed: ~47.5ms)
+#    - Realistic targets should avoid the Qhull plotting bug
+# 3. G6 instance configuration - g6.48xlarge with 8x NVIDIA L4 GPUs (24GB each)
+# 4. Conservative memory utilization - 0.85 for 24GB L4 (vs 0.90 for 48GB L40S)
+#
+# G6 Instance Details:
+# - Instance: g6.48xlarge
+# - GPUs: 8x NVIDIA L4 (24GB VRAM each = 192GB total)
+# - Model: 70B requires ~131GB, fits comfortably with TP=8
+# - Per GPU: ~16.4GB, leaves ~7.6GB headroom per L4
+#
+# Expected profiling time: 2-4 hours with online profiling (AIPerf)
+# NOTE: L4 is NOT supported by AI Configurator
+#
+# Prerequisites:
+# - dynamo-shared-models PVC created (EFS-backed)
+# - g6.48xlarge nodes available via Karpenter/node pool
+# - ~140GB EFS space for model download
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-deepseek-70b-g6
+  namespace: dynamo
+spec:
+  model: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+    # Reference ConfigMap with EFS cache and G6 configuration
+    configMapRef:
+      name: deepseek-70b-g6-dgd-config
+      key: disagg.yaml
+    config:
+      deployment:
+        # Extended timeout for 70B model loading on L4s
+        timeout: 7200  # 2 hours (L4s may be slower than L40S)
+      hardware:
+        # 70B dense model needs 8 GPUs for TP=8
+        min_num_gpus_per_engine: 8
+        max_num_gpus_per_engine: 8
+        num_gpus_per_node: 8
+      sweep:
+        # Online Profiling (AIPerf) - REQUIRED for L4 GPUs
+        # L4 is NOT in AI Configurator database (only A100/H100/H200/B100/B200)
+        # Realistic SLA targets should avoid Qhull plotting bug
+        use_ai_configurator: false
+      sla:
+        # REALISTIC SLA targets based on actual measured performance
+        # Previous: 500ms TTFT, 40ms ITL - TOO AGGRESSIVE
+        # Actual: 5,733ms TTFT, 47.5ms ITL
+        isl: 4096      # Input sequence length
+        osl: 1024      # Output sequence length (longer for reasoning)
+        ttft: 8000.0   # Time To First Token (ms) - 8 seconds (conservative)
+        itl: 60.0      # Inter-Token Latency (ms) - 60ms (realistic)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+
+  autoApply: true
+---
+# ConfigMap with full DGD base config for DeepSeek-R1-Distill-Llama-70B with G6/L4 optimization
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deepseek-70b-g6-dgd-config
+  namespace: dynamo
+data:
+  disagg.yaml: |
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeployment
+    metadata:
+      name: vllm-deepseek-70b-g6-disagg
+    spec:
+      pvcs:
+        - name: dynamo-shared-models
+          create: false
+      envs:
+        - name: HF_HOME
+          value: "/models"
+        - name: HF_HUB_OFFLINE
+          value: "1"
+      services:
+        Frontend:
+          componentType: frontend
+          replicas: 1
+          envFromSecret: hf-token-secret
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+            # Let Karpenter select appropriate instance (g6 or g6e with 8 GPUs)
+            # Removing hardcoded g6.48xlarge to improve availability
+            tolerations:
+              - key: nvidia.com/gpu
+                operator: Exists
+                effect: NoSchedule
+        VllmDecodeWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: decode
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            limits:
+              gpu: "8"  # 8x L4 GPUs for TP=8
+          sharedMemory:
+            size: 32Gi  # Slightly reduced for L4 (24GB vs 48GB L40S)
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+                - --max-model-len
+                - "8192"
+                # Conservative memory utilization for 24GB L4 GPUs
+                # L40S (48GB): 0.90 → L4 (24GB): 0.85
+                - --gpu-memory-utilization
+                - "0.85"
+                - --enforce-eager
+                - --tensor-parallel-size
+                - "8"  # TP=8 for 8x L4 GPUs
+                - --trust-remote-code
+            # Let Karpenter select appropriate instance (g6 or g6e with 8 GPUs)
+            tolerations:
+              - key: nvidia.com/gpu
+                operator: Exists
+                effect: NoSchedule
+        VllmPrefillWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: prefill
+          replicas: 1
+          volumeMounts:
+            - name: dynamo-shared-models
+              mountPoint: /models
+          resources:
+            limits:
+              gpu: "8"  # 8x L4 GPUs for TP=8
+          sharedMemory:
+            size: 32Gi  # Slightly reduced for L4
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+                - --is-prefill-worker
+                - --max-model-len
+                - "8192"
+                # Conservative memory utilization for 24GB L4 GPUs
+                - --gpu-memory-utilization
+                - "0.85"
+                - --enforce-eager
+                - --tensor-parallel-size
+                - "8"  # TP=8 for 8x L4 GPUs
+                - --trust-remote-code
+            # Let Karpenter select appropriate instance (g6 or g6e with 8 GPUs)
+            tolerations:
+              - key: nvidia.com/gpu
+                operator: Exists
+                effect: NoSchedule

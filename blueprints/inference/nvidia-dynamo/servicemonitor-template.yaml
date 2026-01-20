@@ -1,9 +1,24 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# ServiceMonitor template for NVIDIA Dynamo deployments
+# This template creates a Service and ServiceMonitor for metrics collection via Prometheus Operator
+#
+# Usage: Replace EXAMPLE_NAME with your deployment name (e.g., vllm, sglang, trtllm)
+#   sed 's/EXAMPLE_NAME/vllm/g' servicemonitor-template.yaml | kubectl apply -f -
+#
+# Metrics Ports:
+#   - http (8000): Frontend metrics - dynamo_frontend_* (request rates, latency, tokens)
+#   - worker-metrics (8081): Worker system metrics - dynamo_component_*, vllm:*, sglang:*, trtllm:*
+#   - kvbm-metrics (6880): KV cache backend metrics - kvbm_* for disaggregated serving
+#
+# Reference: https://docs.nvidia.com/dynamo/observability/metrics.html
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: EXAMPLE_NAME-frontend
-  namespace: dynamo-cloud
+  namespace: dynamo
   labels:
     nvidia.com/dynamo-component: Frontend
     nvidia.com/dynamo-namespace: EXAMPLE_NAME
@@ -11,10 +26,23 @@ metadata:
     app.kubernetes.io/component: frontend
 spec:
   ports:
-  - name: http
-    port: 8000
-    protocol: TCP
-    targetPort: 8000
+    # Frontend HTTP API port - also exposes /metrics endpoint
+    - name: http
+      port: 8000
+      protocol: TCP
+      targetPort: 8000
+    # Worker system metrics port (DYN_SYSTEM_PORT)
+    # Exposes backend-specific metrics from vLLM, SGLang, or TRT-LLM workers
+    - name: worker-metrics
+      port: 8081
+      protocol: TCP
+      targetPort: 8081
+    # KVBM metrics port for disaggregated serving configurations
+    # Exposes KV cache pool and transfer metrics
+    - name: kvbm-metrics
+      port: 6880
+      protocol: TCP
+      targetPort: 6880
   selector:
     nvidia.com/dynamo-component: Frontend
     nvidia.com/dynamo-namespace: EXAMPLE_NAME
@@ -24,11 +52,12 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: EXAMPLE_NAME-frontend-metrics
-  namespace: dynamo-cloud
+  namespace: dynamo
   labels:
     # Required label for Prometheus to discover this ServiceMonitor
     release: kube-prometheus-stack
     app.kubernetes.io/name: dynamo-metrics
+    app.kubernetes.io/component: observability
     example: EXAMPLE_NAME
 spec:
   selector:
@@ -37,11 +66,58 @@ spec:
       nvidia.com/dynamo-component: Frontend
       nvidia.com/dynamo-namespace: EXAMPLE_NAME
   endpoints:
-  - port: http
-    path: /metrics
-    interval: 10s
-    scrapeTimeout: 10s
-    honorLabels: true
+    # Frontend metrics endpoint (HTTP API port 8000)
+    # Exposes: dynamo_frontend_* metrics
+    # - dynamo_frontend_requests_total: Total LLM requests
+    # - dynamo_frontend_time_to_first_token_seconds: TTFT latency histogram
+    # - dynamo_frontend_inter_token_latency_seconds: ITL latency histogram
+    # - dynamo_frontend_request_duration_seconds: Total request duration
+    # - dynamo_frontend_input_sequence_tokens: Input token counts
+    # - dynamo_frontend_output_sequence_tokens: Output token counts
+    # - dynamo_frontend_inflight_requests: Current inflight requests
+    # - dynamo_frontend_queued_requests: Requests in HTTP queue
+    # - dynamo_frontend_model_workers: Worker instances per model
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+
+    # Worker system metrics endpoint (DYN_SYSTEM_PORT 8081)
+    # Exposes: dynamo_component_* metrics and backend-specific metrics
+    # - dynamo_component_requests_total: Total requests processed
+    # - dynamo_component_request_duration_seconds: Processing time histogram
+    # - dynamo_component_inflight_requests: Current inflight requests
+    # - dynamo_component_kvstats_active_blocks: Active KV cache blocks
+    # - dynamo_component_kvstats_total_blocks: Total KV cache blocks
+    # - dynamo_component_kvstats_gpu_cache_usage_percent: GPU cache utilization
+    # - dynamo_component_kvstats_gpu_prefix_cache_hit_rate: Prefix cache efficiency
+    # Backend-specific: vllm:*, sglang:*, trtllm:*
+    - port: worker-metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+
+    # KVBM metrics endpoint (Port 6880)
+    # Exposes: kvbm_* metrics for disaggregated serving with multi-tier caching
+    # Enable this endpoint when using disaggregated serving (prefill/decode separation)
+    # - kvbm_device_pool_allocated_blocks: GPU blocks currently allocated
+    # - kvbm_device_pool_free_blocks: GPU blocks available
+    # - kvbm_host_pool_allocated_blocks: CPU pinned-memory blocks allocated
+    # - kvbm_host_pool_free_blocks: CPU pinned-memory blocks available
+    # - kvbm_disk_pool_allocated_blocks: NVMe disk blocks allocated
+    # - kvbm_disk_pool_free_blocks: NVMe disk blocks available
+    # - kvbm_transfer_d2h_bytes_total: Device to Host transfer bytes
+    # - kvbm_transfer_h2d_bytes_total: Host to Device transfer bytes
+    # - kvbm_transfer_h2disk_bytes_total: Host to Disk transfer bytes
+    # - kvbm_transfer_disk2d_bytes_total: Disk to Device transfer bytes
+    - port: kvbm-metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+
   namespaceSelector:
     matchNames:
-    - dynamo-cloud
+      - dynamo

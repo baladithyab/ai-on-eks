@@ -1,0 +1,205 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Qwen2.5-VL 7B Multimodal Deployment - Image Configuration
+#
+# This example demonstrates vision-language model deployment optimized for image understanding.
+# Qwen2.5-VL supports advanced image understanding with visual reasoning capabilities.
+#
+# Architecture:
+# - EncodeWorker: Processes and encodes visual inputs (images)
+# - VLMWorker: Handles prefill phase for combined vision-text understanding
+# - Processor: Manages multimodal input preprocessing and prompt template formatting
+#
+# Key Features:
+# - Advanced image understanding and visual reasoning
+# - Multi-turn visual conversations
+# - Custom prompt template support
+# - 16K token context window (optimized for images)
+#
+# Requirements:
+# - 4 GPUs total (1 for EncodeWorker, 2 for VLMWorker, 1 for Processor)
+# - HuggingFace token secret (hf-token-secret) for model download
+#
+# Resource Notes:
+# - All workers: 24Gi memory for model loading
+# - CPU/Memory requests ensure Karpenter provisions appropriately-sized GPU nodes
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: qwen-vl
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+
+    EncodeWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "4"
+          memory: "24Gi"
+          gpu: "1"
+        limits:
+          cpu: "4"
+          gpu: "1"
+          memory: "24Gi"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 120
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 components/encode_worker.py --model Qwen/Qwen2.5-VL-7B-Instruct
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VLMWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "10"
+          memory: "24Gi"
+          gpu: "2"
+        limits:
+          cpu: "10"
+          gpu: "2"
+          memory: "24Gi"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 120
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 components/worker.py --model Qwen/Qwen2.5-VL-7B-Instruct --worker-type prefill --max-model-len 32768 --gpu-memory-utilization 0.75 --tensor-parallel-size 2
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    Processor:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "4"
+          memory: "24Gi"
+          gpu: "1"
+        limits:
+          cpu: "4"
+          gpu: "1"
+          memory: "24Gi"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 120
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - 'python3 components/processor.py --model Qwen/Qwen2.5-VL-7B-Instruct --prompt-template "USER: <image>\n<prompt> ASSISTANT:"'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+

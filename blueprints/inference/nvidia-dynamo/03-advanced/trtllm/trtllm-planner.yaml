@@ -1,0 +1,303 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# TensorRT-LLM Disaggregated with SLA Planner
+#
+# This example demonstrates SLA-based automatic scaling for disaggregated inference.
+# The planner analyzes performance metrics and automatically adjusts worker replicas
+# to meet latency and throughput SLA targets.
+#
+# Key Features:
+# - SLA-aware automatic scaling (p50, p95, p99 latency targets)
+# - Separate prefill and decode workers for optimal resource utilization
+# - Performance-based parallelization recommendations
+#
+# IMPORTANT Prerequisites:
+# 1. **Run SLA Profiler First**: Before deploying this example, you MUST run the SLA profiler
+#    to generate performance profiles for different parallelization configurations.
+#
+#    Example profiler command:
+#    ```
+#    python -m dynamo.planner.profiler \
+#      --model Qwen/Qwen3-0.6B \
+#      --backend trtllm \
+#      --output-dir /data/profiling_results \
+#      --gpu-types g5.xlarge,g5.2xlarge \
+#      --parallelization-configs tp1,tp2
+#    ```
+#
+# 2. **Create PVC**: A PersistentVolumeClaim named 'dynamo-pvc' must exist and contain
+#    the profiling results at /data/profiling_results/
+#
+#    Example PVC creation:
+#    ```yaml
+#    apiVersion: v1
+#    kind: PersistentVolumeClaim
+#    metadata:
+#      name: dynamo-pvc
+#      namespace: dynamo
+#    spec:
+#      accessModes:
+#        - ReadWriteMany
+#      storageClassName: efs-sc  # Use EFS for multi-pod access
+#      resources:
+#        requests:
+#          storage: 100Gi
+#    ```
+#
+# 3. **HuggingFace Token**: Secret 'hf-token-secret' must exist for model download
+#
+# Requirements:
+# - 2 GPUs minimum (1 for prefill, 1 for decode)
+# - EFS storage class for shared PVC access
+# - Completed profiling data
+
+# ConfigMap containing TensorRT-LLM engine configurations
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trtllm-planner-config
+  namespace: dynamo
+data:
+  decode.yaml: |
+    # TensorRT-LLM Decode Worker Configuration
+    tensor_parallel_size: 1
+    moe_expert_parallel_size: 1
+    enable_attention_dp: false
+    max_num_tokens: 8192
+    trust_remote_code: true
+    backend: pytorch
+    enable_chunked_prefill: true
+    disable_overlap_scheduler: false
+    
+    cuda_graph_config:
+      max_batch_size: 16
+    
+    kv_cache_config:
+      free_gpu_memory_fraction: 0.85
+    
+    cache_transceiver_config:
+      backend: default
+  
+  prefill.yaml: |
+    # TensorRT-LLM Prefill Worker Configuration
+    tensor_parallel_size: 1
+    moe_expert_parallel_size: 1
+    enable_attention_dp: false
+    max_num_tokens: 8192
+    trust_remote_code: true
+    backend: pytorch
+    enable_chunked_prefill: true
+    disable_overlap_scheduler: true
+    
+    cuda_graph_config:
+      max_batch_size: 16
+    
+    kv_cache_config:
+      free_gpu_memory_fraction: 0.85
+    
+    cache_transceiver_config:
+      backend: default
+---
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: trtllm-planner
+  namespace: dynamo
+spec:
+  backendFramework: trtllm
+  # PVC for profiling results (must be pre-created)
+  pvcs:
+    - name: dynamo-pvc
+      create: false
+  
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/trtllm
+          command:
+            - python3
+            - -m
+            - dynamo.frontend
+          args:
+            - --http-port
+            - "8000"
+            - --kv-cache-block-size
+            - "128"
+            - --router-mode
+            - kv
+            - --kv-overlap-score-weight
+            - "0.0"
+            - --router-temperature
+            - "0.0"
+            - --no-kv-events
+    
+    Planner:
+      envFromSecret: hf-token-secret
+      componentType: planner
+      replicas: 1
+      volumeMounts:
+        - name: dynamo-pvc
+          mountPoint: /data
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
+          workingDir: /workspace/components/planner/src/dynamo/planner
+          ports:
+            - name: metrics
+              containerPort: 9085
+          command:
+            - python3
+            - -m
+            - planner_sla
+          args:
+            - --environment=kubernetes
+            - --backend=trtllm
+            - --adjustment-interval=60
+            - --profile-results-dir=/data/profiling_results
+            - --prometheus-port=9085
+    
+    TRTLLMDecodeWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "8"
+          memory: "20Gi"
+          gpu: "1"
+        limits:
+          cpu: "8"
+          memory: "20Gi"
+          gpu: "1"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+        terminationGracePeriodSeconds: 600
+        # Mount ConfigMap as volume
+        volumes:
+          - name: trtllm-planner-config
+            configMap:
+              name: trtllm-planner-config
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/trtllm
+          # Mount ConfigMap to engine_configs directory
+          volumeMounts:
+            - name: trtllm-planner-config
+              mountPath: /workspace/components/backends/trtllm/engine_configs
+              readOnly: true
+          command:
+            - python3
+            - -m
+            - dynamo.trtllm
+          args:
+            - --model-path
+            - Qwen/Qwen3-0.6B
+            - --served-model-name
+            - Qwen/Qwen3-0.6B
+            - --extra-engine-args
+            - engine_configs/decode.yaml
+            - --disaggregation-mode
+            - decode
+
+    TRTLLMPrefillWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "8"
+          memory: "20Gi"
+          gpu: "1"
+        limits:
+          cpu: "8"
+          memory: "20Gi"
+          gpu: "1"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+        terminationGracePeriodSeconds: 600
+        # Mount ConfigMap as volume
+        volumes:
+          - name: trtllm-planner-config
+            configMap:
+              name: trtllm-planner-config
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/trtllm
+          # Mount ConfigMap to engine_configs directory
+          volumeMounts:
+            - name: trtllm-planner-config
+              mountPath: /workspace/components/backends/trtllm/engine_configs
+              readOnly: true
+          command:
+            - python3
+            - -m
+            - dynamo.trtllm
+          args:
+            - --model-path
+            - Qwen/Qwen3-0.6B
+            - --served-model-name
+            - Qwen/Qwen3-0.6B
+            - --extra-engine-args
+            - engine_configs/prefill.yaml
+            - --disaggregation-mode
+            - prefill
+

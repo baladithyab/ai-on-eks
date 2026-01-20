@@ -1,0 +1,123 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Disaggregated Deployment for GPT-OSS-120B
+#
+# OpenAI's GPT-OSS-120B is a reasoning model with tool calling support.
+# Uses disaggregated architecture for optimal performance.
+#
+# Hardware Requirements:
+# - 2x g6e.48xlarge (8x L40S each = 16 GPUs total, 768GB VRAM)
+# - ~240GB VRAM for 120B model weights (TP=8 recommended per worker)
+#
+# Features:
+# - EFS-backed model cache
+# - Reasoning parser (gpt_oss) for chain-of-thought
+# - Tool call parser (harmony) for function calling
+#
+# This is a direct DGD deployment (bypasses DGDR profiling)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-gptoss-120b-disagg
+  namespace: dynamo
+spec:
+  # Use shared HF cache from EFS
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+
+  # Set HF_HOME for model caching
+  envs:
+    - name: HF_HOME
+      value: "/models"
+
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+
+    VllmDecodeWorker:
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      resources:
+        limits:
+          gpu: "8"
+      sharedMemory:
+        size: 48Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - openai/gpt-oss-120b
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --enforce-eager
+            - --tensor-parallel-size
+            - "8"
+            - --dyn-reasoning-parser
+            - gpt_oss
+            - --dyn-tool-call-parser
+            - harmony
+
+    VllmPrefillWorker:
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      envs:
+        - name: UCX_TLS
+          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      resources:
+        limits:
+          gpu: "8"
+      sharedMemory:
+        size: 48Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - python3
+          - -m
+          - dynamo.vllm
+          args:
+            - --model
+            - openai/gpt-oss-120b
+            - --is-prefill-worker
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --enforce-eager
+            - --tensor-parallel-size
+            - "8"
+            - --dyn-reasoning-parser
+            - gpt_oss
+            - --dyn-tool-call-parser
+            - harmony
+

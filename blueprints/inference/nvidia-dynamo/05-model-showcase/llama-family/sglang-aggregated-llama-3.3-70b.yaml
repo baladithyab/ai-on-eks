@@ -1,0 +1,151 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# SGLang Aggregated Deployment for Meta Llama 3.3-70B-Instruct
+#
+# Meta's Llama 3.3 is a state-of-the-art open LLM with excellent
+# instruction-following and long-context capabilities.
+#
+# Hardware Requirements:
+# - Option A: 4x L40S GPUs (g6e.24xlarge) with TP=4
+# - Option B: 8x H100 GPUs (p5.48xlarge) with TP=8
+# - ~140GB VRAM for 70B model weights (BF16)
+#
+# This blueprint uses TP=4 for g6e.24xlarge (4x L40S, 192GB VRAM)
+#
+# Features:
+# - EFS-backed model cache for fast restarts
+# - SGLang backend for PCIe multi-GPU compatibility
+# - Aggregated single-worker architecture
+# - Long-context support (up to 128K tokens)
+# - Production-ready health probes
+#
+# Use cases:
+# - Enterprise production inference
+# - Complex instruction following
+# - Long-context applications
+# - Multi-turn conversations
+# - Code generation and analysis
+#
+# Why SGLang over vLLM for PCIe?
+# - Different tensor parallelism coordination mechanism
+# - Avoids vLLM's shm_broadcast deadlock on PCIe topologies
+# - Proven stable on g5/g6/g6e instances
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: sglang-llama-33-70b-agg
+  namespace: dynamo
+spec:
+  # Use shared HF cache from EFS
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+
+  # Set HF_HOME for model caching
+  envs:
+    - name: HF_HOME
+      value: "/models"
+
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    SglangWorker:
+      # AGGREGATED: Single worker with TP=4 for 70B model
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "24"
+          memory: "150Gi"
+          gpu: "4"
+        limits:
+          cpu: "24"
+          memory: "150Gi"
+          gpu: "4"
+      sharedMemory:
+        size: 24Gi
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # 300 * 60s = 5 hours max startup time for 70B model loading
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            # SGLang AGGREGATED MODE for Llama-3.3-70B
+            - |
+              python3 -m dynamo.sglang \
+                --model-path meta-llama/Llama-3.3-70B-Instruct \
+                --served-model-name meta-llama/Llama-3.3-70B-Instruct \
+                --tp 4 \
+                --trust-remote-code \
+                --mem-fraction-static 0.85 \
+                2>&1 | tee /tmp/sglang.log

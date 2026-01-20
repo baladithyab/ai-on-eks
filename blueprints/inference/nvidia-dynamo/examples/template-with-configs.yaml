@@ -1,0 +1,312 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - Template Blueprint Using Centralized Configurations
+# =============================================================================
+#
+# This template demonstrates the standardized approach for creating Dynamo
+# blueprints using centralized configuration management.
+#
+# Key Features Demonstrated:
+# 1. Centralized image versioning (from config/images.yaml)
+# 2. Resource profiles (from config/resource-profiles.yaml)
+# 3. Node selectors (from config/node-selectors.yaml)
+# 4. Common environment variables (from config/common-env.yaml)
+#
+# Usage:
+# 1. Copy this template to create a new blueprint
+# 2. Apply common configuration: ./scripts/apply-config.sh dynamo
+# 3. Deploy: ./deploy.sh template-with-configs
+#
+# Configuration References:
+# - Image version: managed by deploy.sh from config/images.yaml
+# - Profile: medium-a10g-4 (see config/resource-profiles.yaml)
+# - Environment: staging (see config/node-selectors.yaml)
+# - Backend: SGLang (PCIe topology - g5.12xlarge)
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Optional: Pre-deployment Configuration
+# -----------------------------------------------------------------------------
+# Run before applying this blueprint:
+#   kubectl apply -f config/common-env.yaml -n dynamo
+# Or use the helper script:
+#   ./scripts/apply-config.sh dynamo
+
+---
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: template-with-configs
+  namespace: dynamo
+  labels:
+    # Standard labels for organization
+    app.kubernetes.io/name: template-with-configs
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: nvidia-dynamo
+    # Custom labels for configuration tracking
+    dynamo.nvidia.com/backend: sglang
+    dynamo.nvidia.com/profile: medium-a10g-4
+    dynamo.nvidia.com/environment: staging
+  annotations:
+    # Document configuration references
+    dynamo.nvidia.com/config-version: "0.7.1"
+    dynamo.nvidia.com/resource-profile: "medium-a10g-4"
+    dynamo.nvidia.com/node-selector: "staging"
+    description: "Template blueprint demonstrating centralized configuration usage"
+spec:
+  # ===========================================================================
+  # Backend Framework Selection
+  # ===========================================================================
+  # Choose based on GPU topology:
+  # - PCIe (g5, g6, g6e): Use sglang
+  # - NVLink (p4d, p5): Use vllm
+  backendFramework: sglang
+  
+  # ===========================================================================
+  # Persistent Volume Claims (Model Cache)
+  # ===========================================================================
+  # Reference: docs/configuration-management.md#model-caching
+  pvcs:
+    - name: dynamo-shared-models
+      create: false  # Assumes PVC already exists (EFS)
+  
+  # ===========================================================================
+  # Global Environment Variables
+  # ===========================================================================
+  # These are applied to ALL services
+  # Reference: config/common-env.yaml
+  envs:
+    # Model path for HuggingFace cache
+    - name: HF_HOME
+      value: "/models"
+    # Additional deployment-specific variables can be added here
+    # Note: Common variables are inherited from dynamo-common-env ConfigMap
+
+  # ===========================================================================
+  # Service Definitions
+  # ===========================================================================
+  services:
+    # -------------------------------------------------------------------------
+    # Frontend Service (HTTP API)
+    # -------------------------------------------------------------------------
+    Frontend:
+      # Profile Reference: frontend-standard (see config/resource-profiles.yaml)
+      componentType: frontend
+      replicas: 1
+      
+      # Health Probes (standardized across all blueprints)
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      
+      # Resource Profile: frontend-standard
+      # See: config/resource-profiles.yaml -> profiles.frontend-standard
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      
+      # Mount shared model cache
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      
+      extraPodSpec:
+        # Environment ConfigMap Reference
+        # Applied globally via: kubectl apply -f config/common-env.yaml
+        # envFrom:
+        #   - configMapRef:
+        #       name: dynamo-common-env
+        
+        mainContainer:
+          # ===========================================================
+          # IMAGE VERSION MANAGEMENT
+          # ===========================================================
+          # The image tag is managed centrally:
+          # 1. deploy.sh reads version from terraform/blueprint.tfvars
+          # 2. Or override with: DYNAMO_VERSION=0.8.0 ./deploy.sh <id>
+          # 3. Image registry defined in: config/images.yaml
+          #
+          # DO NOT hardcode version here - let deploy.sh manage it
+          # ===========================================================
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+    
+    # -------------------------------------------------------------------------
+    # Worker Service (GPU Inference)
+    # -------------------------------------------------------------------------
+    SglangWorker:
+      # Profile Reference: medium-a10g-4 (see config/resource-profiles.yaml)
+      # Environment: staging (see config/node-selectors.yaml)
+      componentType: worker
+      replicas: 1
+      
+      # HuggingFace token from secret
+      envFromSecret: hf-token-secret
+      
+      # Health Probes
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      
+      # ===========================================================
+      # RESOURCE PROFILE: medium-a10g-4
+      # ===========================================================
+      # From: config/resource-profiles.yaml
+      # Description: 4x A10G GPUs for medium models (up to 30B FP16)
+      # Target Instance: g5.12xlarge (48 vCPU, 192GB RAM)
+      #
+      # To change profile:
+      # 1. Look up new profile in config/resource-profiles.yaml
+      # 2. Update resources below to match profile values
+      # 3. Update nodeSelector to match profile's target instance
+      # ===========================================================
+      resources:
+        requests:
+          cpu: "32"
+          memory: "128Gi"
+          nvidia.com/gpu: "4"
+        limits:
+          cpu: "48"
+          memory: "192Gi"
+          nvidia.com/gpu: "4"
+      
+      # Shared memory for GPU operations
+      # Value from: config/resource-profiles.yaml -> profiles.medium-a10g-4.sharedMemory
+      sharedMemory:
+        size: 24Gi
+      
+      # Mount shared model cache
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      
+      extraPodSpec:
+        # ===========================================================
+        # NODE SELECTOR: staging environment
+        # ===========================================================
+        # From: config/node-selectors.yaml -> environments.staging
+        # Description: Staging with production-like configuration
+        # Target: g5.12xlarge (4x A10G, 96GB VRAM)
+        #
+        # To change environment:
+        # 1. Look up environment in config/node-selectors.yaml
+        # 2. Update nodeSelector below to match environment values
+        # 3. Ensure resource profile matches the instance type
+        # ===========================================================
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+          node.kubernetes.io/instance-type: g5.12xlarge
+        
+        # Optional: Tolerations for GPU nodes
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+        
+        mainContainer:
+          # Startup probe for model loading
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # Allow up to 5 hours for large model loading (300 * 60s)
+            failureThreshold: 300
+          
+          # Image (version managed by deploy.sh)
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            # ===========================================================
+            # MODEL CONFIGURATION
+            # ===========================================================
+            # Adjust these parameters based on your model and profile:
+            # --model-path: HuggingFace model ID
+            # --tp: Tensor parallelism (match GPU count in resources)
+            # --mem-fraction-static: Memory allocation (0.85-0.95)
+            # ===========================================================
+            - |
+              python3 -m dynamo.sglang \
+                --model-path "meta-llama/Llama-3.2-3B-Instruct" \
+                --served-model-name "meta-llama/Llama-3.2-3B-Instruct" \
+                --tp 4 \
+                --trust-remote-code \
+                --mem-fraction-static 0.85 \
+                2>&1 | tee /tmp/sglang.log
+
+# =============================================================================
+# USAGE EXAMPLES
+# =============================================================================
+#
+# Deploy this blueprint:
+#   ./scripts/apply-config.sh dynamo    # First, apply common configs
+#   ./deploy.sh template-with-configs   # Then deploy
+#
+# Deploy with custom version:
+#   DYNAMO_VERSION=0.8.0 ./deploy.sh template-with-configs
+#
+# List available profiles:
+#   ./scripts/apply-config.sh --list-profiles
+#
+# List available environments:
+#   ./scripts/apply-config.sh --list-envs
+#
+# =============================================================================
+# CUSTOMIZATION CHECKLIST
+# =============================================================================
+#
+# When creating a new blueprint from this template:
+#
+# [ ] 1. Update metadata.name to your deployment name
+# [ ] 2. Update labels and annotations to match your config
+# [ ] 3. Choose backend (vllm for NVLink, sglang for PCIe)
+# [ ] 4. Select resource profile from config/resource-profiles.yaml
+# [ ] 5. Select environment/node selector from config/node-selectors.yaml
+# [ ] 6. Update model configuration in worker args
+# [ ] 7. Verify PVC name matches your shared storage
+# [ ] 8. Add to catalog/catalog.yaml for deploy.sh discovery
+#
+# =============================================================================

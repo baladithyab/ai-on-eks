@@ -1,0 +1,157 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# SGLang Aggregated Deployment for GPT-OSS-120B
+#
+# **UNTESTED - REQUIRES 8 GPUs**
+#
+# OpenAI's GPT-OSS-120B is the full-size reasoning model with advanced
+# chain-of-thought and tool calling capabilities.
+#
+# Hardware Requirements:
+# - 8x L40S GPUs (g6e.48xlarge) or 8x H100 (p5.48xlarge)
+# - ~240GB VRAM total for 120B model (BF16)
+# - TP=8 for multi-GPU inference
+# - High-bandwidth interconnect (NVLink preferred for H100)
+#
+# Instance Options:
+# - g6e.48xlarge: 8x L40S, 384GB VRAM - fits 120B with TP=8
+# - p5.48xlarge: 8x H100, 640GB VRAM - optimal performance
+#
+# Features:
+# - EFS-backed model cache for fast restarts
+# - Reasoning parser (gpt_oss) for chain-of-thought
+# - Tool call parser (harmony) for function calling
+# - SGLang backend for PCIe compatibility (if g6e)
+# - Full 120B model capabilities
+#
+# Use cases:
+# - Enterprise-grade reasoning workloads
+# - Complex multi-step problem solving
+# - Advanced tool calling and function execution
+# - Research and development
+#
+# Note: This blueprint requires 8 GPUs and cannot be tested on
+# g6e.24xlarge (4x L40S). Deploy on g6e.48xlarge or p5 instances.
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: sglang-gptoss-120b-agg
+  namespace: dynamo
+spec:
+  # Use shared HF cache from EFS
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+
+  # Set HF_HOME for model caching
+  envs:
+    - name: HF_HOME
+      value: "/models"
+
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    SglangWorker:
+      # AGGREGATED: Single worker with 8 GPUs for full 120B model
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "48"
+          memory: "200Gi"
+          gpu: "8"
+        limits:
+          cpu: "48"
+          memory: "200Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 40Gi
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        nodeSelector:
+          # Use g6e.48xlarge (8x L40S) or p5 (8x H100)
+          # Karpenter will provision appropriate instance
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # 300 * 60s = 5 hours max startup time for 120B model loading
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            # SGLang AGGREGATED MODE for full 120B model
+            - |
+              python3 -m dynamo.sglang \
+                --model-path openai/gpt-oss-120b \
+                --served-model-name openai/gpt-oss-120b \
+                --tp 8 \
+                --trust-remote-code \
+                --mem-fraction-static 0.85 \
+                --dyn-reasoning-parser gpt_oss \
+                --dyn-tool-call-parser harmony \
+                2>&1 | tee /tmp/sglang.log

@@ -1,0 +1,483 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - vLLM with Full Observability Example
+# =============================================================================
+#
+# This example demonstrates comprehensive observability integration for Dynamo
+# deployments. It includes:
+#
+#   1. Distributed Tracing (OpenTelemetry → OTEL Collector → Tempo/Jaeger)
+#   2. Metrics Scraping (PodMonitor/ServiceMonitor → Prometheus)
+#   3. Audit Logging (structured JSON logs)
+#   4. Health Monitoring (liveness/readiness probes)
+#
+# PREREQUISITES:
+#   1. Deploy the OTEL Collector:
+#      kubectl apply -f config/otel-collector.yaml -n dynamo
+#
+#   2. Apply OTEL instrumentation config:
+#      kubectl apply -f config/otel-instrumentation.yaml -n dynamo
+#
+#   3. Ensure Prometheus Operator is installed (kube-prometheus-stack)
+#
+#   4. (Optional) Deploy Tempo for trace storage:
+#      helm install tempo grafana/tempo -n monitoring
+#
+# USAGE:
+#   kubectl apply -f examples/vllm-with-full-observability.yaml -n dynamo
+#
+# OBSERVABILITY FEATURES ANNOTATED:
+#   Look for [OBSERVABILITY] comments throughout this file for explanations
+#   of each observability component.
+#
+# =============================================================================
+
+---
+# [OBSERVABILITY: PodMonitor] Prometheus scraping configuration for this deployment
+# This PodMonitor automatically discovers pods from this deployment and scrapes
+# both frontend metrics (port 8000) and worker metrics (port 8081)
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: vllm-full-observability
+  namespace: dynamo
+  labels:
+    # Standard labels for organization
+    app.kubernetes.io/name: vllm-full-observability
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+    # [OBSERVABILITY] Label for Prometheus to discover this monitor
+    release: prometheus  # Must match Prometheus serviceMonitorSelector
+spec:
+  # [OBSERVABILITY] Select pods from this specific deployment
+  selector:
+    matchLabels:
+      nvidia.com/dynamo-namespace: vllm-full-obs
+  namespaceSelector:
+    matchNames:
+      - dynamo
+  podMetricsEndpoints:
+    # [OBSERVABILITY: Frontend Metrics] Scrape TTFT, ITL, request metrics from frontend
+    - port: "8000"
+      path: /metrics
+      interval: 15s
+      # Add deployment-specific labels to metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_component]
+          targetLabel: dynamo_component
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - action: replace
+          targetLabel: deployment
+          replacement: vllm-full-observability
+    # [OBSERVABILITY: Worker Metrics] Scrape backend-specific metrics from workers
+    - port: "8081"
+      path: /metrics
+      interval: 15s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_nvidia_com_dynamo_component]
+          targetLabel: dynamo_component
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - action: replace
+          targetLabel: deployment
+          replacement: vllm-full-observability
+
+---
+# [OBSERVABILITY: Service] Exposes metrics endpoints for ServiceMonitor (alternative to PodMonitor)
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-full-observability
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: vllm-full-observability
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: nvidia-dynamo
+    # [OBSERVABILITY] Labels for ServiceMonitor selection
+    nvidia.com/metrics-enabled: "true"
+spec:
+  type: ClusterIP
+  selector:
+    nvidia.com/dynamo-namespace: vllm-full-obs
+    nvidia.com/dynamo-component: Frontend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+    # [OBSERVABILITY] Named port for metrics scraping
+    - name: metrics
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+
+---
+# Main DynamoGraphDeployment with full observability integration
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-full-observability
+  namespace: dynamo
+  labels:
+    # Standard Kubernetes labels
+    app.kubernetes.io/name: vllm-full-observability
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: nvidia-dynamo
+    app.kubernetes.io/version: "0.7.1"
+    # [OBSERVABILITY] Labels for metrics and tracing correlation
+    dynamo.nvidia.com/backend: vllm
+    dynamo.nvidia.com/observability: enabled
+    dynamo.nvidia.com/tier: standard
+  annotations:
+    # Configuration documentation
+    description: "vLLM deployment with comprehensive observability - metrics, tracing, and logging"
+    dynamo.nvidia.com/config-version: "0.7.1"
+    dynamo.nvidia.com/resource-profile: "small-a10g-1"
+    # [OBSERVABILITY] Enable operator-managed metrics collection
+    nvidia.com/enable-metrics: "true"
+    # [OBSERVABILITY] Trace sampling configuration
+    nvidia.com/trace-sampling-rate: "0.1"
+spec:
+  # Backend framework selection
+  backendFramework: vllm
+  
+  # Shared PVC for model caching
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+  
+  # ===========================================================================
+  # [OBSERVABILITY: Global Environment] Environment variables for all services
+  # ===========================================================================
+  envs:
+    # HuggingFace cache location
+    - name: HF_HOME
+      value: "/models"
+    
+    # [OBSERVABILITY: Tracing] Enable Dynamo internal tracing
+    - name: DYN_TRACING_ENABLED
+      value: "true"
+    
+    # [OBSERVABILITY: Metrics] Enable metrics export
+    - name: DYN_METRICS_ENABLED
+      value: "true"
+    
+    # [OBSERVABILITY: Audit Logging] Enable structured audit logs
+    - name: DYN_AUDIT_LOG_ENABLED
+      value: "true"
+    - name: DYN_AUDIT_LOG_FORMAT
+      value: "json"
+    
+    # [OBSERVABILITY: Log Level] Structured JSON logging
+    - name: DYN_LOG_FORMAT
+      value: "json"
+    - name: DYN_LOG_LEVEL
+      value: "INFO"
+  
+  # ===========================================================================
+  # Service Definitions with Observability
+  # ===========================================================================
+  services:
+    # -------------------------------------------------------------------------
+    # Frontend Service - HTTP API with full observability
+    # -------------------------------------------------------------------------
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      
+      # HuggingFace token for model access
+      envFromSecret: hf-token-secret
+      
+      # [OBSERVABILITY: Health Probes] Liveness and readiness for monitoring
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 30
+        timeoutSeconds: 10
+        failureThreshold: 5
+      
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+        initialDelaySeconds: 60
+        periodSeconds: 30
+        timeoutSeconds: 10
+        failureThreshold: 5
+      
+      # Resource allocation
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      
+      # Volume mounts
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      
+      extraPodSpec:
+        # [OBSERVABILITY: Labels] Labels for metrics collection and tracing correlation
+        labels:
+          nvidia.com/metrics-enabled: "true"
+          nvidia.com/dynamo-namespace: vllm-full-obs
+          nvidia.com/dynamo-component: Frontend
+          nvidia.com/dynamo-component-type: frontend
+        
+        # [OBSERVABILITY: Annotations] Prometheus scraping annotations
+        annotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "8000"
+          prometheus.io/path: "/metrics"
+        
+        # Run frontend on CPU nodes
+        nodeSelector:
+          kubernetes.io/arch: amd64
+        
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/vllm
+          
+          # [OBSERVABILITY: Container Ports] Expose metrics port
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              # [OBSERVABILITY: Startup Logging]
+              echo '{"level":"info","msg":"Starting Frontend with observability","timestamp":"'$(date -Iseconds)'"}'
+              
+              python3 -m dynamo.frontend \
+                --http-port 8000 \
+                2>&1 | tee /tmp/frontend.log
+          
+          # [OBSERVABILITY: Environment] OTEL configuration for frontend
+          env:
+            # OTEL trace export endpoint (CRITICAL: use correct env var name)
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://otel-collector.dynamo.svc.cluster.local:4317"
+            - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
+              value: "grpc"
+            # Service identification for traces
+            - name: OTEL_SERVICE_NAME
+              value: "vllm-full-obs-frontend"
+            # Sampling configuration
+            - name: OTEL_TRACES_SAMPLER
+              value: "parentbased_traceidratio"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # Propagation context
+            - name: OTEL_PROPAGATORS
+              value: "tracecontext,baggage"
+            # Resource attributes for trace correlation
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.namespace=nvidia-dynamo,deployment.name=vllm-full-observability,component=frontend"
+            # Python instrumentation
+            - name: OTEL_PYTHON_LOG_CORRELATION
+              value: "true"
+            # Frontend-specific tracing
+            - name: DYN_FRONTEND_TRACE_ROUTING
+              value: "true"
+            - name: DYN_FRONTEND_TRACE_STREAMING
+              value: "true"
+    
+    # -------------------------------------------------------------------------
+    # Worker Service - GPU Inference with full observability
+    # -------------------------------------------------------------------------
+    VllmWorker:
+      componentType: worker
+      replicas: 1
+      
+      # HuggingFace token for model access
+      envFromSecret: hf-token-secret
+      
+      # [OBSERVABILITY: Health Probes] Worker health monitoring
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        initialDelaySeconds: 120
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      
+      # Resource allocation for GPU worker
+      resources:
+        requests:
+          cpu: "10"
+          memory: "20Gi"
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "10"
+          memory: "20Gi"
+          nvidia.com/gpu: "1"
+      
+      # Shared memory for GPU operations
+      sharedMemory:
+        size: 16Gi
+      
+      # Volume mounts
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      
+      extraPodSpec:
+        # [OBSERVABILITY: Labels] Labels for metrics collection
+        labels:
+          nvidia.com/metrics-enabled: "true"
+          nvidia.com/dynamo-namespace: vllm-full-obs
+          nvidia.com/dynamo-component: VllmWorker
+          nvidia.com/dynamo-component-type: worker
+        
+        # [OBSERVABILITY: Annotations] Prometheus scraping annotations for worker
+        annotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "8081"
+          prometheus.io/path: "/metrics"
+          # Additional annotation for KVBM metrics if using disaggregated
+          dynamo.nvidia.com/kvbm-enabled: "false"
+        
+        # Run worker on GPU nodes
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        
+        # GPU tolerations
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+        
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/vllm
+          
+          # [OBSERVABILITY: Container Ports] Expose system metrics port
+          ports:
+            - name: health
+              containerPort: 9090
+              protocol: TCP
+            - name: system
+              containerPort: 8081
+              protocol: TCP
+          
+          # [OBSERVABILITY: Startup Probe] Long timeout for model loading
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # Allow up to 5 hours for large model loading
+            failureThreshold: 300
+          
+          command:
+            - /bin/sh
+            - -c
+          args:
+            # [OBSERVABILITY: Startup Logging] Log startup with structured format
+            - |
+              echo '{"level":"info","msg":"Starting VllmWorker with observability","timestamp":"'$(date -Iseconds)'","gpu_count":"1"}'
+              
+              python3 -m dynamo.vllm \
+                --model Qwen/Qwen3-0.6B \
+                --served-model-name "Qwen/Qwen3-0.6B" \
+                2>&1 | tee /tmp/vllm.log
+          
+          # [OBSERVABILITY: Environment] OTEL configuration for worker
+          env:
+            # OTEL trace export endpoint
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://otel-collector.dynamo.svc.cluster.local:4317"
+            - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
+              value: "grpc"
+            # Service identification
+            - name: OTEL_SERVICE_NAME
+              value: "vllm-full-obs-worker"
+            # Sampling - lower for workers (high volume)
+            - name: OTEL_TRACES_SAMPLER
+              value: "parentbased_traceidratio"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.05"
+            # Propagation
+            - name: OTEL_PROPAGATORS
+              value: "tracecontext,baggage"
+            # Resource attributes
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.namespace=nvidia-dynamo,deployment.name=vllm-full-observability,component=worker,gpu.count=1"
+            # Python instrumentation
+            - name: OTEL_PYTHON_LOG_CORRELATION
+              value: "true"
+            # Exclude health checks from tracing
+            - name: OTEL_PYTHON_EXCLUDED_URLS
+              value: "/health,/live,/ready,/metrics"
+            # [OBSERVABILITY: vLLM-specific tracing]
+            - name: DYN_VLLM_METRICS_ENABLED
+              value: "true"
+            - name: DYN_VLLM_METRICS_PORT
+              value: "8081"
+            - name: DYN_VLLM_TRACE_PREFILL
+              value: "true"
+            - name: DYN_VLLM_TRACE_DECODE
+              value: "true"
+
+# =============================================================================
+# OBSERVABILITY VERIFICATION
+# =============================================================================
+#
+# After deploying, verify observability is working:
+#
+# 1. Check OTEL Collector is receiving traces:
+#    kubectl logs -l app.kubernetes.io/name=otel-collector -n dynamo
+#
+# 2. Check Prometheus is scraping metrics:
+#    kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 -n monitoring
+#    # Visit http://localhost:9090/targets and search for "vllm-full-observability"
+#
+# 3. Verify traces in Tempo/Jaeger:
+#    kubectl port-forward svc/tempo 3200:3200 -n monitoring
+#    # Or use Grafana Explore with Tempo datasource
+#
+# 4. Check metrics are being exported:
+#    kubectl port-forward svc/vllm-full-observability 8000:8000 -n dynamo
+#    curl http://localhost:8000/metrics | grep dynamo_
+#
+# 5. Test end-to-end tracing with a request:
+#    curl -X POST http://localhost:8000/v1/chat/completions \
+#      -H 'Content-Type: application/json' \
+#      -H 'traceparent: 00-$(uuidgen | tr -d '-')-$(head -c 16 /dev/urandom | xxd -p)-01' \
+#      -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 50}'
+#
+# Example Prometheus Queries:
+#
+#   # Request rate
+#   rate(dynamo_frontend_requests_total{deployment="vllm-full-observability"}[5m])
+#
+#   # P99 TTFT
+#   histogram_quantile(0.99, rate(dynamo_frontend_time_to_first_token_seconds_bucket{deployment="vllm-full-observability"}[5m]))
+#
+#   # P95 ITL
+#   histogram_quantile(0.95, rate(dynamo_frontend_inter_token_latency_seconds_bucket{deployment="vllm-full-observability"}[5m]))
+#
+# =============================================================================

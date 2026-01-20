@@ -1,0 +1,153 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Aggregated Deployment for GPT-OSS-20B
+#
+# OpenAI's GPT-OSS-20B is a smaller reasoning model with tool calling support.
+# Uses AGGREGATED architecture (single worker) to bypass shared memory broadcast
+# issues found in disaggregated deployments on PCIe GPU topologies.
+#
+# Hardware Requirements:
+# - 1x g6e instance with ≥2x L40S (2 GPUs) recommended
+# - Using TP=2 for validation (note: vLLM TP>1 may still deadlock on PCIe)
+# - Single node deployment
+#
+# Features:
+# - EFS-backed model cache
+# - Reasoning parser (gpt_oss) for chain-of-thought
+# - Tool call parser (harmony) for function calling
+# - No inter-process communication (bypasses shared memory bug)
+# - RECOMMENDED pattern for large models until upstream bug fixed
+#
+# Use cases:
+# - Development and testing of reasoning pipelines
+# - Production inference when disaggregated fails
+# - Single-worker deployment for maximum reliability
+#
+# Why Aggregated?
+# - Disaggregated deployments hit shared memory broadcast synchronization
+#   deadlock on PCIe GPU topologies (tested: DeepSeek-70B, GPT-OSS-20B)
+# - Aggregated single-worker mode bypasses all inter-process communication
+# - Proven stable pattern for ai-on-eks deployments
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-gptoss-20b-agg
+  namespace: dynamo
+spec:
+  # Use shared HF cache from EFS
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+
+  # Set HF_HOME for model caching
+  envs:
+    - name: HF_HOME
+      value: "/models"
+
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmWorker:
+      # AGGREGATED: Single worker handles both prefill and decode
+      # NO inter-process communication = NO shared memory broadcast issues
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "10"
+          memory: "40Gi"
+          gpu: "2"
+        limits:
+          cpu: "10"
+          memory: "40Gi"
+          gpu: "2"
+      sharedMemory:
+        size: 12Gi
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # 300 * 60s = 5 hours max startup time for large model loading
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            # AGGREGATED MODE: Single worker, no --is-prefill-worker flag
+            # Full vLLM engine handles both prefill and decode phases
+            - |
+              python3 -m dynamo.vllm \
+                --model openai/gpt-oss-20b \
+                --tensor-parallel-size 2 \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.90 \
+                --enforce-eager \
+                --dyn-reasoning-parser gpt_oss \
+                --dyn-tool-call-parser harmony \
+                2>&1 | tee /tmp/vllm.log
