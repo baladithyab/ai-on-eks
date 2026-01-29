@@ -45,7 +45,7 @@ Ensure that you have installed the following tools on your machine.
 
 ### (Optional) Reduce Cold Start Time by Preloading Container Images in Bottlerocket OS
 
-To accelerate the deployment of image retrieval on Ray workers, refer to [Preload container images into Bottlerocket data volumes with Karpenter with EBS Snapshots](../../bestpractices/preload-container-images)
+To accelerate the deployment of image retrieval on Ray workers, refer to [Preload container images into Bottlerocket data volumes with Karpenter with EBS Snapshots](../../../guidance/container-startup-time/2-accelerate-pull-process/14-prefecthing-images-on-br)
 
 Define the `TF_VAR_bottlerocket_data_disk_snpashot_id` to enable Karpenter to provision Bottlerocket worker nodes with EBS Snapshots, to reduce cold start for container startup. This will likely to save 10 mins (depending on the image size) for downloading and extracting container images from Amazon ECR.
 

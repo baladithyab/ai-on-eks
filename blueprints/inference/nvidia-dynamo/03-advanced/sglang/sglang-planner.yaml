@@ -30,7 +30,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
           workingDir: /workspace/components/backends/sglang
           command:
             - python3
@@ -56,7 +56,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
           workingDir: /workspace/components/src/dynamo/planner
           ports:
             - name: metrics
@@ -109,7 +109,7 @@ spec:
             effect: NoSchedule
         terminationGracePeriodSeconds: 600
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
           workingDir: /workspace/components/backends/sglang
           command:
             - python3
@@ -172,7 +172,7 @@ spec:
             effect: NoSchedule
         terminationGracePeriodSeconds: 600
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
           workingDir: /workspace/components/backends/sglang
           command:
             - python3

@@ -45,7 +45,7 @@ spec:
           memory: "8Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
 
     EncodeWorker:
       envFromSecret: hf-token-secret
@@ -78,7 +78,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           workingDir: /workspace/examples/multimodal
           securityContext:
             privileged: true
@@ -130,7 +130,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           workingDir: /workspace/examples/multimodal
           securityContext:
             privileged: true
@@ -182,7 +182,7 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           workingDir: /workspace/examples/multimodal
           securityContext:
             privileged: true

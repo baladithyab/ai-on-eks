@@ -28,7 +28,7 @@ The configuration management system consists of four main components:
 ### Why Centralized Configuration?
 
 Before this system, blueprints contained:
-- **50+ hardcoded image tags** like `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1`
+- **50+ hardcoded image tags** like `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0`
 - **Inconsistent resource requests** varying by blueprint
 - **Scattered environment variables** duplicated across files
 - **Hardcoded node selectors** specific to single environments
@@ -52,10 +52,8 @@ ai-on-eks/blueprints/inference/nvidia-dynamo/
 │   └── node-selectors.yaml   # Node targeting by environment
 ├── scripts/
 │   └── apply-config.sh       # Helper script for applying configs
-├── docs/
-│   └── configuration-management.md  # This guide
-└── examples/
-    └── template-with-configs.yaml   # Reference blueprint template
+└── docs/
+    └── configuration-management.md  # This guide
 ```
 
 ## Using Centralized Images
@@ -67,21 +65,21 @@ The `config/images.yaml` file defines all Dynamo runtime images:
 ```yaml
 # config/images.yaml
 version:
-  current: "0.7.1"
+  current: "0.8.0"
 
 images:
   vllm:
     registry: nvcr.io/nvidia/ai-dynamo
     name: vllm-runtime
-    tag: "0.7.1"
+    tag: "0.8.0"
   sglang:
     registry: nvcr.io/nvidia/ai-dynamo
     name: sglang-runtime
-    tag: "0.7.1"
+    tag: "0.8.0"
   trtllm:
     registry: nvcr.io/nvidia/ai-dynamo
     name: trtllm-runtime
-    tag: "0.7.1"
+    tag: "0.8.0"
 ```
 
 ### Updating All Images
@@ -111,9 +109,9 @@ If you need different versions for specific runtimes:
 
 ```yaml
 version:
-  current: "0.7.1"
+  current: "0.8.0"
   overrides:
-    vllm: "0.7.1"       # Stays on 0.7.1
+    vllm: "0.8.0"       # Stays on 0.8.0
     sglang: "0.8.0"     # Uses newer version
     trtllm: "current"   # Uses version.current
 ```
@@ -329,13 +327,13 @@ spec:
 
 Before:
 ```yaml
-image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
 ```
 
 After (with version managed by deploy.sh):
 ```yaml
 # Image version managed by deploy.sh from config/images.yaml
-image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
 ```
 
 **Step 3: Add ConfigMap reference**
@@ -378,7 +376,7 @@ The `deploy.sh` script integrates with this configuration system:
 # deploy.sh reads version from:
 # 1. DYNAMO_VERSION environment variable
 # 2. terraform/blueprint.tfvars (dynamo_stack_version)
-# 3. Default fallback (v0.7.1)
+# 3. Default fallback (v0.8.0)
 
 ./deploy.sh vllm-aggregated-default
 # Automatically patches image tags in the manifest

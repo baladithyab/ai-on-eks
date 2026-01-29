@@ -59,7 +59,7 @@ spec:
           nvidia.com/gpu: "1"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1.post1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0.post1
           args:
             - --model
             - Qwen/Qwen3-0.6B

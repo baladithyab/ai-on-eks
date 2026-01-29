@@ -37,7 +37,7 @@ spec:
   backend: vllm
 
   profilingConfig:
-    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0"
     # Reference ConfigMap with EFS cache and G6 configuration
     configMapRef:
       name: deepseek-70b-g6-dgd-config
@@ -66,7 +66,7 @@ spec:
         itl: 60.0      # Inter-Token Latency (ms) - 60ms (realistic)
 
   deploymentOverrides:
-    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0"
 
   autoApply: true
 ---
@@ -101,7 +101,7 @@ data:
               mountPoint: /models
           extraPodSpec:
             mainContainer:
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
             # Let Karpenter select appropriate instance (g6 or g6e with 8 GPUs)
             # Removing hardcoded g6.48xlarge to improve availability
             tolerations:
@@ -123,7 +123,7 @@ data:
             size: 32Gi  # Slightly reduced for L4 (24GB vs 48GB L40S)
           extraPodSpec:
             mainContainer:
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
               workingDir: /workspace/components/backends/vllm
               command:
               - python3
@@ -162,7 +162,7 @@ data:
             size: 32Gi  # Slightly reduced for L4
           extraPodSpec:
             mainContainer:
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
               workingDir: /workspace/components/backends/vllm
               command:
               - python3

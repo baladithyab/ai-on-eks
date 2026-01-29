@@ -54,6 +54,30 @@ VERBOSE=false
 # Utility Functions
 # =============================================================================
 
+# Check if file contains a DynamoGraphDeployment resource
+is_dgd_manifest() {
+    local file="$1"
+    grep -q "kind: DynamoGraphDeployment" "$file" 2>/dev/null
+}
+
+# Check if file is a DGDR (DynamoGraphDeploymentRequest) - profiler request, not direct deployment
+is_dgdr_manifest() {
+    local file="$1"
+    grep -q "kind: DynamoGraphDeploymentRequest" "$file" 2>/dev/null
+}
+
+# Check if file is an HPA/KEDA/ScaledObject autoscaling resource
+is_autoscaling_resource() {
+    local file="$1"
+    grep -qE "kind: (HorizontalPodAutoscaler|ScaledObject)" "$file" 2>/dev/null
+}
+
+# Check if file is a DynamoModel CRD (model management, not serving)
+is_model_crd() {
+    local file="$1"
+    grep -qE "kind: (DynamoModel|LoRAAdapter)" "$file" 2>/dev/null
+}
+
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
@@ -468,6 +492,79 @@ check_spdx_header() {
 }
 
 # =============================================================================
+# Dynamo v0.8.0 Compatibility Checks
+# =============================================================================
+
+check_deprecated_fields_v080() {
+    local file="$1"
+    log_check "Dynamo v0.8.0 Deprecated Fields"
+    
+    local deprecated_found=false
+    
+    # Check for deprecated dynamoNamespace spec field (not the label)
+    # The label nvidia.com/dynamo-namespace is still valid for observability
+    if grep -qE "^\s+dynamoNamespace:" "$file" 2>/dev/null; then
+        log_fail "Deprecated 'spec.dynamoNamespace' field found (removed in v0.8.0)"
+        echo "         Migration: Remove dynamoNamespace from spec; discovery is now k8s-native"
+        deprecated_found=true
+    fi
+    
+    # Check for embedded autoscaling configuration (deprecated in v0.8.0)
+    if grep -qE "^\s+(minReplicas|maxReplicas|autoscaling):" "$file" 2>/dev/null; then
+        # Only flag if it's in the DGD spec, not in HPA resources
+        if ! grep -q "kind: HorizontalPodAutoscaler\|kind: ScaledObject" "$file" 2>/dev/null; then
+            if grep -qB5 "minReplicas:" "$file" | grep -q "spec:" 2>/dev/null; then
+                log_warn "Embedded autoscaling fields detected (deprecated in v0.8.0)"
+                echo "         Migration: Use HPA or KEDA targeting DynamoGraphDeploymentScalingAdapter"
+            fi
+        fi
+    fi
+    
+    # Check for explicit NATS/etcd URLs that assume these are required
+    if grep -qE "NATS_URL|ETCD_ENDPOINTS" "$file" 2>/dev/null; then
+        log_warn "NATS/etcd environment variables found"
+        echo "         Note: NATS/etcd are optional in v0.8.0 (k8s-native discovery is default)"
+    fi
+    
+    # Check for legacy discovery configuration
+    if grep -qE "discoveryType:\s*(nats|etcd)" "$file" 2>/dev/null; then
+        log_warn "Explicit NATS/etcd discovery type found"
+        echo "         Note: v0.8.0 defaults to k8s-native discovery"
+    fi
+    
+    if ! $deprecated_found; then
+        log_pass "No deprecated v0.8.0 fields found"
+    fi
+}
+
+check_autoscaling_examples_exist() {
+    log_check "Autoscaling Examples Structure (v0.8.0)"
+    
+    local autoscaling_dir="${BLUEPRINT_DIR}/03-advanced/autoscaling"
+    
+    if [ ! -d "$autoscaling_dir" ]; then
+        log_warn "Missing autoscaling examples directory: 03-advanced/autoscaling/"
+        echo "         v0.8.0 deprecates embedded autoscaling; examples should exist"
+        return 1
+    fi
+    
+    local missing_files=()
+    
+    # Check for required autoscaling example files
+    [ ! -f "$autoscaling_dir/README.md" ] && missing_files+=("README.md")
+    [ ! -f "$autoscaling_dir/hpa-frontend-cpu.yaml" ] && missing_files+=("hpa-frontend-cpu.yaml")
+    [ ! -f "$autoscaling_dir/keda-frontend-prometheus.yaml" ] && missing_files+=("keda-frontend-prometheus.yaml")
+    
+    if [ ${#missing_files[@]} -gt 0 ]; then
+        log_warn "Missing autoscaling example files: ${missing_files[*]}"
+        return 1
+    fi
+    
+    log_pass "Autoscaling examples directory structure complete"
+    return 0
+}
+
+# =============================================================================
 # Main Validation Function
 # =============================================================================
 
@@ -483,6 +580,25 @@ validate_blueprint() {
     local file_errors=$ERRORS
     local file_warnings=$WARNINGS
     
+    # Determine file type for conditional checks
+    local is_dgd=false
+    local is_dgdr=false
+    local is_autoscale_res=false
+    local is_model_res=false
+    
+    if is_dgd_manifest "$file"; then
+        is_dgd=true
+    fi
+    if is_dgdr_manifest "$file"; then
+        is_dgdr=true
+    fi
+    if is_autoscaling_resource "$file"; then
+        is_autoscale_res=true
+    fi
+    if is_model_crd "$file"; then
+        is_model_res=true
+    fi
+    
     # Run all checks
     check_yaml_syntax "$file"
     check_spdx_header "$file"
@@ -490,12 +606,35 @@ validate_blueprint() {
     check_description_annotation "$file"
     check_no_hardcoded_secrets "$file"
     check_secret_references "$file"
-    check_resource_limits "$file"
-    check_node_selector "$file"
+    
+    # Only check resource limits for pure DGD manifests (not DGDR, HPA/KEDA, or DynamoModel)
+    if $is_dgd && ! $is_dgdr && ! $is_autoscale_res && ! $is_model_res; then
+        check_resource_limits "$file"
+        check_node_selector "$file"
+        check_health_probes "$file"
+    else
+        # Log that we're skipping these checks for non-DGD resources
+        if $is_dgdr; then
+            echo -e "${GREEN}[SKIP]${NC} Resource/probe checks (DGDR profiler request with embedded config)"
+        elif $is_autoscale_res; then
+            echo -e "${GREEN}[SKIP]${NC} Resource/probe checks (HPA/KEDA autoscaling resource)"
+        elif $is_model_res; then
+            echo -e "${GREEN}[SKIP]${NC} Resource/probe checks (DynamoModel CRD reference)"
+        elif ! $is_dgd; then
+            echo -e "${GREEN}[SKIP]${NC} Resource/probe checks (Not a DynamoGraphDeployment)"
+        fi
+    fi
+    
     check_observability_labels "$file"
     check_otel_configuration "$file"
-    check_health_probes "$file"
-    check_naming_convention "$file"
+    
+    # Only check naming convention for DGD manifests
+    if $is_dgd; then
+        check_naming_convention "$file"
+    fi
+    
+    # v0.8.0 compatibility checks
+    check_deprecated_fields_v080 "$file"
     
     # Summary for this file
     local new_errors=$((ERRORS - file_errors))
@@ -624,11 +763,19 @@ main() {
     echo ""
     echo -e "${BLUE}==========================================${NC}"
     echo -e "${BLUE}  NVIDIA Dynamo Blueprint Validator${NC}"
+    echo -e "${BLUE}  (Dynamo v0.8.0 Compatible)${NC}"
     echo -e "${BLUE}==========================================${NC}"
     echo -e "Files to validate: ${#files[@]}"
     if $STRICT_MODE; then
         echo -e "Mode: ${RED}STRICT${NC} (warnings = errors)"
     fi
+    
+    # Global structure checks (run once)
+    echo ""
+    echo -e "${CYAN}=========================================${NC}"
+    echo -e "${CYAN}Global Structure Checks${NC}"
+    echo -e "${CYAN}=========================================${NC}"
+    check_autoscaling_examples_exist
     
     # Validate each file
     local failed_files=0

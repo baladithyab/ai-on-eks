@@ -1,6 +1,6 @@
-# 04-experimental: Multi-Node & Specialized
+# 04-experimental: Heavy DGDR & Specialized
 
-This tier contains experimental and cutting-edge examples including multi-node deployments and specialized configurations.
+This tier contains experimental and cutting-edge examples including heavy DGDR profiling and specialized configurations.
 
 ## ⚠️ WARNING
 
@@ -16,8 +16,8 @@ This tier contains experimental and cutting-edge examples including multi-node d
 
 | Count | Description |
 |-------|-------------|
-| 6 | Total examples |
-| 3 | Backend coverage (vLLM, SGLang, TRT-LLM) |
+| 2 | Total examples |
+| 1 | Backend coverage (vLLM) |
 | 🔬 | Experimental status |
 
 ## What's Here
@@ -26,115 +26,73 @@ This tier contains experimental and cutting-edge examples including multi-node d
 - **vllm-dgdr-deepseek-70b** - 70B DGDR (very long profiling)
 - **vllm-dgdr-deepseek-70b-g6** - 70B DGDR with g6 GPU tuning
 
-### multi-node/ - Grove/KAI Style
-- **vllm-disaggregated-multinode** - vLLM multi-node tensor parallel
-- **sglang-disaggregated-multinode** - SGLang multi-node tensor parallel
-- **trtllm-disaggregated-multinode** - TRT-LLM multi-node tensor parallel
+## Multi-Node Examples (Removed)
 
-### lws-multinode/ - LeaderWorkerSet Style
-- **llama3-70b-lws** - LWS-based multi-node alternative
+:::warning
+Multi-node examples (Grove/KAI, LWS/Volcano) have been **temporarily removed** until Grove/Kai orchestration is validated on AWS EKS. These will be re-added in a future release once the multi-node infrastructure is production-ready.
+
+Features removed:
+- `multi-node/vllm-disaggregated-multinode.yaml`
+- `multi-node/sglang-disaggregated-multinode.yaml`
+- `multi-node/trtllm-disaggregated-multinode.yaml`
+- `lws-multinode/llama3-70b-lws.yaml`
+
+For multi-node deployments, please use:
+1. Single-node large-GPU instances (p5.48xlarge with 8x H100)
+2. SGLang backend which works on PCIe (no NVLink required for TP)
+:::
 
 ## Prerequisites
 
-### Multi-Node Requirements
+### DGDR Requirements
 
-Multi-node examples require specialized orchestration:
-
-| Approach | Requirements |
-|----------|--------------|
-| Grove/KAI | Grove operator + KAI controller |
-| LWS/Volcano | LeaderWorkerSet + Volcano scheduler |
-
-### Network Requirements
-- High-bandwidth inter-node networking (RDMA preferred)
-- EFA support for AWS clusters
-- InfiniBand for on-prem
+Heavy DGDR examples require:
+- Prometheus stack for metrics collection
+- Large GPU instances (g6e.48xlarge or p5.48xlarge)
+- Extended profiling time (hours to complete)
 
 ### Storage Requirements
-- Shared filesystem (EFS, FSx Lustre, or equivalent)
-- Accessible from all worker nodes
-- Sufficient capacity for large models
-
-## Multi-Node Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                    Router/Frontend                   │
-└─────────────────────┬───────────────────────────────┘
-                      │
-         ┌────────────┴────────────┐
-         │                         │
-┌────────▼────────┐     ┌──────────▼──────────┐
-│     Node 1      │     │       Node 2        │
-│  ┌───────────┐  │     │   ┌───────────┐     │
-│  │  GPU 0-3  │◄─┼─────┼──►│  GPU 0-3  │     │
-│  │  Worker   │  │ NVLink  │  Worker   │     │
-│  └───────────┘  │ RDMA │   └───────────┘     │
-└─────────────────┘     └─────────────────────┘
-```
+- Shared filesystem (EFS) for model storage
+- Sufficient capacity for large models (100GB+)
 
 ## Deployment Steps
 
-### Grove/KAI Style
-
 ```bash
-# 1. Ensure Grove/KAI operators are installed
-kubectl get crd groves.ai.nvidia.com
+# 1. Ensure Prometheus is available
+kubectl get servicemonitor -n kube-prometheus-stack
 
-# 2. Deploy multi-node example
-./deploy.sh vllm-disaggregated-multinode
+# 2. Deploy DGDR example
+./deploy.sh vllm-dgdr-deepseek-70b
 
-# 3. Monitor pod placement across nodes
-kubectl get pods -n dynamo -o wide
-```
-
-### LWS Style
-
-```bash
-# 1. Ensure LeaderWorkerSet and Volcano are installed
-kubectl get crd leaderworkersets.leaderworkerset.x-k8s.io
-
-# 2. Deploy LWS example
-./deploy.sh llama3-70b-lws
-
-# 3. Verify leader/worker topology
-kubectl get lws -n dynamo
+# 3. Monitor profiling progress
+kubectl get dgdr -n dynamo -w
 ```
 
 ## Known Limitations
 
-1. **Pod Scheduling**: Multi-node requires careful nodeSelector/affinity
-2. **Networking**: NCCL may need tuning for cross-node communication
-3. **Failure Recovery**: Pod restarts may require full deployment restart
-4. **Scaling**: Horizontal scaling not supported during active inference
+1. **Profiling Time**: DGDR profiling can take 2-8 hours
+2. **Hardware Requirements**: Large GPU instances required
+3. **Cost**: Extended profiling incurs significant compute costs
 
 ## Troubleshooting
 
-### NCCL Communication Errors
+### Profiling Failures
 ```bash
-# Check NCCL environment
-kubectl exec -it <pod> -n dynamo -- env | grep NCCL
+# Check profiler pod logs
+kubectl logs -n dynamo -l nvidia.com/component=profiler
 
-# Check network connectivity
-kubectl exec -it <pod> -n dynamo -- ping <other-node-ip>
+# Check DGDR status
+kubectl describe dgdr <name> -n dynamo
 ```
 
-### Pod Scheduling Issues
+### Resource Issues
 ```bash
-# Check node labels and taints
-kubectl describe nodes | grep -A5 "Taints\|Labels"
-
 # Verify GPU availability
 kubectl describe nodes | grep nvidia.com/gpu
+
+# Check pod events
+kubectl get events -n dynamo --sort-by='.lastTimestamp'
 ```
-
-## Future Work
-
-These experimental patterns are evolving:
-- Better multi-node failure handling
-- Improved scaling mechanisms
-- Simplified orchestration
-- Better observability
 
 ## Contact
 

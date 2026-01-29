@@ -82,7 +82,7 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
           workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh
@@ -134,7 +134,7 @@ spec:
               port: 9090
             periodSeconds: 60
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
           workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh
@@ -195,7 +195,7 @@ spec:
               port: 9090
             periodSeconds: 60
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
           workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh

@@ -19,7 +19,7 @@
 #   01-core/       - Golden path examples, all backends
 #   02-standard/   - Production variants
 #   03-advanced/   - Large models, DGDR profiling
-#   04-experimental/ - Multi-node, specialized
+#   04-experimental/ - Heavy DGDR, specialized (multi-node removed until Grove/Kai validated)
 #   05-model-showcase/ - Real-world production models
 #   _internal/     - Test manifests (not deployed via catalog)
 
@@ -486,8 +486,9 @@ entries:
     cost_per_hour: "$98.32"
 
   # ---------------------------------------------------------------------------
-  # EXPERIMENTAL (multi-node + heavy DGDR) - 04-experimental/
-  # v0.7.1 Validation: Not tested (requires multi-node infrastructure)
+  # EXPERIMENTAL (heavy DGDR) - 04-experimental/
+  # v0.7.1 Validation: Not tested (requires specialized infrastructure)
+  # NOTE: Multi-node examples removed until Grove/Kai is validated.
   # ---------------------------------------------------------------------------
   - id: vllm-dgdr-deepseek-70b
     path: 04-experimental/vllm/vllm-dgdr-deepseek-70b.yaml
@@ -509,45 +510,8 @@ entries:
     hardware: "g6e.48xlarge (specific tuning)"
     cost_per_hour: "$15.64+"
 
-  - id: vllm-disaggregated-multinode
-    path: 04-experimental/multi-node/vllm-disaggregated-multinode.yaml
-    backend: vllm
-    tier: experimental
-    prereqs: "Multi-node orchestration (Grove/KAI or LWS/Volcano)"
-    notes: "Multi-node tensor parallel (Grove-style)"
-    validation_status: experimental
-    hardware: "Multi-node p5.48xlarge"
-    cost_per_hour: "$196.64+"
-
-  - id: sglang-disaggregated-multinode
-    path: 04-experimental/multi-node/sglang-disaggregated-multinode.yaml
-    backend: sglang
-    tier: experimental
-    prereqs: "Multi-node orchestration (Grove/KAI or LWS/Volcano)"
-    notes: "Multi-node tensor parallel (Grove-style)"
-    validation_status: experimental
-    hardware: "Multi-node p5.48xlarge"
-    cost_per_hour: "$196.64+"
-
-  - id: trtllm-disaggregated-multinode
-    path: 04-experimental/multi-node/trtllm-disaggregated-multinode.yaml
-    backend: trtllm
-    tier: experimental
-    prereqs: "Multi-node orchestration (Grove/KAI or LWS/Volcano)"
-    notes: "Multi-node tensor parallel (Grove-style)"
-    validation_status: experimental
-    hardware: "Multi-node p5.48xlarge"
-    cost_per_hour: "$196.64+"
-
-  - id: llama3-70b-lws
-    path: 04-experimental/lws-multinode/llama3-70b-lws.yaml
-    backend: vllm
-    tier: experimental
-    prereqs: "LeaderWorkerSet + Volcano; multi-node GPUs"
-    notes: "LWS multi-node alternative"
-    validation_status: experimental
-    hardware: "Multi-node p5.48xlarge"
-    cost_per_hour: "$196.64+"
+  # NOTE: Multi-node examples (Grove/KAI, LWS) removed until Grove/Kai is validated.
+  # See issue tracking at: https://github.com/awslabs/ai-on-eks/issues/XXX
 
   # ---------------------------------------------------------------------------
   # MODEL SHOWCASE - 05-model-showcase/

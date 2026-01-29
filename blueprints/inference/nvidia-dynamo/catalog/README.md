@@ -1,10 +1,10 @@
-# NVIDIA Dynamo Blueprint Catalog - v0.7.1 Validation Results
+# NVIDIA Dynamo Blueprint Catalog - v0.8.0 Validation Results
 
 This directory provides a **showcase-first, backend-diverse catalog** for the Dynamo blueprints in [`ai-on-eks/blueprints/inference/nvidia-dynamo/`](../:1).
 
 ## Validation Status
 
-✅ **v0.7.1 Comprehensive Testing Complete** (100% Pass Rate for Testable Configurations)
+✅ **v0.8.0 Comprehensive Testing Complete** (100% Pass Rate for Testable Configurations)
 - **Core Tier:** 11/11 blueprints PASSED
 - **Standard Tier:** 11/11 blueprints PASSED  
 - **Model Showcase:** 3/3 large model families validated on PCIe with SGLang
@@ -165,7 +165,7 @@ cd ai-on-eks/blueprints/inference/nvidia-dynamo
 **Status:** vLLM upstream issue, SGLang recommended alternative
 
 ### DGDR Profiler Integration
-**Issue:** DGDR profiler has initialization bug in v0.7.1  
+**Issue:** DGDR profiler has initialization bug in v0.8.0  
 **Impact:** DGDR blueprints in advanced tier untestable  
 **Workaround:** None currently, awaiting v0.7.2 or v0.8.0 fix  
 **Affected Blueprints:** All `*-dgdr-*` blueprints in advanced tier
@@ -226,7 +226,7 @@ cd ai-on-eks/blueprints/inference/nvidia-dynamo
 
 ## Testing and Validation
 
-**Test Framework:** `test-all-tiers.sh` automated validation  
+**Test Framework:** `scripts/run-all-tests.sh` automated validation  
 **Coverage:** 22/22 Core + Standard tier blueprints  
 **Infrastructure:** g6e.12xlarge (4x L40S 48GB PCIe)  
 **Methodology:** Full deployment, health checks, inference validation, cleanup
@@ -242,5 +242,5 @@ cd ai-on-eks/blueprints/inference/nvidia-dynamo
 - The scripts resolve stable `id` via [`catalog.yaml`](catalog.yaml:1) to a manifest `path`
 - If an `id` is **not** in the catalog, scripts fall back to best-effort discovery (filename lookup) with warning
 - Some entries are **infra-only** (`backend: infra`), like DynamoModel examples - they are listed in catalog but do not represent inference-serving workloads
-- All test results reflect v0.7.1 validation on g6e.12xlarge infrastructure
+- All test results reflect v0.8.0 validation on g6e.12xlarge infrastructure
 - Advanced tier blueprints require specialized hardware or have known blockers (documented above)

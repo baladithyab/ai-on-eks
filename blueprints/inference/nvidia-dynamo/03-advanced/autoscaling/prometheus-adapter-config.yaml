@@ -1,0 +1,191 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# Prometheus Adapter Configuration for NVIDIA Dynamo Custom Metrics
+# =============================================================================
+#
+# This configuration enables the Prometheus Adapter to expose Dynamo metrics
+# as custom.metrics.k8s.io resources, allowing HPAs to scale based on them.
+#
+# Use this as Helm values when installing the Prometheus Adapter:
+#   helm install prometheus-adapter prometheus-community/prometheus-adapter \
+#     -n monitoring -f prometheus-adapter-config.yaml
+#
+# Or merge with your existing prometheus-adapter values.
+#
+# After installation, verify metrics are available:
+#   kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1" | jq .
+#
+# Prerequisites:
+#   1. Prometheus stack installed
+#   2. Dynamo metrics being scraped (via OTel collector or PodMonitor)
+#
+# =============================================================================
+
+# Prometheus URL (adjust to match your installation)
+prometheus:
+  url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local
+  port: 9090
+
+# Custom metric rules for Dynamo
+rules:
+  default: false
+  custom:
+    # =========================================================================
+    # Request Queue Size - Scale on pending requests
+    # =========================================================================
+    - seriesQuery: 'dynamo_request_queue_size{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace:
+            resource: namespace
+          pod:
+            resource: pod
+      name:
+        matches: "^(.*)$"
+        as: "dynamo_request_queue_size"
+      metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+
+    # =========================================================================
+    # Concurrent Requests - Scale on active load
+    # =========================================================================
+    - seriesQuery: 'dynamo_concurrent_requests{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace:
+            resource: namespace
+          pod:
+            resource: pod
+      name:
+        matches: "^(.*)$"
+        as: "dynamo_concurrent_requests"
+      metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+
+    # =========================================================================
+    # Request Latency P95 - Scale on latency SLA violations
+    # =========================================================================
+    - seriesQuery: 'dynamo_request_latency_seconds_bucket{namespace!=""}'
+      resources:
+        overrides:
+          namespace:
+            resource: namespace
+      name:
+        matches: "^(.*)_bucket$"
+        as: "dynamo_request_latency_p95"
+      metricsQuery: |
+        histogram_quantile(0.95,
+          sum(rate(<<.Series>>{<<.LabelMatchers>>}[5m])) by (le, <<.GroupBy>>)
+        )
+
+    # =========================================================================
+    # Tokens Per Second (TPS) - Scale on throughput
+    # =========================================================================
+    - seriesQuery: 'dynamo_tokens_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace:
+            resource: namespace
+          pod:
+            resource: pod
+      name:
+        matches: "^(.*)_total$"
+        as: "dynamo_tokens_per_second"
+      metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[1m])) by (<<.GroupBy>>)'
+
+    # =========================================================================
+    # GPU Utilization (from DCGM if available) - Scale on GPU usage
+    # =========================================================================
+    - seriesQuery: 'DCGM_FI_DEV_GPU_UTIL{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace:
+            resource: namespace
+          pod:
+            resource: pod
+      name:
+        matches: "^DCGM_FI_DEV_GPU_UTIL$"
+        as: "gpu_utilization"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+
+    # =========================================================================
+    # KV Cache Usage - Scale disaggregated deployments on cache pressure
+    # =========================================================================
+    - seriesQuery: 'dynamo_kv_cache_usage_ratio{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace:
+            resource: namespace
+          pod:
+            resource: pod
+      name:
+        matches: "^(.*)$"
+        as: "dynamo_kv_cache_usage"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+
+# External metrics (for external triggers)
+# These can be used by KEDA or other external metric consumers
+external: []
+
+# Resource metrics (CPU/Memory) - use default behavior
+resource:
+  cpu:
+    containerQuery: |
+      sum(rate(container_cpu_usage_seconds_total{<<.LabelMatchers>>}[5m]))
+      by (<<.GroupBy>>)
+    nodeQuery: |
+      sum(rate(container_cpu_usage_seconds_total{<<.LabelMatchers>>}[5m]))
+      by (<<.GroupBy>>)
+    resources:
+      overrides:
+        namespace:
+          resource: namespace
+        pod:
+          resource: pod
+        node:
+          resource: node
+    containerLabel: container
+  memory:
+    containerQuery: |
+      sum(container_memory_working_set_bytes{<<.LabelMatchers>>})
+      by (<<.GroupBy>>)
+    nodeQuery: |
+      sum(container_memory_working_set_bytes{<<.LabelMatchers>>})
+      by (<<.GroupBy>>)
+    resources:
+      overrides:
+        namespace:
+          resource: namespace
+        pod:
+          resource: pod
+        node:
+          resource: node
+    containerLabel: container
+
+# Service configuration
+replicas: 1
+
+# Pod resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 65534
+  runAsNonRoot: true
+  runAsUser: 65534
+
+# Container security context  
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534

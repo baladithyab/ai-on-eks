@@ -345,6 +345,7 @@ resource "kubectl_manifest" "nvidia_dynamo_platform_yaml" {
     dynamo_version                                = var.dynamo_stack_version
     dynamo_enable_grove                           = var.dynamo_enable_grove
     dynamo_enable_kai_scheduler                   = var.dynamo_enable_kai_scheduler
+    dynamo_enable_nats_etcd                       = var.dynamo_enable_nats_etcd
     dynamo_operator_namespace_restriction_enabled = var.dynamo_operator_namespace_restriction_enabled
     dynamo_model_express_url                      = var.dynamo_model_express_url
     enable_prometheus_endpoint                    = var.enable_ai_ml_observability_stack

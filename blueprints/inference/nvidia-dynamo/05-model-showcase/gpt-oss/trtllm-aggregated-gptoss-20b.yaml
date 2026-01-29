@@ -98,7 +98,7 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
@@ -151,7 +151,7 @@ spec:
             periodSeconds: 60
             # 300 * 60s = 5 hours max startup time for engine build + model loading
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh

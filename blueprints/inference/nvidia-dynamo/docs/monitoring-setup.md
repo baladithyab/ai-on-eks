@@ -181,7 +181,7 @@ spec:
               name: dynamo-otel-vllm
 ```
 
-Or see [`examples/vllm-with-full-observability.yaml`](../examples/vllm-with-full-observability.yaml) for a complete example.
+Or see [`01-core/observability/vllm-full-observability.yaml`](../01-core/observability/vllm-full-observability.yaml) for a complete example.
 
 ### Viewing Traces
 

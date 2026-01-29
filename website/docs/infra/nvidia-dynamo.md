@@ -146,8 +146,8 @@ The installation script performs the following:
 
 1. **Copies Base Infrastructure**: Integrates with the ai-on-eks base infrastructure modules
 2. **Provisions AWS Resources**: Creates VPC, EKS cluster, and supporting infrastructure via Terraform
-3. **Deploys Dynamo CRDs**: Installs Custom Resource Definitions via ArgoCD
-4. **Deploys Dynamo Platform**: Installs operator and platform components via ArgoCD (creates dynamo namespace)
+3. **Deploys Dynamo CRDs**: Installs Custom Resource Definitions via ArgoCD (Application: `dynamo-crds`) - **CRDs are always deployed first**
+4. **Deploys Dynamo Platform**: Installs operator and platform components via ArgoCD (Application: `dynamo-platform`)
 5. **Creates Secrets in dynamo namespace** (managed in `nvidia-dynamo-secrets.tf`):
    - `ngc-secret`: NGC container image pull authentication
    - `hf-token-secret`: HuggingFace model downloads
@@ -207,7 +207,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true # Required for NVIDIA Dynamo high-performance networking
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.7.1"
+dynamo_stack_version             = "v0.8.0"
 
 # Required Secrets - Replace with your actual tokens
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -242,11 +242,11 @@ Terraform will update the Kubernetes secrets without recreating the entire infra
 
 ### Platform-Level Feature Configuration
 
-NVIDIA Dynamo v0.5.0+ and v0.6.0+ introduce platform-level features that can be enabled via Terraform variables. These features are configured at the platform level (dynamo-platform Helm chart) and affect the entire Dynamo installation.
+NVIDIA Dynamo v0.8.0+ introduces platform-level features that can be enabled via Terraform variables. These features are configured at the platform level (dynamo-platform Helm chart) and affect the entire Dynamo installation.
 
 :::info
 **Platform-Level vs. Workload-Level Features:**
-- **Platform-Level**: Configured in Terraform (`blueprint.tfvars`) and affect the entire platform (Grove, Kai Scheduler, namespace restriction, Model Express)
+- **Platform-Level**: Configured in Terraform (`blueprint.tfvars`) and affect the entire platform (Grove, Kai Scheduler, namespace restriction, Model Express, NATS/Etcd)
 - **Workload-Level**: Configured in DynamoGraphDeployment CRs per-workload (KV Router, SLA Planner, KVBM, OTEL tracing, audit logging)
 
 For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](https://awslabs.github.io/ai-on-eks/docs/blueprints/inference/GPUs/nvidia-dynamo#advanced-features).
@@ -256,26 +256,26 @@ For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `dynamo_stack_version` | string | `"v0.7.1"` | Dynamo platform version to deploy |
+| `dynamo_stack_version` | string | `"v0.8.0"` | Dynamo platform version to deploy |
 | `dynamo_enable_grove` | bool | `false` | Enable Grove for multi-node inference coordination |
 | `dynamo_enable_kai_scheduler` | bool | `false` | Enable Kai Scheduler for intelligent resource allocation |
+| `dynamo_enable_nats_etcd` | bool | `false` | Enable NATS and Etcd for event-driven architecture and distributed coordination (Opt-in) |
 | `dynamo_operator_namespace_restriction_enabled` | bool | `false` | Restrict operator to dynamo namespace only |
 | `dynamo_model_express_url` | string | `""` | URL for existing Model Express server (optional) |
 
 #### dynamo_stack_version
 
 **Type**: `string`
-****Default**: `"v0.7.1"`
-**Example**: `"v0.5.1"` (for rollback)
+****Default**: `"v0.8.0"`
+****Example**: `"v0.7.1"` (for rollback)
 
-:::info What's New in v0.6.1
-- ✅ **Production Readiness**: vLLM DP multi-node, automated DGDR profiling, Grove improvements
-- ✅ **KVBM Enhancements**: GPU-to-disk offloading with multi-tier caching (GPU→CPU→Disk→Remote)
-- ✅ **Enhanced Benchmarking**: AIPerf replaces genai-perf for standardized testing
-- ✅ **GKE Support**: Production-ready templates for Google Kubernetes Engine
-- ✅ **GB200 Platform**: FP4 quantization, WideEP for MoE models (experimental)
+:::info What's New in v0.8.0
+- ✅ **Simplified Architecture**: NATS and Etcd are now opt-in, reducing the default footprint.
+- ✅ **Enhanced Autoscaling**: Improved support for HPA and custom metrics.
+- ✅ **Tiered Blueprints**: New organized structure for Core, Standard, and Advanced use cases.
+- ✅ **Stability Improvements**: Bug fixes and performance optimizations for vLLM and TRT-LLM backends.
 
-For detailed upgrade information, see the [v0.6.1 Upgrade Guide](https://github.com/awslabs/ai-on-eks/blob/main/infra/nvidia-dynamo/UPGRADE_TO_V0.6.1.md).
+For detailed upgrade information, see the [v0.8.0 Upgrade Guide](https://github.com/awslabs/ai-on-eks/blob/main/infra/nvidia-dynamo/UPGRADE_TO_V0.8.0.md).
 :::
 
 Specifies the NVIDIA Dynamo platform version to deploy. This determines which Helm chart version is used for the dynamo-platform deployment.
@@ -293,7 +293,7 @@ Specifies the NVIDIA Dynamo platform version to deploy. This determines which He
 
 **Example:**
 ```hcl
-dynamo_stack_version = "v0.7.1"
+dynamo_stack_version = "v0.8.0"
 ```
 
 :::tip Version Updates
@@ -306,10 +306,14 @@ Check the [NVIDIA Dynamo releases](https://github.com/ai-dynamo/dynamo/releases)
 **Default**: `false`
 **Example**: `true`
 
+:::warning In Progress
+Grove and Kai Scheduler support is **in progress** with further investigation ongoing. Multi-node blueprints have been temporarily removed until Grove/Kai orchestration is validated on AWS EKS. These settings remain available for testing but are not recommended for production use.
+:::
+
 Enables Grove, the multi-node inference coordination operator. Grove orchestrates distributed inference workloads across multiple nodes and GPUs.
 
 **When to Enable:**
-- Deploying multi-node inference workloads (models too large for a single GPU)
+- Testing multi-node inference workloads (in progress)
 - Using tensor parallelism (TP) or pipeline parallelism (PP)
 - Deploying models that require multiple GPUs across multiple nodes
 
@@ -328,25 +332,20 @@ dynamo_enable_grove         = true
 dynamo_enable_kai_scheduler = true  # Required for Grove
 ```
 
-**Infrastructure Impact:**
-- Grove requires Kai Scheduler to function properly
-- No changes to existing ai-on-eks infrastructure required
-- Minimal resource footprint (~100m CPU, ~256Mi memory per operator)
-- Works seamlessly with Karpenter, EFS, and observability stack
-
-**Related Documentation:**
-- Check upgrade guides in [infra/nvidia-dynamo](https://github.com/awslabs/ai-on-eks/tree/main/infra/nvidia-dynamo) for detailed Grove setup and migration information
-
 #### dynamo_enable_kai_scheduler
 
 **Type**: `bool`
 **Default**: `false`
 **Example**: `true`
 
+:::warning In Progress
+Grove and Kai Scheduler support is **in progress** with further investigation ongoing. Multi-node blueprints have been temporarily removed until Grove/Kai orchestration is validated on AWS EKS. These settings remain available for testing but are not recommended for production use.
+:::
+
 Enables Kai Scheduler, the intelligent resource allocation operator for multi-node workloads. Kai Scheduler optimizes GPU allocation and scheduling for distributed inference.
 
 **When to Enable:**
-- Deploying multi-node inference workloads with Grove
+- Testing multi-node inference workloads with Grove (experimental)
 - Required for Grove-based multi-node deployments
 - Optimizing resource allocation for complex inference graphs
 
@@ -363,6 +362,18 @@ Enables Kai Scheduler, the intelligent resource allocation operator for multi-no
 dynamo_enable_grove         = true
 dynamo_enable_kai_scheduler = true
 ```
+
+#### dynamo_enable_nats_etcd (Opt-in)
+
+**Type**: `bool`
+**Default**: `false`
+
+In v0.8.0+, NATS and Etcd are optional components, controlled by a single toggle.
+
+- **NATS**: Provides event-driven architecture and messaging capabilities.
+- **Etcd**: Provides distributed coordination features.
+
+By default, these are disabled to reduce the platform footprint and complexity, as Dynamo v0.8.0+ uses Kubernetes-native discovery and TCP by default.
 
 #### dynamo_operator_namespace_restriction_enabled
 
@@ -438,7 +449,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.7.1"
+dynamo_stack_version             = "v0.8.0"
 
 # Required Secrets
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -447,24 +458,30 @@ huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
 # Platform features (all defaults)
 # dynamo_enable_grove = false
 # dynamo_enable_kai_scheduler = false
+# dynamo_enable_nats_etcd = false
 # dynamo_operator_namespace_restriction_enabled = false
 # dynamo_model_express_url = ""
 ```
 
-**Multi-Node Deployment:**
+**Multi-Node Deployment (Experimental):**
+
+:::warning
+Multi-node deployments via Grove/Kai are experimental. Multi-node blueprints have been removed until validated.
+:::
+
 ```hcl
 name                             = "dynamo-on-eks"
 enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.7.1"
+dynamo_stack_version             = "v0.8.0"
 
 # Required Secrets
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
 huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
 
-# Enable multi-node features
+# Enable multi-node features (EXPERIMENTAL - blueprints not yet available)
 dynamo_enable_grove         = true
 dynamo_enable_kai_scheduler = true
 ```
@@ -476,7 +493,7 @@ enable_dynamo_stack              = true
 enable_aws_efs_csi_driver        = true
 enable_aws_efa_k8s_device_plugin = true
 enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.7.1"
+dynamo_stack_version             = "v0.8.0"
 
 # Required Secrets
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
@@ -485,6 +502,22 @@ huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
 # Restrict operator to dynamo namespace
 dynamo_operator_namespace_restriction_enabled = true
 ```
+
+## EKS-Specific Considerations
+
+When deploying NVIDIA Dynamo on Amazon EKS, consider the following:
+
+### Networking
+- **EFA (Elastic Fabric Adapter)**: For multi-node training or inference (e.g., using Grove), EFA is critical for low-latency communication. Ensure `enable_aws_efa_k8s_device_plugin = true` is set in your Terraform config.
+- **VPC CNI**: The default AWS VPC CNI plugin is used. Ensure your subnets have enough IP addresses for the number of pods you plan to deploy.
+
+### Storage
+- **EFS (Elastic File System)**: Used for shared model storage. The `enable_aws_efs_csi_driver = true` setting ensures the CSI driver is installed.
+- **StorageClasses**: The blueprint deploys standard storage classes. If you need high-performance local storage (e.g., NVMe on instance store), ensure your node groups are configured with RAID 0 on instance stores (handled by the blueprint's Karpenter configuration for GPU nodes).
+
+### IAM and Secrets
+- **IRSA (IAM Roles for Service Accounts)**: The blueprint uses IRSA for components that need AWS permissions (e.g., EFS CSI driver, Karpenter).
+- **Secrets Management**: Critical secrets (NGC API Key, HF Token) are managed via Terraform and injected as Kubernetes Secrets. Avoid hardcoding these in your DGD manifests.
 
 ## Monitoring and Observability
 
@@ -560,8 +593,8 @@ kubectl get secret -n dynamo ngc-secret -o yaml
 
 After deploying the infrastructure, you can:
 
-1. **Deploy Inference Examples**: Navigate to the [NVIDIA Dynamo Blueprints](https://awslabs.github.io/ai-on-eks/docs/blueprints/inference/GPUs/nvidia-dynamo) page
-2. **Explore Available Examples**: Review the 9 production-ready inference examples
+1. **Deploy Inference Examples**: Use the global [`deploy.sh`](../../../blueprints/inference/nvidia-dynamo/deploy.sh) script with the [examples catalogue](../../../blueprints/inference/nvidia-dynamo/catalog/catalog.yaml). See the [NVIDIA Dynamo Blueprints](https://awslabs.github.io/ai-on-eks/docs/blueprints/inference/GPUs/nvidia-dynamo) page for details.
+2. **Explore Available Examples**: Review the production-ready inference examples in the catalogue
 3. **Customize Deployments**: Learn about DynamoGraphDeployment structure and customization
 4. **Monitor Performance**: Use Grafana dashboards for ongoing monitoring
 

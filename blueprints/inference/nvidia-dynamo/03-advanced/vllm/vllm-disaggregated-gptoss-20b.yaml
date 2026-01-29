@@ -49,7 +49,7 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
 
     VllmDecodeWorker:
       componentType: worker
@@ -62,13 +62,19 @@ spec:
         - name: dynamo-shared-models
           mountPoint: /models
       resources:
+        requests:
+          cpu: "16"
+          memory: "128Gi"
+          gpu: "4"
         limits:
+          cpu: "32"
+          memory: "256Gi"
           gpu: "4"
       sharedMemory:
         size: 24Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           workingDir: /workspace/components/backends/vllm
           command:
           - python3
@@ -101,13 +107,19 @@ spec:
         - name: dynamo-shared-models
           mountPoint: /models
       resources:
+        requests:
+          cpu: "16"
+          memory: "128Gi"
+          gpu: "4"
         limits:
+          cpu: "32"
+          memory: "256Gi"
           gpu: "4"
       sharedMemory:
         size: 24Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           workingDir: /workspace/components/backends/vllm
           command:
           - python3

@@ -461,6 +461,22 @@ fi
 
 section "Test Suite 4: Blueprint Validation"
 
+# Optional offline validation workflow (no cluster required)
+test_start "Offline validation workflow (validate-offline.sh)"
+if [ -f "${ROOT_DIR}/scripts/validate-offline.sh" ]; then
+    if dry_run_msg "${ROOT_DIR}/scripts/validate-offline.sh"; then
+        test_pass "Dry run"
+    else
+        if "${ROOT_DIR}/scripts/validate-offline.sh" --skip-helm --skip-links >/dev/null 2>&1; then
+            test_pass "Offline validation completed"
+        else
+            test_fail "Offline validation failed"
+        fi
+    fi
+else
+    test_skip "validate-offline.sh not found"
+fi
+
 # Function to validate a blueprint
 validate_blueprint() {
     local blueprint_file="$1"

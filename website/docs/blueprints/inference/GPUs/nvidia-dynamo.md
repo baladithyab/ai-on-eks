@@ -16,10 +16,10 @@ This page covers NVIDIA Dynamo **inference blueprints and examples**. For infras
 # NVIDIA Dynamo Inference Blueprints
 
 :::info
-NVIDIA Dynamo provides production-ready inference capabilities including multimodal support, multi-node deployments, comprehensive observability, and advanced routing.
+NVIDIA Dynamo provides production-ready inference capabilities including multimodal support, comprehensive observability, advanced routing, and disaggregated serving architectures.
 
 **Version Information:**
-- Current version used in examples: Check `infra/nvidia-dynamo/terraform/blueprint.tfvars`
+- Current version used in examples: Check `infra/nvidia-dynamo/terraform/blueprint.tfvars` (Default: **v0.8.0**)
 - Latest NVIDIA releases: [Dynamo Releases](https://github.com/ai-dynamo/dynamo/releases)
 :::
 
@@ -42,15 +42,22 @@ git clone https://github.com/awslabs/ai-on-eks.git && cd ai-on-eks/infra/nvidia-
 # 3. Deploy inference examples using prebuilt NGC containers
 cd ../../blueprints/inference/nvidia-dynamo
 
-./deploy.sh                # Interactive menu to choose example
-# ./deploy.sh vllm           # Deploy vLLM with interactive setup
+# 4. Choose an example from the tiered structure
+# List all available examples
+./deploy.sh --list
 
-# 4. Test your deployment (wait for model download)
+# Deploy a Core example (Basic):
+./deploy.sh vllm-aggregated-default
+
+# Or deploy a Standard example (Production-ready):
+# ./deploy.sh vllm-aggregated-router
+
+# 5. Test your deployment (wait for model download)
 kubectl port-forward svc/vllm-frontend 8000:8000 -n dynamo
 curl http://localhost:8000/health
 ```
 
-**Prerequisites**:
+**Prerequisites:**
 - Infrastructure deployed with secrets configured ([see infrastructure guide](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo))
 - NGC API key and HuggingFace token configured in Terraform (required)
 
@@ -78,33 +85,46 @@ A **DynamoGraphDeployment (DGD)** is a Kubernetes Custom Resource Definition (CR
 
 Think of a DGD as a blueprint that tells the Dynamo Operator how to deploy and manage your inference workload.
 
-<CollapsibleContent header={<h2><span>Deploying Inference Examples</span></h2>}>
+<CollapsibleContent header={<h2><span>Deploy via Blueprint Catalogue</span></h2>}>
 
 ### Using the Deployment Script
 
-The `deploy.sh` script simplifies deploying Dynamo examples with prebuilt [NGC container images](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/containers):
+The [`deploy.sh`](../../../../../blueprints/inference/nvidia-dynamo/deploy.sh) script simplifies deploying Dynamo examples using a **catalogue-based workflow**. It resolves example IDs to their corresponding manifests in [`catalog.yaml`](../../../../../blueprints/inference/nvidia-dynamo/catalog/catalog.yaml) and handles version management automatically.
 
 ```bash
 cd blueprints/inference/nvidia-dynamo
 
-# Interactive menu to choose from 9 examples
-./deploy.sh
+# List all available examples in the catalogue
+./deploy.sh --list
 
-# Or deploy specific examples directly
-./deploy.sh vllm-aggregated-default           # vLLM aggregated serving
-./deploy.sh sglang-aggregated-default         # SGLang with RadixAttention
-./deploy.sh hello-world                       # CPU-only testing
-./deploy.sh trtllm-aggregated-default         # TensorRT-LLM optimized
+# Deploy a specific example by ID
+./deploy.sh vllm-aggregated-default
+
+# Interactive menu to choose from the catalogue
+./deploy.sh
 ```
 
-**What the Script Does:**
+**How it Works:**
 
-1. **Version Management**: Automatically reads Dynamo version from `terraform/blueprint.tfvars`
-2. **Secret Validation**: Verifies that required secrets exist (created by Terraform)
-   - `hf-token-secret`: HuggingFace token for model downloads
-   - `ngc-secret`: NGC authentication for container images
-3. **Manifest Deployment**: Applies the DynamoGraphDeployment YAML to the cluster
-4. **Service Monitor**: Optionally creates Prometheus ServiceMonitor for metrics
+1. **Catalogue Lookup**: The script looks up the provided ID (e.g., `vllm-aggregated-default`) in [`catalog/catalog.yaml`](../../../../../blueprints/inference/nvidia-dynamo/catalog/catalog.yaml).
+2. **Manifest Resolution**: It resolves the ID to the specific manifest path (e.g., `01-core/vllm/vllm-aggregated-default.yaml`).
+3. **Version Management**: Automatically reads Dynamo version from `terraform/blueprint.tfvars` and updates container image tags.
+4. **Secret Validation**: Verifies that required secrets (`hf-token-secret`, `ngc-secret`) exist.
+5. **Deployment**: Applies the resolved manifest and optionally creates observability resources.
+
+**Key Features:**
+
+- **Catalogue-First**: Use stable IDs instead of file paths.
+- **Tiered Structure**: Examples are organized into Core, Standard, Advanced, and Experimental tiers.
+- **Enhanced Deployment**: Support for `--apply-configs`, `--enable-monitoring`, and `--enable-tracing` flags.
+
+```bash
+# Deploy with monitoring enabled
+./deploy.sh vllm-aggregated-default --enable-monitoring
+
+# Deploy with full observability (monitoring + tracing)
+./deploy.sh vllm-full-observability --enable-monitoring --enable-tracing
+```
 
 :::info Secret Management
 Secrets are now managed by Terraform (not shell scripts). If the deployment script reports missing secrets, ensure you have:
@@ -118,100 +138,101 @@ See the [Infrastructure Guide](https://awslabs.github.io/ai-on-eks/docs/infra/nv
 
 ```bash
 # Override version via environment variable
-export DYNAMO_VERSION=v0.7.1
+export DYNAMO_VERSION=v0.8.0
 ./deploy.sh vllm-aggregated-default
 
 # Or inline
-DYNAMO_VERSION=v0.7.1 ./deploy.sh sglang-aggregated-default
+DYNAMO_VERSION=v0.8.0 ./deploy.sh sglang-aggregated-default
 ```
 
 **Key Benefits of Prebuilt Containers:**
-- **No Build Required**: Uses official [NGC container images](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/collections/ai-dynamo)
+- **No Build Required**: Uses official [NGC container images](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo)
 - **Faster Deployment**: Skip 20+ minute build process
 - **Consistent Experience**: NVIDIA-tested and validated images
 - **Version Management**: Automatic version detection from `blueprint.tfvars`
-- **Override Support**: Use `DYNAMO_VERSION=v0.7.1 ./deploy.sh` to override version
+- **Override Support**: Use `DYNAMO_VERSION=v0.8.0 ./deploy.sh` to override version
 
 </CollapsibleContent>
 
 ## Available Examples
 
-All examples are located in `blueprints/inference/nvidia-dynamo/` and can be deployed using the `deploy.sh` script.
+The examples are organized into a tiered structure to help you choose the right complexity for your needs:
 
-### Production-Ready Examples
-
-The following examples are fully tested and production-ready with comprehensive documentation:
+### 1. Core Tier (`01-core`)
+Basic examples for testing connectivity and platform functionality. Ideal for initial validation.
 
 | Example | Runtime | Model | Architecture | Node Type | Key Features |
 |---------|---------|--------|--------------|-----------|--------------|
-| **[hello-world](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/hello-world)** | CPU | N/A | Aggregated | CPU | Basic connectivity testing |
-| **[vllm-aggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm)** | vLLM | Qwen3-8B | Aggregated | G5 GPU | OpenAI API, balanced performance |
-| **[sglang-aggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/sglang)** | SGLang | DeepSeek-R1-Distill-8B | Aggregated | G5 GPU | RadixAttention caching |
-| **[trtllm-aggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/trtllm)** | TensorRT-LLM | DeepSeek-R1-Distill-8B | Aggregated | G5 GPU | Maximum inference performance |
-| **[multi-replica-vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multi-replica-vllm)** | vLLM | Multiple models | Multi-replica HA | G5 GPU | KV routing, load balancing |
+| **[hello-world](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/01-core/hello-world)** | CPU | N/A | Aggregated | CPU | Basic connectivity testing |
+| **[vllm-aggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/01-core/vllm)** | vLLM | Qwen3-8B | Aggregated | G5 GPU | OpenAI API, balanced performance |
 
-### Advanced Examples (Beta)
+### 2. Standard Tier (`02-standard`)
+Production-ready examples with advanced features like routing, caching, and different backends.
 
-These examples demonstrate advanced Dynamo features and are suitable for experimental workloads:
+| Example | Runtime | Model | Architecture | Key Features |
+|---------|---------|--------|--------------|--------------|
+| **[sglang-aggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/02-standard/sglang)** | SGLang | DeepSeek-R1-Distill-8B | Aggregated | RadixAttention caching |
+| **[trtllm-aggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/02-standard/trtllm)** | TensorRT-LLM | DeepSeek-R1-Distill-8B | Aggregated | Maximum inference performance |
+| **[vllm-router](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/02-standard/vllm)** | vLLM | Multiple | KV Routing | Cache-aware request routing |
+| **[multimodal](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/02-standard/multimodal)** | vLLM | Qwen2.5-VL | Disaggregated | Vision-Language Model support |
+
+### 3. Advanced Tier (`03-advanced`)
+Complex architectures including autoscaling, DGDR profiling, and disaggregated serving.
 
 | Example | Runtime | Architecture | Use Case | Key Features |
 |---------|---------|--------------|----------|--------------|
-| **[vllm-disaggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm)** | vLLM | Disaggregated | High throughput | Separate prefill/decode workers |
-| **[sglang-disaggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/sglang)** | SGLang | Disaggregated | Memory optimization | RadixAttention + disaggregation |
-| **[trtllm-disaggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/trtllm)** | TensorRT-LLM | Disaggregated | Ultra-high performance | TRT-LLM + disaggregation |
-| **[vllm-router](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm/router)** | vLLM | KV Routing | Cache optimization | KV-aware request routing |
+| **[autoscaling](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/03-advanced/autoscaling)** | vLLM | Autoscaling | Variable Load | HPA with custom metrics |
+| **[disaggregated](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/03-advanced/vllm)** | vLLM | Disaggregated | High Throughput | Separate Prefill/Decode scaling |
+| **[dgdr-profiling](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/03-advanced/vllm)** | vLLM | DGDR | Automated Optimization | AIPerf-based profiling |
 
 ### Example Highlights
 
-**🚀 hello-world: Perfect starting point**
+**🚀 hello-world (Core): Perfect starting point**
 - CPU-only deployment for testing Dynamo platform functionality
 - Fast deployment (~2 minutes)
 - No GPU or model dependencies
-- Ideal for CI/CD validation and understanding DGD structure
 
-**⚡ vllm-aggregated-default: Recommended for most use cases**
+**⚡ vllm-aggregated-default (Core): Recommended for most use cases**
 - OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`)
 - Small model (Qwen3-8B) for quick testing with TP=2
 - Production-ready health checks
-- G5 GPU optimization
 
-**🧠 sglang-aggregated-default: Advanced caching capabilities**
+**📈 Autoscaling (Advanced): Handle variable traffic**
+- Demonstrates Horizontal Pod Autoscaling (HPA)
+- Uses custom metrics (e.g., queue depth, GPU utilization)
+- Automatically scales worker pods based on load
+- Located in `03-advanced/autoscaling`
+
+**🧠 sglang-aggregated-default (Standard): Advanced caching capabilities**
 - RadixAttention for 2-10x speedup on repetitive queries
 - Structured generation support (JSON/XML)
 - Advanced memory management
 - Perfect for cache-heavy workloads
 - DeepSeek-R1-Distill-8B model
 
-**🏎️ trtllm-aggregated-default: Maximum performance**
+**🏎️ trtllm-aggregated-default (Standard): Maximum performance**
 - NVIDIA TensorRT-LLM optimized kernels
 - Highest throughput and lowest latency
 - Custom CUDA kernels
 - Best for production serving
 - Two variants: default and high-performance
 
-**🌐 multi-replica-vllm: High availability deployments**
+**🌐 multi-replica-vllm (Standard): High availability deployments**
 - Multiple independent worker replicas with KV routing
 - Automatic load balancing and failover
 - Intelligent cache-aware request routing
 - Ideal for production workloads requiring high availability
 - Demonstrates KV-aware routing capabilities
 
-**🔀 Disaggregated Examples: Advanced architectures**
-- Separate prefill and decode workers for optimal resource utilization
-- Prefill workers handle input processing (can be smaller instances)
-- Decode workers handle token generation (optimized for throughput)
-- Independent scaling of each component based on workload
-- Available for vLLM, SGLang, and TensorRT-LLM
+**🔀 Disaggregated Examples (Advanced Tier):**
+- **[vllm-disaggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/01-core/vllm)**: DeepSeek-R1 across 4 nodes with unified cache
+- **[sglang-disaggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/03-advanced/disaggregated/sglang)**: DeepSeek-R1 with 2x Reshard Multicast
+- **[trtllm-disaggregated-default](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/03-advanced/disaggregated/trtllm)**: DeepSeek-R1 Reshard Multicast Architecture
+- **[deepseek-r1-deepbm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/01-core/vllm)**: DeepSeek-R1 Multi-Tier Caching (v0.7.0+)
 
-**🎯 Router Examples: Intelligent request routing**
-- KV-aware routing minimizes cache recomputation
-- Routes requests to workers with relevant cached data
-- Configurable routing strategies (temperature, overlap scoring)
-- Demonstrates advanced Dynamo routing capabilities
-
-:::info Comprehensive Testing
-All 9 examples have been thoroughly tested and validated on EKS clusters with GPU nodes. Each example includes proper health checks, OpenAI-compatible API endpoints, and production-ready configurations. See our [testing summary](https://github.com/awslabs/ai-on-eks/blob/main/NVIDIA_Dynamo_Testing_Summary.md) for detailed validation results.
-:::
+**🎯 Router Examples (All Tiers):**
+- **[vllm-router](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/02-standard/vllm/router)**: KV aware vLLM router with Azure scheduler integration (202504)
+- **[sglang-router](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/03-advanced/routing/sglang-router)**: Local PLM router with KVBM offloading support
 
 ## Understanding DynamoGraphDeployment (DGD) Structure
 
@@ -240,7 +261,7 @@ spec:
           memory: "2Gi"
       extraPodSpec:                 # Additional pod configuration
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.frontend"]
           args: ["--http-port", "8000"]
@@ -275,7 +296,7 @@ spec:
         nodeSelector:               # Node selection
           karpenter.sh/nodepool: g5-gpu-karpenter
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args:
@@ -283,6 +304,21 @@ spec:
             - "Qwen/Qwen3-0.6B"
             - "--max-model-len"
             - "8192"
+            - "--tensor-parallel-size"
+            - "2"                          # For multi-GPU
+        livenessProbe:
+          httpGet:
+            path: /live
+            port: 9090
+          initialDelaySeconds: 120  # Longer for large model
+          periodSeconds: 60
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9090
+          initialDelaySeconds: 120
+          periodSeconds: 60
+          failureThreshold: 60  # Allow time for model download
 ```
 
 ### Key Components Explained
@@ -449,7 +485,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.frontend"]
           args: ["--http-port", "8000"]
@@ -485,7 +521,7 @@ spec:
           karpenter.sh/nodepool: g5-gpu-karpenter
           node.kubernetes.io/instance-type: g5.48xlarge  # 8x A10G GPUs
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           workingDir: /workspace/components/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args:
@@ -531,11 +567,15 @@ The `deploy.sh` script automates the deployment process:
 # Interactive mode
 ./deploy.sh
 
-# Direct deployment
+# Direct deployment (Core)
 ./deploy.sh vllm-aggregated-default
 
+# Direct deployment (Standard)
+cd ../02-standard
+./deploy.sh vllm-aggregated-router
+
 # With version override
-DYNAMO_VERSION=v0.7.1 ./deploy.sh sglang-aggregated-default
+DYNAMO_VERSION=v0.8.0 ./deploy.sh sglang-aggregated-default
 
 # Skip ServiceMonitor creation
 SKIP_SERVICE_MONITOR=true ./deploy.sh trtllm-aggregated-default
@@ -686,21 +726,21 @@ The deployment automatically creates:
 The deployment automatically manages Dynamo versions with flexible override options:
 
 **Default Behavior:**
-- Reads version from `terraform/blueprint.tfvars` (`dynamo_stack_version = "v0.7.1"`)
+- Reads version from `terraform/blueprint.tfvars` (`dynamo_stack_version = "v0.8.0"`)
 - Automatically updates container image tags in YAML manifests
 - Creates temporary manifests without modifying source files
 
 **Override Options:**
 ```bash
 # Environment variable (highest priority)
-export DYNAMO_VERSION=v0.7.1
+export DYNAMO_VERSION=v0.8.0
 ./deploy.sh vllm
 
 # Inline override
-DYNAMO_VERSION=v0.7.1 ./deploy.sh sglang
+DYNAMO_VERSION=v0.8.0 ./deploy.sh sglang
 
 # Update terraform/blueprint.tfvars (persistent)
-dynamo_stack_version = "v0.7.1"
+dynamo_stack_version = "v0.8.0"
 ```
 
 **Version Management:**
@@ -734,7 +774,6 @@ VllmWorker:
       gpu: '4'
 ```
 
-
 ### Advanced vLLM Configuration
 
 For advanced vLLM configurations, you can customize additional parameters:
@@ -761,7 +800,7 @@ VllmWorker:
 
 ## Troubleshooting
 
-### Known Issues (v0.7.0)
+### Known Issues (v0.8.0)
 
 #### SGLang DeepSeek-R1 with WideEP
 
@@ -825,7 +864,7 @@ VllmWorker:
     nodeSelector:
       karpenter.sh/nodepool: g5-gpu-karpenter
   resources:
-    requests:
+    limits:
       gpu: "1"
 
 # Example: Deploy frontend to CPU instances
@@ -851,6 +890,10 @@ For advanced customization and development:
 Refer to the individual README files in each blueprint example for specific customization guidance.
 
 ## Multi-Node Tensor Parallelism Limitations
+
+:::warning In Progress
+Multi-node blueprint examples have been **temporarily removed** until Grove/Kai orchestration is validated on AWS EKS. This section documents the limitations and alternatives. Single-node deployments with multi-GPU tensor parallelism remain fully supported.
+:::
 
 ### Understanding Multi-Replica vs Multi-Node
 
@@ -917,9 +960,11 @@ python3 -m dynamo.sglang.worker \
 ```bash
 # TRT-LLM multi-node example (Slurm only)
 srun --nodes=4 --ntasks-per-node=4 \
-  python3 -m dynamo.trtllm \
-  --model-path /model/ \
-  --engine-config wide_ep_config.yaml
+  python3 -m dynamo.trtllm.inference \
+  --model-path /models/ \
+  --batch-size 1 \
+  --parallel-mode wide \
+  --config-file wide_ep_config.yaml
 ```
 
 #### vLLM Multi-Node Support ❌
@@ -997,7 +1042,7 @@ NVIDIA Dynamo provides advanced workload-level features that can be configured i
 
 :::info
 **Platform-Level vs. Workload-Level Features:**
-- **Platform-Level**: Configured in Terraform and affect the entire platform (Grove, Kai Scheduler, namespace restriction, Model Express). See [Infrastructure Configuration](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#platform-level-feature-configuration).
+- **Platform-Level**: Configured in Terraform and affect the entire platform (Grove, Kai Scheduler, namespace restriction, Model Express). See [Infrastructure Configuration](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#step-2-configure-required-secrets) for details.
 - **Workload-Level**: Configured in DynamoGraphDeployment CRs per-workload (KV Router, SLA Planner, KVBM, OTEL tracing, audit logging, multimodal, multi-node) - documented below.
 
 :::
@@ -1005,7 +1050,7 @@ NVIDIA Dynamo provides advanced workload-level features that can be configured i
 ### KV Router
 
 :::tip
-See [router examples](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm/router) for vLLM, SGLang, and TensorRT-LLM.
+See router examples in the [Standard tier](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/02-standard) for vLLM, SGLang, and TensorRT-LLM.
 :::
 
 KV Router enables cache-aware request routing to minimize KV cache recomputation by directing requests to workers that already have relevant cached data.
@@ -1038,16 +1083,16 @@ Frontend:
 ```
 
 **Example Deployments:**
-- `blueprints/inference/nvidia-dynamo/vllm/router/vllm-aggregated-router.yaml`
-- `blueprints/inference/nvidia-dynamo/vllm/router/vllm-disaggregated-router.yaml`
-- `blueprints/inference/nvidia-dynamo/sglang/router/sglang-router.yaml`
-- `blueprints/inference/nvidia-dynamo/trtllm/router/trtllm-router.yaml`
+- `blueprints/inference/nvidia-dynamo/02-standard/vllm/vllm-aggregated-router.yaml`
+- `blueprints/inference/nvidia-dynamo/02-standard/vllm/vllm-disaggregated-router.yaml`
+- `blueprints/inference/nvidia-dynamo/02-standard/sglang/sglang-router.yaml`
+- `blueprints/inference/nvidia-dynamo/02-standard/trtllm/trtllm-router.yaml`
 
 **Testing:**
 
 ```bash
 # Deploy KV Router example
-kubectl apply -f blueprints/inference/nvidia-dynamo/vllm/router/vllm-aggregated-router.yaml -n dynamo
+kubectl apply -f blueprints/inference/nvidia-dynamo/02-standard/vllm/vllm-aggregated-router.yaml -n dynamo
 
 # Test with repeated prompts to see cache benefits
 kubectl port-forward service/vllm-aggregated-router-frontend 8000:8000 -n dynamo
@@ -1110,7 +1155,7 @@ VllmDecodeWorker:
 - ✅ Critical for 215K+ token contexts
 - ✅ Automatic tier management
 
-**Example:** See [`vllm-disaggregated-kvbm-disk.yaml`](https://github.com/awslabs/ai-on-eks/blob/main/blueprints/inference/nvidia-dynamo/vllm/kvbm/vllm-disaggregated-kvbm-disk.yaml)
+**Example:** See [`vllm-disaggregated-kvbm-disk.yaml`](https://github.com/awslabs/ai-on-eks/blob/main/blueprints/inference/nvidia-dynamo/01-core/vllm/vllm-disaggregated-kvbm-disk.yaml)
 
 **Resource Requirements:**
 
@@ -1124,13 +1169,13 @@ KVBM deployments require high-memory GPU instances:
 | `g6.48xlarge` | 8x L4 | 192GB total | 768GB | Large models (70B+) |
 
 **Example Deployment:**
-- `blueprints/inference/nvidia-dynamo/vllm/kvbm/vllm-aggregated-kvbm.yaml`
+- `blueprints/inference/nvidia-dynamo/02-standard/vllm/vllm-aggregated-kvbm.yaml`
 
 **Testing:**
 
 ```bash
 # Deploy KVBM example
-kubectl apply -f blueprints/inference/nvidia-dynamo/vllm/kvbm/vllm-aggregated-kvbm.yaml -n dynamo
+kubectl apply -f blueprints/inference/nvidia-dynamo/02-standard/vllm/vllm-aggregated-kvbm.yaml -n dynamo
 
 # Test with large context
 kubectl port-forward service/vllm-aggregated-kvbm-frontend 8000:8000 -n dynamo
@@ -1198,7 +1243,7 @@ Planner:
 - **Prophet**: Complex seasonal patterns
 
 **Example Deployment:**
-- `blueprints/inference/nvidia-dynamo/vllm/planner/vllm-disaggregated-planner.yaml`
+- `blueprints/inference/nvidia-dynamo/01-core/vllm/vllm-disaggregated-planner.yaml`
 
 **Monitoring:**
 
@@ -1257,7 +1302,7 @@ spec:
   backend: vllm
 
   profilingConfig:
-    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0"
     config:
       deployment:
         timeout: 2400  # Model loading timeout (seconds)
@@ -1274,7 +1319,7 @@ spec:
         itl: 30.0      # Inter-Token Latency (ms)
 
   deploymentOverrides:
-    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0"
 
   autoApply: true  # Auto-deploy after profiling
 ```
@@ -1305,11 +1350,11 @@ data:
     services:
       VllmDecodeWorker:
         args:
-          - --model
-          - meta-llama/Llama-3.3-70B-Instruct
-          - --max-model-len
+          - "--model"
+          - "meta-llama/Llama-3.3-70B-Instruct"
+          - "--max-model-len"
           - "8192"
-          - --enforce-eager
+          - "--enforce-eager"
 ---
 # Step 2: Reference ConfigMap in DGDR
 apiVersion: nvidia.com/v1alpha1
@@ -1318,12 +1363,12 @@ metadata:
   name: vllm-70b
   namespace: dynamo
 spec:
-  model: meta-llama/Llama-3.3-70B-Instruct
-  backend: vllm
+  model: "meta-llama/Llama-3.3-70B-Instruct"
+  backend: "vllm"
   profilingConfig:
     configMapRef:
-      name: llama-70b-config
-      key: disagg.yaml
+      name: "llama-70b-config"
+      key: "disagg.yaml"
     config:
       hardware:
         min_num_gpus_per_engine: 4
@@ -1345,32 +1390,13 @@ kubectl logs -n dynamo -l nvidia.com/component=profiler -f
 # Status progression: Pending → Profiling → Deploying → Ready
 ```
 
-**Available DGDR Blueprints:**
-
-| Blueprint | Model | Size | GPUs | Time | EFS Cache |
-|-----------|-------|------|------|------|-----------|
-| `vllm-dgdr-online.yaml` | Qwen3-0.6B | 0.6B | 1 | ~30 min | ❌ |
-| `vllm-dgdr-qwen-coder-32b.yaml` | Qwen2.5-Coder-32B | 32B | 2-4 | 2-3 hrs | ✅ |
-| `vllm-dgdr-deepseek-32b.yaml` | DeepSeek-R1-Distill-32B | 32B | 2-4 | 2-3 hrs | ✅ |
-| `vllm-dgdr-olmo-32b.yaml` | OLMo-3-32B-Think | 32B | 2-4 | 2-3 hrs | ✅ |
-| `vllm-dgdr-gptoss-20b.yaml` | GPT-OSS-20B | 20B | 1-2 | 1-2 hrs | ✅ |
-
-:::info EFS Model Caching
-Blueprints with EFS caching include a ConfigMap that configures:
-- `dynamo-shared-models` PVC mount at `/models`
-- `HF_HOME=/models` environment variable
-- Model weights are cached in EFS and shared across pods
-
-This significantly reduces model loading time for subsequent deployments.
-:::
-
 **Direct DGD Deployment (Bypass Profiling):**
 
 When profiling isn't practical or you know your configuration:
 
 | Blueprint | Model | GPUs | Use Case |
 |-----------|-------|------|----------|
-| `vllm-disaggregated-70b.yaml` | Llama-3.3-70B | 16 (TP=8) | Large model, known config |
+| `vllm-disaggregated-70b.yaml` | Llama-3.1-70B | 16 (TP=8) | Large model, known config |
 | `vllm-disaggregated-olmo-32b.yaml` | OLMo-3-32B-Think | 8 (TP=4) | Open-source reasoning |
 | `vllm-disaggregated-gptoss-120b.yaml` | GPT-OSS-120B | 16 (TP=8) | Reasoning + tool calling |
 
@@ -1380,9 +1406,9 @@ GPT-OSS is OpenAI's open-source reasoning model with tool calling support. It re
 
 ```yaml
 args:
-  - --dyn-reasoning-parser
+  - "--dyn-reasoning-parser"
   - gpt_oss
-  - --dyn-tool-call-parser
+  - "--dyn-tool-call-parser"
   - harmony
 ```
 
@@ -1422,7 +1448,7 @@ kubectl exec -it <worker-pod> -n dynamo -- \
   --output-length 128
 
 # Output metrics:
-# - Throughput (tokens/sec)
+# -Throughput (tokens/sec)
 # - Latency (P50, P95, P99)
 # - Time-to-First-Token (TTFT)
 # - Inter-Token Latency (ITL)
@@ -1431,7 +1457,7 @@ kubectl exec -it <worker-pod> -n dynamo -- \
 ### Multimodal Support
 
 :::tip
-Vision-language models: [LLaVA 1.5 7B](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multimodal/llava-1.5-7b.yaml) | [Qwen2.5-VL 7B](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multimodal/qwen2.5-vl-7b.yaml)
+Vision-language models: [LLaVA 1.5 7B](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/01-core/multimodal/llava-1.5-7b.yaml) | [Qwen2.5-VL 7B](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/02-standard/multimodal/qwen2.5-vl-7b.yaml)
 :::
 
 Dynamo supports multimodal (vision) models for image and video understanding using vLLM backend with specialized architecture.
@@ -1496,21 +1522,21 @@ services:
 
 **Resource Requirements:**
 
-| Component | GPUs | Memory | Total |
-|-----------|------|--------|-------|
+| Instance Type | GPUs | Memory | Total |
+|--------------|------|--------|-------|
 | EncodeWorker | 1 | 16Gi | 3 GPUs |
-| VLMWorker | 1 | 16Gi | 48Gi |
+| VLMWorker | 1 | 16Gi | |
 | Processor | 1 | 16Gi | |
 
 **Example Deployments:**
-- `blueprints/inference/nvidia-dynamo/multimodal/llava-1.5-7b.yaml`
-- `blueprints/inference/nvidia-dynamo/multimodal/qwen2.5-vl-7b.yaml`
+- `blueprints/inference/nvidia-dynamo/01-core/multimodal/llava-1.5-7b.yaml`
+- `blueprints/inference/nvidia-dynamo/02-standard/multimodal/qwen2.5-vl-7b.yaml`
 
 **Testing:**
 
 ```bash
 # Deploy multimodal example
-kubectl apply -f blueprints/inference/nvidia-dynamo/multimodal/llava-1.5-7b.yaml -n dynamo
+kubectl apply -f blueprints/inference/nvidia-dynamo/01-core/multimodal/llava-1.5-7b.yaml -n dynamo
 
 # Test with image understanding
 kubectl port-forward service/llava-frontend 8000:8000 -n dynamo
@@ -1531,8 +1557,18 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 ### Multi-Node Deployments
 
-:::warning Prerequisites
-Requires Grove and Kai Scheduler enabled in Terraform. See [Platform Configuration](https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#platform-level-feature-configuration).
+:::warning In Progress - Blueprints Removed
+Multi-node blueprint examples have been **temporarily removed** until Grove/Kai orchestration is validated on AWS EKS. The configuration documentation below is retained for reference, but there are no deployable multi-node examples at this time.
+
+**Current Status:**
+- Grove and Kai Scheduler platform support remains available in Terraform (experimental)
+- Multi-node DGD examples have been removed from `04-experimental/`
+- Investigation is ongoing to validate multi-node deployments on EKS
+
+**Alternatives for Large Models:**
+- Use single-node high-GPU instances (p5.48xlarge with 8x H100, g5.48xlarge with 8x A10G)
+- Use model quantization (FP8, INT8) to reduce memory requirements
+- Use disaggregated architecture to optimize resource utilization
 :::
 
 Multi-node deployments enable tensor parallelism (TP) across multiple nodes for large models that don't fit on a single node.
@@ -1540,7 +1576,7 @@ Multi-node deployments enable tensor parallelism (TP) across multiple nodes for 
 **Prerequisites:**
 
 :::warning
-Multi-node deployments require Grove and Kai Scheduler to be enabled at the platform level:
+Multi-node deployments require Grove and Kai Scheduler to be enabled at the platform level. **Note:** Multi-node blueprint examples are currently unavailable while Grove/Kai validation is in progress.
 
 ```hcl
 # In infra/nvidia-dynamo/terraform/blueprint.tfvars
@@ -1564,7 +1600,7 @@ Client → Frontend → Prefill Workers (2 nodes × 4 GPUs = TP=8)
                   → Decode Workers (2 nodes × 4 GPUs = TP=8)
 ```
 
-**Configuration:**
+**Configuration (Reference Only):**
 
 The `multinode` field tells Grove how many nodes to use:
 
@@ -1578,7 +1614,7 @@ prefill:
   extraPodSpec:
     mainContainer:
       args:
-        - --tensor-parallel-size
+        - "--tensor-parallel-size"
         - "8"  # Must match nodeCount × GPUs per node
     tolerations:
       - key: "nvidia.com/gpu"
@@ -1607,40 +1643,10 @@ When you add `multinode.nodeCount` to a service in your DGD:
 - ✅ Add GPU tolerations to your DGD spec
 - ✅ Set correct `tensor-parallel-size` matching total GPUs
 
-**Example Deployments:**
-- `blueprints/inference/nvidia-dynamo/multi-node/vllm-disaggregated-multinode.yaml`
-- `blueprints/inference/nvidia-dynamo/multi-node/trtllm-disaggregated-multinode.yaml`
-- `blueprints/inference/nvidia-dynamo/multi-node/sglang-disaggregated-multinode.yaml`
-
-**Resource Requirements:**
-
-| Example | Nodes | GPUs/Node | Total GPUs | Instance Type |
-|---------|-------|-----------|------------|---------------|
-| vLLM TP=8 | 2 | 4 | 8 | g6.12xlarge |
-| TRT-LLM TP=8 | 2 | 4 | 8 | g6.12xlarge |
-| SGLang TP=8 | 2 | 4 | 8 | g6.12xlarge |
-
-**Testing:**
-
-```bash
-# Deploy multi-node example
-kubectl apply -f blueprints/inference/nvidia-dynamo/multi-node/vllm-disaggregated-multinode.yaml -n dynamo
-
-# Monitor Grove coordination
-kubectl logs -n dynamo -l app.kubernetes.io/name=grove-operator -f
-
-# Wait for all pods to be ready
-kubectl wait --for=condition=ready pod -l app=vllm-disagg-multinode-prefill -n dynamo --timeout=900s
-
-# Test the deployment
-kubectl port-forward service/vllm-disagg-multinode-frontend 8000:8000 -n dynamo
-curl http://localhost:8000/health
-```
-
-### Observability Features
+## Observability Features
 
 :::info
-Examples: [OTEL Tracing](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/observability/vllm-otel-tracing.yaml) | [Audit Logging](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/observability/vllm-audit-logging.yaml) | [Full Stack](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/observability/vllm-full-observability.yaml)
+Examples: [OTEL Tracing](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/02-standard/observability/vllm-otel-tracing.yaml) | [Audit Logging](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/02-standard/observability/vllm-audit-logging.yaml) | [Full Stack](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/01-core/observability/vllm-full-observability.yaml)
 :::
 
 Dynamo provides comprehensive observability features for production deployments including distributed tracing, audit logging, and Prometheus metrics.
@@ -1678,7 +1684,7 @@ spec:
             - name: OTEL_SERVICE_NAME
               value: "dynamo-frontend"
 
-    VllmDecodeWorker:
+    VllmWorker:
       extraPodSpec:
         mainContainer:
           env:
@@ -1794,9 +1800,9 @@ VllmPrefillWorker:
 - Cache capacity utilization
 
 **Example Deployments:**
-- `blueprints/inference/nvidia-dynamo/observability/vllm-otel-tracing.yaml`
-- `blueprints/inference/nvidia-dynamo/observability/vllm-audit-logging.yaml`
-- `blueprints/inference/nvidia-dynamo/observability/vllm-full-observability.yaml`
+- `blueprints/inference/nvidia-dynamo/02-standard/observability/vllm-otel-tracing.yaml`
+- `blueprints/inference/nvidia-dynamo/02-standard/observability/vllm-audit-logging.yaml`
+- `blueprints/inference/nvidia-dynamo/01-core/observability/vllm-full-observability.yaml`
 
 ## Alternative Deployment Options
 

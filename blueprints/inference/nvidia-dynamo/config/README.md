@@ -35,17 +35,17 @@ Defines all container images and their versions:
 
 ```yaml
 version:
-  current: "0.7.1"
+  current: "0.8.0"
 
 images:
   vllm:
     registry: nvcr.io/nvidia/ai-dynamo
     name: vllm-runtime
-    tag: "0.7.1"
+    tag: "0.8.0"
   sglang:
     registry: nvcr.io/nvidia/ai-dynamo
     name: sglang-runtime
-    tag: "0.7.1"
+    tag: "0.8.0"
 ```
 
 **Update this file to change versions globally.** The `deploy.sh` script reads from terraform/blueprint.tfvars or you can override with `DYNAMO_VERSION` environment variable.
@@ -120,4 +120,4 @@ spec:
 - [Configuration Management Guide](../docs/configuration-management.md)
 - [Blueprint README](../README.md)
 - [Apply Config Script](../scripts/apply-config.sh)
-- [Template Blueprint](../examples/template-with-configs.yaml)
+- [Core vLLM Blueprints](../01-core/vllm/)

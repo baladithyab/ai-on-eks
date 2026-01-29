@@ -1,6 +1,6 @@
 # TRT-LLM SLA Planner & DGDR Examples
 
-Deploy TensorRT-LLM with SLA-based automatic scaling (Dynamo v0.7.1+).
+Deploy TensorRT-LLM with SLA-based automatic scaling (Dynamo v0.8.0+).
 
 ## 📚 Full Documentation
 

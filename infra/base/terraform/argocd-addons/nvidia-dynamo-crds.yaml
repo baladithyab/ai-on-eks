@@ -1,8 +1,14 @@
+# NVIDIA Dynamo CRDs - Must be deployed BEFORE dynamo-platform
+# Uses ArgoCD sync-wave to ensure CRDs are installed first
+# v0.8.0: No CRD schema changes, but CRD-first ordering is critical for webhook registration
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: dynamo-crds
   namespace: argocd
+  annotations:
+    # Sync-wave -10 ensures CRDs are applied before platform components (wave 0 or higher)
+    argocd.argoproj.io/sync-wave: "-10"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

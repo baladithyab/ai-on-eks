@@ -83,7 +83,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
@@ -144,7 +144,7 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 120
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
           volumeMounts:

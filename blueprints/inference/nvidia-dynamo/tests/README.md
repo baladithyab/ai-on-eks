@@ -1,6 +1,6 @@
 # NVIDIA Dynamo Test Organization
 
-This directory contains a modular test suite for NVIDIA Dynamo v0.7.1 deployments on EKS.
+This directory contains a modular test suite for NVIDIA Dynamo v0.8.0 deployments on EKS.
 
 ## Directory Structure
 
@@ -273,7 +273,7 @@ The following legacy test scripts have been reorganized:
 | `test.sh` (monolithic) | Split into `tests/general/` and `tests/targeted/` |
 | `test-otel.sh` | `tests/targeted/observability-tests/test-otel.sh` |
 | `01-core/vllm/test-kvbm-disk.sh` | Referenced in `tests/targeted/kv-routing-tests/` |
-| `_internal/multimodal-tests/` | `tests/targeted/multimodal-tests/` |
+| Legacy multimodal scripts | `tests/targeted/multimodal-tests/` |
 
 ## Troubleshooting
 

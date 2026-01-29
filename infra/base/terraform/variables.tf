@@ -472,9 +472,19 @@ variable "enable_dynamo_stack" {
 }
 
 variable "dynamo_stack_version" {
-  description = "NVIDIA Dynamo Stack version for platform Helm charts. Note: Container images may use different versions (e.g., 0.7.1)"
+  description = <<-EOF
+    NVIDIA Dynamo Stack version for platform Helm charts.
+    
+    v0.8.0 BREAKING CHANGES from v0.7.1:
+    - Request plane: TCP is now DEFAULT (was NATS). NATS still available for control signals.
+    - Discovery: Kubernetes-native service discovery is now DEFAULT (was etcd).
+    - Backend updates: vLLM 0.12.0, SGLang 0.5.6.post2, TensorRT-LLM 1.2.0rc4
+    - Enhanced multimodal support (audio/video inputs)
+    
+    Container images use the same version tag (e.g., 0.8.0).
+  EOF
   type        = string
-  default     = "v0.7.1"
+  default     = "v0.8.0"
 }
 
 # NVIDIA Dynamo Platform-Level Features
@@ -492,6 +502,29 @@ variable "dynamo_enable_kai_scheduler" {
   description = "Enable Kai Scheduler via Dynamo platform Helm chart (v0.9.4). Provides GPU-aware scheduling with queue management."
   type        = bool
   default     = true
+}
+
+variable "dynamo_enable_nats_etcd" {
+  description = <<-EOF
+    Enable NATS and etcd for Dynamo platform (legacy mode).
+    
+    v0.8.0 DEFAULTS (when false):
+    - Request plane: Uses TCP (lower latency, simpler architecture)
+    - Service discovery: Uses Kubernetes-native mechanisms (Services, Endpoints)
+    
+    LEGACY MODE (when true):
+    - Request plane: NATS message queue (useful for complex routing scenarios)
+    - Service discovery: etcd-based (useful for advanced distributed state management)
+    - Storage: Uses EFS dynamic provisioning via efs-sc-dynamic StorageClass
+    
+    RECOMMENDATION: Keep disabled (false) for new deployments using v0.8.0+ to align
+    with upstream defaults. Only enable if you have specific requirements for:
+    - Message-queue-based request routing
+    - etcd-based service discovery (external to Kubernetes)
+    - Distributed KV state management outside of Kubernetes
+  EOF
+  type        = bool
+  default     = false
 }
 
 variable "dynamo_operator_namespace_restriction_enabled" {

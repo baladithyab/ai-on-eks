@@ -1,8 +1,17 @@
+# NVIDIA Dynamo Platform - Deploys operator, dependencies, and optional components
+# v0.8.0 IMPORTANT CHANGES:
+# - Request plane: TCP is now DEFAULT (NATS remains for control signals if needed)
+# - Discovery: Kubernetes-native is now DEFAULT (etcd available for advanced use cases)
+# - Backends: vLLM 0.12.0, SGLang 0.5.6.post2, TensorRT-LLM 1.2.0rc4
+# CRDs must be installed first via nvidia-dynamo-crds.yaml (sync-wave: -10)
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: dynamo-platform
   namespace: argocd
+  annotations:
+    # Sync-wave 0 ensures platform deploys after CRDs (wave -10)
+    argocd.argoproj.io/sync-wave: "0"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -14,7 +23,7 @@ spec:
     helm:
       values: |
         # NVIDIA Dynamo Platform Configuration for ai-on-eks using NGC
-        # Using minimal config - NGC chart defaults should work
+        # v0.8.0 uses minimal config - chart defaults align with K8s-native approach
 
         # NGC authentication (required)
         dynamo-operator:
@@ -42,12 +51,12 @@ spec:
         # Grove: Network topology-aware gang scheduling and auto-scaling
         # Kai Scheduler: GPU-aware scheduler with queue management
         #
-        # NOTE: Grove v0.1.0-alpha.3 bundled with Dynamo v0.7.1 has a bug where
-        # the cert-rotation controller triggers a pod restart on every startup,
-        # causing crash loops. This is hardcoded behavior (RestartOnSecretRefresh=true)
-        # that cannot be disabled via configuration.
+        # v0.8.0 STATUS: Grove version may have been updated from v0.1.0-alpha.3
+        # but cert-rotation behavior requires validation before enabling.
         #
-        # WORKAROUND: Disable Grove until a fixed version is released.
+        # RECOMMENDATION: Keep disabled until:
+        # 1. Cert-rotation crash loop behavior is confirmed fixed in v0.8.0 Grove
+        # 2. Multi-node gang scheduling tested in staging environment
         grove:
           enabled: ${dynamo_enable_grove}
 
@@ -69,29 +78,58 @@ spec:
             parentName: dynamo-default
             childName: dynamo
 
-        # NATS configuration - use EFS for JetStream persistence
-        # Note: etcd inherits from global.storageClass, but NATS needs explicit setting
-        # v0.7.1 NEW: NATS can be disabled in favor of HTTP/TCP request plane
-        # Set DYN_REQUEST_PLANE=http or DYN_REQUEST_PLANE=tcp in workload deployments
+        # NATS/etcd Configuration - v0.8.0 DEFAULT: DISABLED
+        #
+        # v0.8.0 uses TCP request plane + Kubernetes-native discovery by default.
+        # NATS and etcd are only needed for legacy compatibility or advanced use cases.
+        #
+        # To enable legacy mode, set dynamo_enable_nats_etcd = true in blueprint.tfvars
+        %{~ if dynamo_enable_nats_etcd ~}
+
+        # LEGACY MODE: NATS enabled for message-queue-based request routing
+        # Required for: legacy workloads, complex routing scenarios, JetStream persistence
         nats:
+          enabled: true
           config:
             jetstream:
+              enabled: true
               fileStore:
                 pvc:
                   storageClassName: efs-sc-dynamic
+                  size: 10Gi
+          # Pod Disruption Budget for NATS cluster stability
+          podDisruptionBudget:
+            enabled: true
+            minAvailable: 1
 
-        # etcd configuration - disable JWT auth and pre-upgrade hook
-        # v0.7.1 NEW: etcd can be replaced with Kubernetes-native service discovery
-        # Use operator flag: --discovery-backend=kubernetes
-        # Or use filesystem-backed KeyValueStore for non-distributed deployments
+        # LEGACY MODE: etcd enabled for distributed service discovery
+        # Required for: legacy workloads, KV cache routing, external discovery
         etcd:
+          enabled: true
           auth:
             token:
               enabled: false
           preUpgradeJob:
             enabled: false
+          persistence:
+            storageClass: efs-sc-dynamic
+            size: 8Gi
+          # Pod Disruption Budget for etcd cluster stability
+          pdb:
+            create: true
+            minAvailable: 1
+        %{~ else ~}
 
-        # Use EFS for shared storage (etcd inherits this, other components may too)
+        # v0.8.0 DEFAULT: NATS disabled - using TCP request plane
+        nats:
+          enabled: false
+
+        # v0.8.0 DEFAULT: etcd disabled - using Kubernetes-native discovery
+        etcd:
+          enabled: false
+        %{~ endif ~}
+
+        # Use EFS for shared storage (global setting for any component that needs it)
         global:
           storageClass: efs-sc-dynamic
   destination:
@@ -111,13 +149,16 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - ApplyOutOfSyncOnly=true
+  # ignoreDifferences: Prevents ArgoCD from detecting drift on controller-managed fields
+  # Critical for webhook caBundle which is populated by cert-manager/controller
   ignoreDifferences:
-    # Ignore differences in webhook configurations during upgrades
+    # Webhook caBundle is managed by the cluster (injected by cert-manager or controller)
+    # ArgoCD should not try to reconcile this as it will drift from Helm template state
     - group: admissionregistration.k8s.io
-      kind: ValidatingAdmissionWebhook
+      kind: ValidatingWebhookConfiguration
       jqPathExpressions:
         - .webhooks[]?.clientConfig.caBundle
     - group: admissionregistration.k8s.io
-      kind: MutatingAdmissionWebhook
+      kind: MutatingWebhookConfiguration
       jqPathExpressions:
         - .webhooks[]?.clientConfig.caBundle

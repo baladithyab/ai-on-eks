@@ -14,6 +14,7 @@
 #   - CI/CD pipelines should read from this file for consistency
 #
 # Version History:
+#   0.8.0 - Latest stable release with performance improvements
 #   0.7.1 - Production-stable release with UCX fixes
 #   0.7.0 - Initial stable release with DynamoModel CRD support
 #
@@ -31,7 +32,7 @@ registry:
 # Current production version
 # Change this to upgrade all runtimes globally
 version:
-  current: "0.7.1"
+  current: "0.8.0"
   # Pin specific runtimes to different versions if needed
   # Leave as "current" to use the global version
   overrides:
@@ -48,8 +49,8 @@ images:
   vllm:
     registry: nvcr.io/nvidia/ai-dynamo
     name: vllm-runtime
-    tag: "0.7.1"
-    # Full image path: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+    tag: "0.8.0"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
     # Features:
     #   - PagedAttention for efficient memory management
     #   - Continuous batching for throughput optimization
@@ -67,8 +68,8 @@ images:
   sglang:
     registry: nvcr.io/nvidia/ai-dynamo
     name: sglang-runtime
-    tag: "0.7.1"
-    # Full image path: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+    tag: "0.8.0"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
     # Features:
     #   - RadixAttention for prefix caching
     #   - PCIe-friendly tensor parallelism
@@ -86,8 +87,8 @@ images:
   trtllm:
     registry: nvcr.io/nvidia/ai-dynamo
     name: trtllm-runtime
-    tag: "0.7.1"
-    # Full image path: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.7.1
+    tag: "0.8.0"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/trtllm-runtime:0.8.0
     # Features:
     #   - TensorRT-optimized kernels
     #   - In-flight batching
@@ -105,8 +106,8 @@ images:
   kvbm:
     registry: nvcr.io/nvidia/ai-dynamo
     name: kvbm-server
-    tag: "0.7.1"
-    # Full image path: nvcr.io/nvidia/ai-dynamo/kvbm-server:0.7.1
+    tag: "0.8.0"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/kvbm-server:0.8.0
     # Features:
     #   - Distributed KV cache management
     #   - GPU memory pooling across workers
@@ -124,8 +125,8 @@ images:
   nim-proxy:
     registry: nvcr.io/nvidia/ai-dynamo
     name: nim-proxy
-    tag: "0.7.1"
-    # Full image path: nvcr.io/nvidia/ai-dynamo/nim-proxy:0.7.1
+    tag: "0.8.0"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/nim-proxy:0.8.0
     # Features:
     #   - OpenAI API compatibility layer
     #   - Request routing and load balancing
@@ -141,8 +142,8 @@ images:
   router:
     registry: nvcr.io/nvidia/ai-dynamo
     name: router
-    tag: "0.7.1"
-    # Full image path: nvcr.io/nvidia/ai-dynamo/router:0.7.1
+    tag: "0.8.0"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/router:0.8.0
     # Features:
     #   - Intelligent request routing
     #   - Load-aware distribution
@@ -158,8 +159,8 @@ images:
   planner:
     registry: nvcr.io/nvidia/ai-dynamo
     name: planner
-    tag: "0.7.1"
-    # Full image path: nvcr.io/nvidia/ai-dynamo/planner:0.7.1
+    tag: "0.8.0"
+    # Full image path: nvcr.io/nvidia/ai-dynamo/planner:0.8.0
     # Features:
     #   - Request orchestration across prefill/decode workers
     #   - Metrics endpoint on port 9085
@@ -182,4 +183,4 @@ images:
 # images:
 #   - name: vllm-runtime
 #     newName: nvcr.io/nvidia/ai-dynamo/vllm-runtime
-#     newTag: "0.7.1"
+#     newTag: "0.8.0"

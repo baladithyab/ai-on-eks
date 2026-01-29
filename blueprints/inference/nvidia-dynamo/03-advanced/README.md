@@ -1,16 +1,28 @@
-# 03-advanced: Large Models & DGDR Profiling
+# 03-advanced: Large Models, DGDR Profiling & Autoscaling
 
-This tier contains advanced examples for large model deployments and DGDR (DynamoGraphDeploymentRequest) profiling workflows.
+This tier contains advanced examples for large model deployments, DGDR (DynamoGraphDeploymentRequest) profiling workflows, and autoscaling configurations for Dynamo v0.8.0+.
 
 ## Overview
 
 | Count | Description |
 |-------|-------------|
-| 17 | Total examples |
+| 20+ | Total examples |
 | 3 | Backend coverage (vLLM, SGLang, TRT-LLM) |
+| ✅ | Autoscaling for v0.8.0+ |
 | ⚠️ | Requires significant resources |
 
 ## What's Here
+
+### autoscaling/ - HPA & KEDA Examples (v0.8.0+)
+
+**Dynamo v0.8.0 deprecates embedded autoscaling.** Use these examples to scale via standard Kubernetes approaches:
+
+- **hpa-frontend-cpu.yaml** - CPU-based HPA targeting DGDSA
+- **keda-frontend-prometheus.yaml** - KEDA with Prometheus metrics
+- **prometheus-adapter-config.yaml** - Custom metrics adapter config
+- **README.md** - Detailed autoscaling documentation
+
+See [autoscaling/README.md](autoscaling/README.md) for complete setup instructions.
 
 ### vllm/ - Planner & Large Models
 

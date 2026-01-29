@@ -13,6 +13,9 @@ TIER=standard TIMEOUT=1200 ./scripts/run-all-tests.sh
 
 # Test without cleanup (for debugging)
 CLEANUP=false TIER=core ./scripts/run-all-tests.sh
+
+# Offline validation (no cluster required)
+./scripts/validate-offline.sh
 ```
 
 ---
@@ -22,8 +25,8 @@ CLEANUP=false TIER=core ./scripts/run-all-tests.sh
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | **`run-all-tests.sh`** | Automated testing pipeline | CI/CD integration, tier-based testing |
-| `sequential-test-all.sh` | Legacy sequential tester | Older tier system (deprecated) |
 | `validate-features.sh` | Feature validation | Pre-commit checks |
+| `validate-offline.sh` | Offline validation (no cluster required) | Terraform + Helm + YAML + docs links |
 | `patch-cache.sh` | Cache patching utility | Model cache management |
 | `patch-profiler-job-pvc.sh` | PVC patching for profiler | DGDR job support |
 
@@ -271,21 +274,6 @@ pipeline {
 
 ---
 
-## sequential-test-all.sh (Legacy)
-
-Older sequential testing script with custom tier system. **Superseded by `run-all-tests.sh`** but kept for backwards compatibility.
-
-```bash
-# Legacy usage
-./scripts/sequential-test-all.sh --tier 1
-./scripts/sequential-test-all.sh --examples "hello-world vllm-aggregated-default"
-./scripts/sequential-test-all.sh --skip-cleanup
-```
-
-**Note:** Consider migrating to `run-all-tests.sh` for improved CI/CD support and markdown reporting.
-
----
-
 ## validate-features.sh
 
 Validates blueprint feature flags and configuration consistency.
@@ -293,6 +281,27 @@ Validates blueprint feature flags and configuration consistency.
 ```bash
 ./scripts/validate-features.sh
 ```
+
+---
+
+## validate-offline.sh
+
+Offline validation workflow that runs without cluster access. It performs:
+- Terraform fmt + validate for `infra/base/terraform` and `infra/nvidia-dynamo/terraform`
+- Helm template rendering for local Dynamo charts (`dynamo/deploy/cloud/helm`)
+- Blueprint YAML linting + schema validation + `validate-blueprint.sh`
+- Guardrails (no `dynamoNamespace`, no committed test outputs, autoscaling examples present)
+- Website docs relative link checks
+
+```bash
+# Basic offline validation
+./scripts/validate-offline.sh
+
+# CI/strict mode (warnings + skipped tools fail)
+./scripts/validate-offline.sh --ci
+```
+
+**Tooling (auto-skipped if missing):** terraform, helm, kubeconform or kubeval, yamllint, python3.
 
 ---
 

@@ -111,7 +111,7 @@ metadata:
     app.kubernetes.io/name: "<deployment-name>"
     app.kubernetes.io/component: "inference"
     app.kubernetes.io/part-of: "nvidia-dynamo"
-    app.kubernetes.io/version: "0.7.1"
+    app.kubernetes.io/version: "0.8.0"
     
     # Dynamo-Specific Labels
     dynamo.nvidia.com/backend: "<vllm|sglang|trtllm>"
@@ -136,7 +136,7 @@ metadata:
     description: "Brief description of this deployment"
     
     # Configuration References
-    dynamo.nvidia.com/config-version: "0.7.1"
+    dynamo.nvidia.com/config-version: "0.8.0"
     dynamo.nvidia.com/resource-profile: "<profile-name>"
     
     # Observability (optional but recommended)
@@ -236,12 +236,12 @@ Reference the centralized image version:
 
 ```yaml
 # config/images.yaml defines:
-# version.current: "0.7.1"
+# version.current: "0.8.0"
 
 extraPodSpec:
   mainContainer:
     # deploy.sh substitutes the version from images.yaml
-    image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+    image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
 ```
 
 ---

@@ -1,6 +1,6 @@
 # Multi-Replica vLLM Example
 
-Deploy high-availability vLLM with multiple worker replicas, disaggregated serving, and KV-aware routing using Dynamo v0.7.1.
+Deploy high-availability vLLM with multiple worker replicas, disaggregated serving, and KV-aware routing using Dynamo v0.8.0.
 
 > **Important**: This example provides **high availability and load balancing** using multiple independent worker replicas (each running the full model). For true multi-node tensor parallelism (splitting large models across nodes), see the [Multi-node Limitations](#multi-node-limitations) section below.
 

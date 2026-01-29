@@ -149,7 +149,7 @@ spec:
   backend: vllm                   # vllm, sglang, or trtllm
 
   profilingConfig:
-    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0"
     configMapRef:                 # Optional: reference base DGD config
       name: my-config
       key: config.yaml
@@ -169,7 +169,7 @@ spec:
         itl: 30.0                 # Inter-Token Latency (ms)
 
   deploymentOverrides:
-    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1"
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0"
 
   autoApply: true                 # Auto-deploy after profiling
 ```
