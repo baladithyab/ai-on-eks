@@ -136,6 +136,7 @@ This command provisions your complete environment:
 - **Monitoring Stack**: Prometheus, Grafana, and AI/ML observability
 - **ArgoCD**: GitOps deployment platform
 - **Dynamo Platform**: Deploys using [official NVIDIA Dynamo Helm charts](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/helm-charts/dynamo-platform) (Operator, API Store, NATS, PostgreSQL, MinIO)
+- **Model Express**: Model caching service for efficient model distribution (deploys into dynamo namespace)
 - **Kubernetes Secrets**: NGC authentication and HuggingFace token secrets (managed by Terraform)
 
 **Duration**: 15-30 minutes
@@ -148,7 +149,8 @@ The installation script performs the following:
 2. **Provisions AWS Resources**: Creates VPC, EKS cluster, and supporting infrastructure via Terraform
 3. **Deploys Dynamo CRDs**: Installs Custom Resource Definitions via ArgoCD (Application: `dynamo-crds`) - **CRDs are always deployed first**
 4. **Deploys Dynamo Platform**: Installs operator and platform components via ArgoCD (Application: `dynamo-platform`)
-5. **Creates Secrets in dynamo namespace** (managed in `nvidia-dynamo-secrets.tf`):
+5. **Deploys Model Express**: Installs model caching service via ArgoCD (Application: `model-express`)
+6. **Creates Secrets in dynamo namespace** (managed in `nvidia-dynamo-secrets.tf`):
    - `ngc-secret`: NGC container image pull authentication
    - `hf-token-secret`: HuggingFace model downloads
 
@@ -185,6 +187,12 @@ Expected output should show pods for:
 - `minio`
 - `api-store`
 
+Verify Model Express is running:
+
+```bash
+kubectl get pods -n dynamo -l app.kubernetes.io/name=modelexpress
+```
+
 Check ArgoCD applications:
 
 ```bash
@@ -194,6 +202,7 @@ kubectl get applications -n argocd
 You should see applications for:
 - `dynamo-crds`
 - `dynamo-platform`
+- `model-express`
 
 </CollapsibleContent>
 
@@ -244,9 +253,25 @@ Terraform will update the Kubernetes secrets without recreating the entire infra
 
 NVIDIA Dynamo v0.8.0+ introduces platform-level features that can be enabled via Terraform variables. These features are configured at the platform level (dynamo-platform Helm chart) and affect the entire Dynamo installation.
 
+#### Orchestrator Selection (Required for Multi-Node)
+
+Dynamo v0.8.0 requires an orchestrator for multi-node workloads. LeaderWorkerSet (LWS) is the supported orchestrator.
+
+**LeaderWorkerSet (Supported)**
+
+LeaderWorkerSet (LWS) is the supported orchestrator for multi-node workloads in this blueprint.
+
+```hcl
+enable_lws_for_dynamo = true
+```
+
+:::note
+Grove and KAI Scheduler integrations are currently disabled in this blueprint. Please use LeaderWorkerSet (LWS) for multi-node orchestration.
+:::
+
 :::info
 **Platform-Level vs. Workload-Level Features:**
-- **Platform-Level**: Configured in Terraform (`blueprint.tfvars`) and affect the entire platform (Grove, Kai Scheduler, namespace restriction, Model Express, NATS/Etcd)
+- **Platform-Level**: Configured in Terraform (`blueprint.tfvars`) and affect the entire platform (LeaderWorkerSet, namespace restriction, Model Express, NATS/Etcd)
 - **Workload-Level**: Configured in DynamoGraphDeployment CRs per-workload (KV Router, SLA Planner, KVBM, OTEL tracing, audit logging)
 
 For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](https://awslabs.github.io/ai-on-eks/docs/blueprints/inference/GPUs/nvidia-dynamo#advanced-features).
@@ -257,17 +282,16 @@ For workload-level features, see [NVIDIA Dynamo Blueprints - Advanced Features](
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `dynamo_stack_version` | string | `"v0.8.0"` | Dynamo platform version to deploy |
-| `dynamo_enable_grove` | bool | `false` | Enable Grove for multi-node inference coordination |
-| `dynamo_enable_kai_scheduler` | bool | `false` | Enable Kai Scheduler for intelligent resource allocation |
 | `dynamo_enable_nats_etcd` | bool | `false` | Enable NATS and Etcd for event-driven architecture and distributed coordination (Opt-in) |
 | `dynamo_operator_namespace_restriction_enabled` | bool | `false` | Restrict operator to dynamo namespace only |
-| `dynamo_model_express_url` | string | `""` | URL for existing Model Express server (optional) |
+| `enable_dynamo_model_express` | bool | `true` | Enable Model Express for managed model caching (only built-in option) |
+| `dynamo_model_express_url` | string | `""` | URL for existing Model Express server (auto-configured when enable_dynamo_model_express=true) |
 
 #### dynamo_stack_version
 
 **Type**: `string`
-****Default**: `"v0.8.0"`
-****Example**: `"v0.7.1"` (for rollback)
+**Default**: `"v0.8.0"`
+**Example**: `"v0.7.1"` (for rollback)
 
 :::info What's New in v0.8.0
 - ✅ **Simplified Architecture**: NATS and Etcd are now opt-in, reducing the default footprint.
@@ -287,7 +311,7 @@ Specifies the NVIDIA Dynamo platform version to deploy. This determines which He
 
 **Current Features:**
 - Multimodal support (vision-language models)
-- Multi-node deployments with Grove + Kai Scheduler
+- Multi-node deployments with LeaderWorkerSet (LWS)
 - Comprehensive observability (OTEL, audit logging, metrics)
 - Advanced routing and KV cache management
 
@@ -299,69 +323,6 @@ dynamo_stack_version = "v0.8.0"
 :::tip Version Updates
 Check the [NVIDIA Dynamo releases](https://github.com/ai-dynamo/dynamo/releases) for the latest version and release notes. For upgrade guidance between versions, see upgrade guides in the [infra/nvidia-dynamo](https://github.com/awslabs/ai-on-eks/tree/main/infra/nvidia-dynamo) directory.
 :::
-
-#### dynamo_enable_grove
-
-**Type**: `bool`
-**Default**: `false`
-**Example**: `true`
-
-:::warning In Progress
-Grove and Kai Scheduler support is **in progress** with further investigation ongoing. Multi-node blueprints have been temporarily removed until Grove/Kai orchestration is validated on AWS EKS. These settings remain available for testing but are not recommended for production use.
-:::
-
-Enables Grove, the multi-node inference coordination operator. Grove orchestrates distributed inference workloads across multiple nodes and GPUs.
-
-**When to Enable:**
-- Testing multi-node inference workloads (in progress)
-- Using tensor parallelism (TP) or pipeline parallelism (PP)
-- Deploying models that require multiple GPUs across multiple nodes
-
-**Requirements:**
-- Must also enable `dynamo_enable_kai_scheduler = true`
-- Requires GPU instances that support multi-node deployments (e.g., `p5.48xlarge`, `p4d.24xlarge`, `g6.48xlarge`)
-- EFA networking is recommended (already enabled in ai-on-eks)
-
-**Infrastructure Impact:**
-- Deploys Grove operator (minimal resource footprint: ~100m CPU, ~256Mi memory)
-- No changes required to Karpenter, EKS cluster, EFS, or observability stack
-
-**Example:**
-```hcl
-dynamo_enable_grove         = true
-dynamo_enable_kai_scheduler = true  # Required for Grove
-```
-
-#### dynamo_enable_kai_scheduler
-
-**Type**: `bool`
-**Default**: `false`
-**Example**: `true`
-
-:::warning In Progress
-Grove and Kai Scheduler support is **in progress** with further investigation ongoing. Multi-node blueprints have been temporarily removed until Grove/Kai orchestration is validated on AWS EKS. These settings remain available for testing but are not recommended for production use.
-:::
-
-Enables Kai Scheduler, the intelligent resource allocation operator for multi-node workloads. Kai Scheduler optimizes GPU allocation and scheduling for distributed inference.
-
-**When to Enable:**
-- Testing multi-node inference workloads with Grove (experimental)
-- Required for Grove-based multi-node deployments
-- Optimizing resource allocation for complex inference graphs
-
-**Requirements:**
-- Typically enabled together with `dynamo_enable_grove = true`
-- Requires GPU instances that support multi-node deployments
-
-**Infrastructure Impact:**
-- Deploys Kai Scheduler operator (minimal resource footprint: ~100m CPU, ~256Mi memory)
-- No changes required to Karpenter, EKS cluster, EFS, or observability stack
-
-**Example:**
-```hcl
-dynamo_enable_grove         = true
-dynamo_enable_kai_scheduler = true
-```
 
 #### dynamo_enable_nats_etcd (Opt-in)
 
@@ -421,24 +382,53 @@ dynamo_operator_namespace_restriction_enabled = true
 
 **Type**: `string`
 **Default**: `""`
-**Example**: `"http://model-express-server.model-express.svc.cluster.local:8080"`
+**Example**: `"http://modelexpress.dynamo.svc.cluster.local:8001"`
 
 URL for an existing Model Express server. Model Express is a model management service that can be used to centralize model storage and distribution.
 
-**When to Configure:**
-- Integrating with an existing Model Express deployment
-- Centralizing model management across multiple Dynamo deployments
-- Using a shared model repository
+**Auto-Configuration**: When `enable_dynamo_model_express = true` (the default), the URL is automatically set to:
+```
+http://modelexpress.dynamo.svc.cluster.local:8001
+```
+
+**When to Configure Manually:**
+- Integrating with an existing Model Express deployment in a different namespace
+- Using a custom Model Express server URL
+- Overriding the auto-configured URL for testing
 
 **Format:**
 - Must be a valid HTTP/HTTPS URL
 - Format: `http://hostname:port` or `https://hostname:port`
-- Leave empty (default) to not use Model Express
+- Leave empty to use auto-configuration (when Model Express is enabled)
 
 **Example:**
 ```hcl
-dynamo_model_express_url = "http://model-express-server.model-express.svc.cluster.local:8080"
+dynamo_model_express_url = "http://modelexpress.dynamo.svc.cluster.local:8001"
 ```
+
+#### Model Caching with Model Express
+
+Model Express is the ONLY built-in model caching mechanism for NVIDIA Dynamo deployments:
+
+```hcl
+# Default configuration - Model Express enabled
+enable_dynamo_model_express = true  # Default
+```
+
+**Features:**
+- ✅ Faster pod startup (models pre-fetched to nodes)
+- ✅ Better for large models (>50GB)
+- ✅ Handles high pod churn efficiently
+- ✅ Centralized model management
+- ✅ Auto-configured service URL
+- ✅ Deploys into dynamo namespace (no cross-namespace secret copying)
+
+**Model Express Service URL** (auto-configured):
+```
+http://modelexpress.dynamo.svc.cluster.local:8001
+```
+
+**Note**: Users requiring custom caching solutions can bring their own implementations.
 
 #### Example Configuration
 
@@ -455,35 +445,12 @@ dynamo_stack_version             = "v0.8.0"
 ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
 huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
 
+# Model Caching (defaults - Model Express enabled)
+# enable_dynamo_model_express = true    # Default
+
 # Platform features (all defaults)
-# dynamo_enable_grove = false
-# dynamo_enable_kai_scheduler = false
 # dynamo_enable_nats_etcd = false
 # dynamo_operator_namespace_restriction_enabled = false
-# dynamo_model_express_url = ""
-```
-
-**Multi-Node Deployment (Experimental):**
-
-:::warning
-Multi-node deployments via Grove/Kai are experimental. Multi-node blueprints have been removed until validated.
-:::
-
-```hcl
-name                             = "dynamo-on-eks"
-enable_dynamo_stack              = true
-enable_aws_efs_csi_driver        = true
-enable_aws_efa_k8s_device_plugin = true
-enable_ai_ml_observability_stack = true
-dynamo_stack_version             = "v0.8.0"
-
-# Required Secrets
-ngc_api_key       = "YOUR_NGC_API_KEY_HERE"
-huggingface_token = "YOUR_HUGGINGFACE_TOKEN_HERE"
-
-# Enable multi-node features (EXPERIMENTAL - blueprints not yet available)
-dynamo_enable_grove         = true
-dynamo_enable_kai_scheduler = true
 ```
 
 **Multi-Tenant Deployment:**
@@ -508,7 +475,7 @@ dynamo_operator_namespace_restriction_enabled = true
 When deploying NVIDIA Dynamo on Amazon EKS, consider the following:
 
 ### Networking
-- **EFA (Elastic Fabric Adapter)**: For multi-node training or inference (e.g., using Grove), EFA is critical for low-latency communication. Ensure `enable_aws_efa_k8s_device_plugin = true` is set in your Terraform config.
+- **EFA (Elastic Fabric Adapter)**: For multi-node training or inference (e.g., using LeaderWorkerSet), EFA is critical for low-latency communication. Ensure `enable_aws_efa_k8s_device_plugin = true` is set in your Terraform config.
 - **VPC CNI**: The default AWS VPC CNI plugin is used. Ensure your subnets have enough IP addresses for the number of pods you plan to deploy.
 
 ### Storage
@@ -579,6 +546,9 @@ kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server
 # Check Dynamo operator logs
 kubectl logs -n dynamo -l app=dynamo-operator
 
+# Check Model Express logs
+kubectl logs -n dynamo -l app.kubernetes.io/name=modelexpress
+
 # Verify all secrets are created
 kubectl get secret -n argocd nvidia-dynamo-repo
 kubectl get secret -n dynamo ngc-secret
@@ -610,6 +580,7 @@ cd infra/nvidia-dynamo
 **What gets cleaned up (in proper order):**
 - **Dynamo Examples**: All deployed inference graphs and workloads
 - **Dynamo Platform**: Operator, API Store, and supporting services
+- **Model Express**: Model caching service
 - **ArgoCD Applications**: GitOps-managed resources
 - **Kubernetes Resources**: Namespaces, secrets, and configurations
 - **Infrastructure**: EKS cluster, VPC, security groups, and all AWS resources

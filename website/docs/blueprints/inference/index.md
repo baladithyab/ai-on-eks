@@ -22,6 +22,7 @@ Get started quickly with our pre-configured Helm charts that support multiple mo
 ### GPU Deployments
 Explore GPU-specific inference solutions:
 
+- [NVIDIA Dynamo Inference Blueprints](./GPUs/nvidia-dynamo.md)
 - [DeepSeek-R1 with Ray and vLLM](./GPUs/ray-vllm-deepseek.md)
 - [NVIDIA NIM with Llama3](./GPUs/nvidia-nim-llama3.md)
 - [NVIDIA NIM Operator](./GPUs/nvidia-nim-operator.md)
