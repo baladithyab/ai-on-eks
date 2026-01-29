@@ -120,4 +120,4 @@ spec:
 - [Configuration Management Guide](../docs/configuration-management.md)
 - [Blueprint README](../README.md)
 - [Apply Config Script](../scripts/apply-config.sh)
-- [Core vLLM Blueprints](../01-core/vllm/)
+- [Core vLLM Blueprints](../engines/vllm/)

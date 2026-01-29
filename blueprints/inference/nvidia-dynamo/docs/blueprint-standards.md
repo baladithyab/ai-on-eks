@@ -31,11 +31,11 @@ All NVIDIA Dynamo blueprints in this repository must follow these standards to e
 
 ```
 blueprints/inference/nvidia-dynamo/
-├── 01-core/           # Essential examples (always tested)
-├── 02-standard/       # Production patterns
-├── 03-advanced/       # Specialized features
-├── 04-experimental/   # Early features, may be unstable
-├── 05-model-showcase/ # Model-specific configurations
+├── engines/           # Base engine examples (vLLM, SGLang, TRT-LLM)
+├── features/          # Cross-cutting and advanced features
+├── models/            # Model-specific showcases (DeepSeek, GPT-OSS, Llama)
+├── observability/     # Shared observability examples
+├── experimental/      # Early features, may be unstable
 ├── config/            # Centralized configuration files
 ├── docs/              # Documentation
 ├── examples/          # Template examples
@@ -391,7 +391,7 @@ Every blueprint MUST include:
 
 ### README for Complex Blueprints
 
-Blueprints in `03-advanced/` or `05-model-showcase/` subdirectories MUST have a `README.md` covering:
+Blueprints in `features/` or `models/` subdirectories MUST have a `README.md` covering:
 
 - Purpose and use case
 - Prerequisites
@@ -413,7 +413,7 @@ examples:
     tier: core
     backend: vllm
     pattern: aggregated
-    path: 01-core/vllm/vllm-aggregated-default.yaml
+    path: engines/vllm/vllm-aggregated-default.yaml
     tests:
       - type: health_check
       - type: model_list

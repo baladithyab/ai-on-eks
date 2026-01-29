@@ -272,7 +272,7 @@ The following legacy test scripts have been reorganized:
 |---------------|--------------|
 | `test.sh` (monolithic) | Split into `tests/general/` and `tests/targeted/` |
 | `test-otel.sh` | `tests/targeted/observability-tests/test-otel.sh` |
-| `01-core/vllm/test-kvbm-disk.sh` | Referenced in `tests/targeted/kv-routing-tests/` |
+| KVBM disk tests | `tests/targeted/kv-routing-tests/` |
 | Legacy multimodal scripts | `tests/targeted/multimodal-tests/` |
 
 ## Troubleshooting

@@ -15,32 +15,22 @@
 # - cost_per_hour: estimated AWS cost (USD/hour)
 # - test_date: v0.7.1 validation date (YYYY-MM-DD)
 #
-# Physical Layout (tier-based):
-#   01-core/       - Golden path examples, all backends
-#   02-standard/   - Production variants
-#   03-advanced/   - Large models, DGDR profiling
-#   04-experimental/ - Heavy DGDR, specialized (multi-node removed until Grove/Kai validated)
-#   05-model-showcase/ - Real-world production models
-#   _internal/     - Test manifests (not deployed via catalog)
+# Physical Layout:
+#   engines/       - Base serving engine examples (vLLM, SGLang, TRT-LLM)
+#   features/      - Cross-cutting features (autoscaling, KVBM, DGDR, multimodal, etc.)
+#   models/        - Model-specific showcases (DeepSeek, GPT-OSS, Llama)
+#   observability/ - Metrics, tracing, audit logging examples
+#   experimental/  - Bleeding-edge and unstable features
+#   config/        - Shared configuration components
 
 entries:
   # ---------------------------------------------------------------------------
-  # CORE (golden path) - 01-core/
-  # v0.7.1 Validation: 11/11 PASSED (100%)
+  # CORE (golden path)
+  # v0.7.1 Validation: 10/11 PASSED (91%) - hello-world removed (requires etcd)
   # ---------------------------------------------------------------------------
-  - id: hello-world
-    path: 01-core/hello-world/hello-world.yaml
-    backend: demo
-    tier: core
-    prereqs: "Dynamo platform installed; no GPU required"
-    notes: "Smoke test for platform wiring (no OpenAI HTTP API)"
-    validation_status: validated
-    hardware: "Any instance (CPU only)"
-    cost_per_hour: "$0.00"
-    test_date: "2026-01-01"
 
   - id: vllm-aggregated-default
-    path: 01-core/vllm/vllm-aggregated-default.yaml
+    path: engines/vllm/vllm-aggregated-default.yaml
     backend: vllm
     tier: core
     prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
@@ -51,7 +41,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: sglang-aggregated-default
-    path: 01-core/sglang/sglang-aggregated-default.yaml
+    path: engines/sglang/sglang-aggregated-default.yaml
     backend: sglang
     tier: core
     prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
@@ -62,7 +52,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: trtllm-aggregated-default
-    path: 01-core/trtllm/trtllm-aggregated-default.yaml
+    path: engines/trtllm/trtllm-aggregated-default.yaml
     backend: trtllm
     tier: core
     prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
@@ -73,7 +63,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: vllm-disaggregated-default
-    path: 01-core/vllm/vllm-disaggregated-default.yaml
+    path: engines/vllm/vllm-disaggregated-default.yaml
     backend: vllm
     tier: core
     prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
@@ -84,7 +74,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: vllm-router
-    path: 01-core/vllm/vllm-router.yaml
+    path: engines/vllm/vllm-router.yaml
     backend: vllm
     tier: core
     prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
@@ -95,7 +85,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: vllm-disaggregated-kvbm-disk
-    path: 01-core/vllm/vllm-disaggregated-kvbm-disk.yaml
+    path: features/kvbm/vllm-disaggregated-kvbm-disk.yaml
     backend: vllm
     tier: core
     prereqs: "GPU nodes; enough RAM + ephemeral disk; hf-token-secret + ngc-secret"
@@ -106,7 +96,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: multi-replica-vllm
-    path: 01-core/multi-replica-vllm/multi-replica-vllm.yaml
+    path: features/multi-replica/multi-replica-vllm.yaml
     backend: vllm
     tier: core
     prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
@@ -117,7 +107,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: vllm-full-observability
-    path: 01-core/observability/vllm-full-observability.yaml
+    path: observability/vllm-full-observability.yaml
     backend: vllm
     tier: core
     prereqs: "GPU nodes; Tempo/OTEL stack (observability namespace)"
@@ -128,7 +118,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: llava-1.5-7b
-    path: 01-core/multimodal/llava-1.5-7b.yaml
+    path: features/multimodal/llava-1.5-7b.yaml
     backend: vllm
     tier: core
     prereqs: "3 GPUs total (Encode+VLM+Processor); hf-token-secret + ngc-secret"
@@ -139,7 +129,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: llava-next-video-7b
-    path: 01-core/multimodal/llava-next-video-7b.yaml
+    path: features/multimodal/llava-next-video-7b.yaml
     backend: vllm
     tier: core
     prereqs: "3 GPUs total; large CPU+RAM; hf-token-secret + ngc-secret"
@@ -151,7 +141,7 @@ entries:
 
   # Infra (showcase, not deploy.sh-first by default)
   - id: base-model
-    path: 01-core/model-management/base-model.yaml
+    path: features/model-management/base-model.yaml
     backend: N/A  # Reference CRD only
     tier: documentation  # CHANGE FROM: core
     category: model-management
@@ -162,7 +152,7 @@ entries:
     cost_per_hour: "$0.00"
 
   - id: lora-adapter
-    path: 01-core/model-management/lora-adapter.yaml
+    path: features/model-management/lora-adapter.yaml
     backend: N/A  # Reference CRD only
     tier: documentation  # CHANGE FROM: core
     category: model-management
@@ -174,7 +164,7 @@ entries:
 
   # Backwards-compatible aliases (keep existing docs/workflows working)
   - id: vllm
-    path: 01-core/vllm/vllm-aggregated-default.yaml
+    path: engines/vllm/vllm-aggregated-default.yaml
     backend: vllm
     tier: core
     prereqs: "Alias for vllm-aggregated-default"
@@ -185,7 +175,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: sglang
-    path: 01-core/sglang/sglang-aggregated-default.yaml
+    path: engines/sglang/sglang-aggregated-default.yaml
     backend: sglang
     tier: core
     prereqs: "Alias for sglang-aggregated-default"
@@ -196,7 +186,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: trtllm
-    path: 01-core/trtllm/trtllm-aggregated-default.yaml
+    path: engines/trtllm/trtllm-aggregated-default.yaml
     backend: trtllm
     tier: core
     prereqs: "Alias for trtllm-aggregated-default"
@@ -207,11 +197,11 @@ entries:
     test_date: "2026-01-01"
 
   # ---------------------------------------------------------------------------
-  # STANDARD (common variants) - 02-standard/
+  # STANDARD (common variants)
   # v0.7.1 Validation: 11/11 PASSED (100%)
   # ---------------------------------------------------------------------------
   - id: sglang-disaggregated-default
-    path: 02-standard/sglang/sglang-disaggregated-default.yaml
+    path: engines/sglang/sglang-disaggregated-default.yaml
     backend: sglang
     tier: standard
     prereqs: "GPU nodes; hf-token-secret + ngc-secret"
@@ -222,7 +212,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: trtllm-disaggregated-default
-    path: 02-standard/trtllm/trtllm-disaggregated-default.yaml
+    path: engines/trtllm/trtllm-disaggregated-default.yaml
     backend: trtllm
     tier: standard
     prereqs: "GPU nodes; hf-token-secret + ngc-secret"
@@ -233,7 +223,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: sglang-router
-    path: 02-standard/sglang/sglang-router.yaml
+    path: engines/sglang/sglang-router.yaml
     backend: sglang
     tier: standard
     prereqs: "GPU nodes; hf-token-secret + ngc-secret"
@@ -244,7 +234,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: trtllm-router
-    path: 02-standard/trtllm/trtllm-router.yaml
+    path: engines/trtllm/trtllm-router.yaml
     backend: trtllm
     tier: standard
     prereqs: "GPU nodes; hf-token-secret + ngc-secret"
@@ -255,7 +245,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: vllm-aggregated-kvbm
-    path: 02-standard/vllm/vllm-aggregated-kvbm.yaml
+    path: features/kvbm/vllm-aggregated-kvbm.yaml
     backend: vllm
     tier: standard
     prereqs: "GPU nodes; extra CPU RAM; hf-token-secret + ngc-secret"
@@ -266,7 +256,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: vllm-aggregated-router
-    path: 02-standard/vllm/vllm-aggregated-router.yaml
+    path: engines/vllm/vllm-aggregated-router.yaml
     backend: vllm
     tier: standard
     prereqs: "GPU nodes; hf-token-secret + ngc-secret"
@@ -277,7 +267,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: vllm-disaggregated-router
-    path: 02-standard/vllm/vllm-disaggregated-router.yaml
+    path: engines/vllm/vllm-disaggregated-router.yaml
     backend: vllm
     tier: standard
     prereqs: "GPU nodes; hf-token-secret + ngc-secret"
@@ -288,7 +278,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: vllm-otel-tracing
-    path: 02-standard/observability/vllm-otel-tracing.yaml
+    path: observability/vllm-otel-tracing.yaml
     backend: vllm
     tier: standard
     prereqs: "GPU nodes; Tempo/OTEL stack"
@@ -299,7 +289,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: vllm-audit-logging
-    path: 02-standard/observability/vllm-audit-logging.yaml
+    path: observability/vllm-audit-logging.yaml
     backend: vllm
     tier: standard
     prereqs: "GPU nodes"
@@ -310,7 +300,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: qwen2.5-vl-7b
-    path: 02-standard/multimodal/qwen2.5-vl-7b.yaml
+    path: features/multimodal/qwen2.5-vl-7b.yaml
     backend: vllm
     tier: standard
     prereqs: "3 GPUs total; high memory; hf-token-secret + ngc-secret"
@@ -321,7 +311,7 @@ entries:
     test_date: "2026-01-01"
 
   - id: trtllm-aggregated-high-performance
-    path: 02-standard/trtllm/trtllm-aggregated-high-performance.yaml
+    path: engines/trtllm/trtllm-aggregated-high-performance.yaml
     backend: trtllm
     tier: standard
     prereqs: "GPU nodes; hf-token-secret + ngc-secret"
@@ -332,11 +322,11 @@ entries:
     test_date: "2026-01-01"
 
   # ---------------------------------------------------------------------------
-  # ADVANCED (profiling/planner + large models) - 03-advanced/
+  # ADVANCED (profiling/planner + large models)
   # v0.7.1 Validation: Not fully tested (requires NVLink/profiling infrastructure)
   # ---------------------------------------------------------------------------
   - id: vllm-disaggregated-planner
-    path: 03-advanced/vllm/vllm-disaggregated-planner.yaml
+    path: features/dgdr-planner/vllm-disaggregated-planner.yaml
     backend: vllm
     tier: advanced
     prereqs: "Planner + profiling artifacts; GPU nodes"
@@ -346,7 +336,7 @@ entries:
     cost_per_hour: "$3.91+"
 
   - id: sglang-planner
-    path: 03-advanced/sglang/sglang-planner.yaml
+    path: features/dgdr-planner/sglang-planner.yaml
     backend: sglang
     tier: advanced
     prereqs: "Planner + profiling artifacts; GPU nodes"
@@ -356,7 +346,7 @@ entries:
     cost_per_hour: "$3.91+"
 
   - id: trtllm-planner
-    path: 03-advanced/trtllm/trtllm-planner.yaml
+    path: features/dgdr-planner/trtllm-planner.yaml
     backend: trtllm
     tier: advanced
     prereqs: "Planner + profiling artifacts; GPU nodes"
@@ -366,7 +356,7 @@ entries:
     cost_per_hour: "$3.91+"
 
   - id: vllm-dgdr-online
-    path: 03-advanced/vllm/vllm-dgdr-online.yaml
+    path: features/dgdr-planner/vllm-dgdr-online.yaml
     backend: vllm
     tier: advanced
     prereqs: "Prometheus stack; hours of profiling; GPU nodes"
@@ -376,7 +366,7 @@ entries:
     cost_per_hour: "$3.91+"
 
   - id: sglang-dgdr-online
-    path: 03-advanced/sglang/sglang-dgdr-online.yaml
+    path: features/dgdr-planner/sglang-dgdr-online.yaml
     backend: sglang
     tier: advanced
     prereqs: "Prometheus stack; hours of profiling; GPU nodes"
@@ -386,7 +376,7 @@ entries:
     cost_per_hour: "$3.91+"
 
   - id: trtllm-dgdr-online
-    path: 03-advanced/trtllm/trtllm-dgdr-online.yaml
+    path: features/dgdr-planner/trtllm-dgdr-online.yaml
     backend: trtllm
     tier: advanced
     prereqs: "Prometheus stack; hours of profiling; GPU nodes"
@@ -396,7 +386,7 @@ entries:
     cost_per_hour: "$3.91+"
 
   - id: vllm-dgdr-deepseek-32b
-    path: 03-advanced/vllm/vllm-dgdr-deepseek-32b.yaml
+    path: models/deepseek/vllm-dgdr-deepseek-32b.yaml
     backend: vllm
     tier: advanced
     prereqs: "Prometheus stack; 2-4h profiling; multi-GPU"
@@ -406,7 +396,7 @@ entries:
     cost_per_hour: "$3.91+"
 
   - id: vllm-dgdr-qwen-coder-32b
-    path: 03-advanced/vllm/vllm-dgdr-qwen-coder-32b.yaml
+    path: features/dgdr-planner/vllm-dgdr-qwen-coder-32b.yaml
     backend: vllm
     tier: advanced
     prereqs: "Prometheus stack; 2-4h profiling; multi-GPU"
@@ -416,7 +406,7 @@ entries:
     cost_per_hour: "$3.91+"
 
   - id: trtllm-dgdr-aic
-    path: 03-advanced/trtllm/trtllm-dgdr-aic.yaml
+    path: features/dgdr-planner/trtllm-dgdr-aic.yaml
     backend: trtllm
     tier: advanced
     prereqs: "AIC-capable hardware (H100/H200); Prometheus"
@@ -426,7 +416,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: sglang-disaggregated-2gpu
-    path: 03-advanced/sglang/sglang-disaggregated-2gpu.yaml
+    path: features/multi-replica/sglang-disaggregated-2gpu.yaml
     backend: sglang
     tier: advanced
     prereqs: "4+ GPUs total; hf-token-secret + ngc-secret"
@@ -436,7 +426,7 @@ entries:
     cost_per_hour: "$3.91"
 
   - id: vllm-aggregated-gptoss-20b
-    path: 03-advanced/vllm/vllm-aggregated-gptoss-20b.yaml
+    path: models/gpt-oss/vllm-aggregated-gptoss-20b.yaml
     backend: v llm
     tier: advanced
     prereqs: "Multi-GPU; large model download"
@@ -446,7 +436,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: vllm-disaggregated-gptoss-20b
-    path: 03-advanced/vllm/vllm-disaggregated-gptoss-20b.yaml
+    path: models/gpt-oss/vllm-disaggregated-gptoss-20b.yaml
     backend: vllm
     tier: advanced
     prereqs: "Multi-GPU; large model download"
@@ -456,7 +446,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: vllm-disaggregated-gptoss-120b
-    path: 03-advanced/vllm/vllm-disaggregated-gptoss-120b.yaml
+    path: models/gpt-oss/vllm-disaggregated-gptoss-120b.yaml
     backend: vllm
     tier: advanced
     prereqs: "Many GPUs; long warmup"
@@ -466,7 +456,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: vllm-disaggregated-70b
-    path: 03-advanced/vllm/vllm-disaggregated-70b.yaml
+    path: models/llama-family/vllm-disaggregated-70b.yaml
     backend: vllm
     tier: advanced
     prereqs: "Many GPUs; large storage"
@@ -476,7 +466,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: vllm-disaggregated-deepseek-70b
-    path: 03-advanced/vllm/vllm-disaggregated-deepseek-70b.yaml
+    path: models/deepseek/vllm-disaggregated-deepseek-70b.yaml
     backend: vllm
     tier: advanced
     prereqs: "Many GPUs; large storage"
@@ -486,12 +476,12 @@ entries:
     cost_per_hour: "$98.32"
 
   # ---------------------------------------------------------------------------
-  # EXPERIMENTAL (heavy DGDR) - 04-experimental/
+  # EXPERIMENTAL (heavy DGDR)
   # v0.7.1 Validation: Not tested (requires specialized infrastructure)
   # NOTE: Multi-node examples removed until Grove/Kai is validated.
   # ---------------------------------------------------------------------------
   - id: vllm-dgdr-deepseek-70b
-    path: 04-experimental/vllm/vllm-dgdr-deepseek-70b.yaml
+    path: experimental/vllm-dgdr-deepseek-70b.yaml
     backend: vllm
     tier: experimental
     prereqs: "Prometheus; very long profiling; many GPUs"
@@ -501,7 +491,7 @@ entries:
     cost_per_hour: "$98.32+"
 
   - id: vllm-dgdr-deepseek-70b-g6
-    path: 04-experimental/vllm/vllm-dgdr-deepseek-70b-g6.yaml
+    path: experimental/vllm-dgdr-deepseek-70b-g6.yaml
     backend: vllm
     tier: experimental
     prereqs: "Prometheus; very long profiling; many GPUs; GPU type-specific"
@@ -514,14 +504,14 @@ entries:
   # See issue tracking at: https://github.com/awslabs/ai-on-eks/issues/XXX
 
   # ---------------------------------------------------------------------------
-  # MODEL SHOWCASE - 05-model-showcase/
+  # MODEL SHOWCASE
   # v0.7.1 Validation: 3 model families tested (6 blueprints)
   # This tier focuses on model families rather than Dynamo features
   # ---------------------------------------------------------------------------
   
   # GPT-OSS (NVIDIA) - Production-ready reasoning models
   - id: showcase-gptoss-20b-vllm
-    path: 05-model-showcase/gpt-oss/vllm-aggregated-gptoss-20b.yaml
+    path: models/gpt-oss/vllm-aggregated-gptoss-20b.yaml
     backend: vllm
     tier: model-showcase
     category: GPT-OSS
@@ -533,7 +523,7 @@ entries:
     test_date: "2025-12-28"
 
   - id: showcase-gptoss-20b-sglang-agg
-    path: 05-model-showcase/gpt-oss/sglang-aggregated-gptoss-20b.yaml
+    path: models/gpt-oss/sglang-aggregated-gptoss-20b.yaml
     backend: sglang
     tier: model-showcase
     category: GPT-OSS
@@ -545,7 +535,7 @@ entries:
     test_date: "2025-12-28"
 
   - id: showcase-gptoss-20b-sglang-dgd
-    path: 05-model-showcase/gpt-oss/sglang-disaggregated-gptoss-20b.yaml
+    path: models/gpt-oss/sglang-disaggregated-gptoss-20b.yaml
     backend: sglang
     tier: model-showcase
     category: GPT-OSS
@@ -557,7 +547,7 @@ entries:
     test_date: "2025-12-28"
 
   - id: showcase-gptoss-20b-sglang-router
-    path: 05-model-showcase/gpt-oss/sglang-router-gptoss-20b.yaml
+    path: models/gpt-oss/sglang-router-gptoss-20b.yaml
     backend: sglang
     tier: model-showcase
     category: GPT-OSS
@@ -569,7 +559,7 @@ entries:
     test_date: "2025-12-28"
 
   - id: showcase-gptoss-120b-vllm
-    path: 05-model-showcase/gpt-oss/vllm-disaggregated-gptoss-120b.yaml
+    path: models/gpt-oss/vllm-disaggregated-gptoss-120b.yaml
     backend: vllm
     tier: model-showcase
     category: GPT-OSS
@@ -580,7 +570,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: showcase-gptoss-120b-sglang
-    path: 05-model-showcase/gpt-oss/sglang-aggregated-gptoss-120b.yaml
+    path: models/gpt-oss/sglang-aggregated-gptoss-120b.yaml
     backend: sglang
     tier: model-showcase
     category: GPT-OSS
@@ -592,7 +582,7 @@ entries:
 
   # DeepSeek (Community) - Advanced reasoning capabilities
   - id: showcase-deepseek-r1-8b
-    path: 05-model-showcase/deepseek/sglang-deepseek-r1-distill-8b.yaml
+    path: models/deepseek/sglang-deepseek-r1-distill-8b.yaml
     backend: sglang
     tier: model-showcase
     category: DeepSeek
@@ -604,7 +594,7 @@ entries:
     test_date: "2025-12-28"
 
   - id: showcase-deepseek-32b
-    path: 05-model-showcase/deepseek/vllm-dgdr-deepseek-32b.yaml
+    path: models/deepseek/vllm-dgdr-deepseek-32b.yaml
     backend: vllm
     tier: model-showcase
     category: DeepSeek
@@ -615,7 +605,7 @@ entries:
     cost_per_hour: "$3.91"
 
   - id: showcase-deepseek-70b-vllm
-    path: 05-model-showcase/deepseek/vllm-disaggregated-deepseek-70b.yaml
+    path: models/deepseek/vllm-disaggregated-deepseek-70b.yaml
     backend: vllm
     tier: model-showcase
     category: DeepSeek
@@ -626,7 +616,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: showcase-deepseek-70b-sglang-agg
-    path: 05-model-showcase/deepseek/sglang-aggregated-deepseek-70b.yaml
+    path: models/deepseek/sglang-aggregated-deepseek-70b.yaml
     backend: sglang
     tier: model-showcase
     category: DeepSeek
@@ -637,7 +627,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: showcase-deepseek-70b-sglang-dgd
-    path: 05-model-showcase/deepseek/sglang-disaggregated-deepseek-70b.yaml
+    path: models/deepseek/sglang-disaggregated-deepseek-70b.yaml
     backend: sglang
     tier: model-showcase
     category: DeepSeek
@@ -648,7 +638,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: showcase-deepseek-70b-sglang-router
-    path: 05-model-showcase/deepseek/sglang-router-deepseek-70b.yaml
+    path: models/deepseek/sglang-router-deepseek-70b.yaml
     backend: sglang
     tier: model-showcase
     category: DeepSeek
@@ -660,7 +650,7 @@ entries:
 
   # Llama Family (Meta) - Foundation models
   - id: showcase-llama-3.3-70b-vllm
-    path: 05-model-showcase/llama-family/vllm-llama-3.3-70b.yaml
+    path: models/llama-family/vllm-llama-3.3-70b.yaml
     backend: vllm
     tier: model-showcase
     category: Llama
@@ -671,7 +661,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: showcase-llama-3.3-70b-sglang-agg
-    path: 05-model-showcase/llama-family/sglang-aggregated-llama-3.3-70b.yaml
+    path: models/llama-family/sglang-aggregated-llama-3.3-70b.yaml
     backend: sglang
     tier: model-showcase
     category: Llama
@@ -682,7 +672,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: showcase-llama-3.3-70b-sglang-dgd
-    path: 05-model-showcase/llama-family/sglang-disaggregated-llama-3.3-70b.yaml
+    path: models/llama-family/sglang-disaggregated-llama-3.3-70b.yaml
     backend: sglang
     tier: model-showcase
     category: Llama
@@ -693,7 +683,7 @@ entries:
     cost_per_hour: "$98.32"
 
   - id: showcase-llama-3.3-70b-sglang-router
-    path: 05-model-showcase/llama-family/sglang-router-llama-3.3-70b.yaml
+    path: models/llama-family/sglang-router-llama-3.3-70b.yaml
     backend: sglang
     tier: model-showcase
     category: Llama

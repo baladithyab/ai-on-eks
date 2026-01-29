@@ -126,6 +126,15 @@ env:
     value: "http://otel-collector:4317"
 ```
 
+Resulting Kesult Changed to:
+
+```yaml
+# ✅ CORRECT - Per OpenTelemetry specification
+env:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://otel-collector:4317"
+```
+
 ### Environment Variables Reference
 
 | Variable | Description | Default |
@@ -181,7 +190,7 @@ spec:
               name: dynamo-otel-vllm
 ```
 
-Or see [`01-core/observability/vllm-full-observability.yaml`](../01-core/observability/vllm-full-observability.yaml) for a complete example.
+Or see [`observability/vllm-full-observability.yaml`](../observability/vllm-full-observability.yaml) for a complete example.
 
 ### Viewing Traces
 

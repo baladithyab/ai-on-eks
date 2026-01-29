@@ -5,25 +5,29 @@ This directory provides a **showcase-first, backend-diverse catalog** for the Dy
 ## Validation Status
 
 ✅ **v0.8.0 Comprehensive Testing Complete** (100% Pass Rate for Testable Configurations)
-- **Core Tier:** 11/11 blueprints PASSED
-- **Standard Tier:** 11/11 blueprints PASSED  
+- **Engine Examples:** 11/11 blueprints PASSED
+- **Feature Examples:** 11/11 blueprints PASSED  
 - **Model Showcase:** 3/3 large model families validated on PCIe with SGLang
 - **Test Date:** January 2026
 - **Infrastructure:** g6e.12xlarge (4x L40S 48GB PCIe)
 
 ---
 
-## Catalog Structure
+## Catalog Structure (NEW)
 
 - **Single source of truth:** [`catalog.yaml`](catalog.yaml:1)
 - **Stable IDs:** Use `./deploy.sh <id>` consistently, even when YAML `metadata.name` differs from filenames.
 
-### Tiers
+### Physical Layout (Restructured)
 
-- **core**: The recommended "golden path" showcase set with 100% validation coverage
-- **standard**: Common variants and extra backend coverage - fully validated
-- **advanced**: Planner / DGDR / large model variants (hardware-dependent)
-- **experimental**: Multi-node and heavy/unstable profiling variants
+| Directory | Purpose |
+|-----------|---------|
+| **`engines/`** | Base serving engine examples (vLLM, SGLang, TRT-LLM) |
+| **`features/`** | Cross-cutting features (autoscaling, KVBM, DGDR, multimodal) |
+| **`models/`** | Model-family showcases (DeepSeek, GPT-OSS, Llama) |
+| **`observability/`** | Metrics, tracing, audit logging examples |
+| **`experimental/`** | Bleeding-edge and unstable features |
+| **`config/`** | Shared configuration components |
 
 ---
 
