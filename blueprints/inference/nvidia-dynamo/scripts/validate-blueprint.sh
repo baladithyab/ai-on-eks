@@ -140,13 +140,13 @@ Checks Performed:
 
 Examples:
   # Validate a single blueprint
-  ./scripts/validate-blueprint.sh 01-core/vllm/vllm-aggregated-default.yaml
+  ./scripts/validate-blueprint.sh engines/vllm/vllm-aggregated-default.yaml
 
   # Validate all core tier blueprints
   ./scripts/validate-blueprint.sh --tier core
 
   # Strict validation (warnings are errors)
-  ./scripts/validate-blueprint.sh --strict 01-core/vllm/vllm-aggregated-default.yaml
+  ./scripts/validate-blueprint.sh --strict engines/vllm/vllm-aggregated-default.yaml
 EOF
 }
 
@@ -540,10 +540,10 @@ check_deprecated_fields_v080() {
 check_autoscaling_examples_exist() {
     log_check "Autoscaling Examples Structure (v0.8.0)"
     
-    local autoscaling_dir="${BLUEPRINT_DIR}/03-advanced/autoscaling"
+    local autoscaling_dir="${BLUEPRINT_DIR}/features/autoscaling"
     
     if [ ! -d "$autoscaling_dir" ]; then
-        log_warn "Missing autoscaling examples directory: 03-advanced/autoscaling/"
+        log_warn "Missing autoscaling examples directory: features/autoscaling/"
         echo "         v0.8.0 deprecates embedded autoscaling; examples should exist"
         return 1
     fi
@@ -665,20 +665,20 @@ find_blueprints() {
     
     if [ -n "$tier" ]; then
         case "$tier" in
-            core)
-                find "${BLUEPRINT_DIR}/01-core" -name "*.yaml" -type f 2>/dev/null
+            core|engines)
+                find "${BLUEPRINT_DIR}/engines" -name "*.yaml" -type f 2>/dev/null
                 ;;
-            standard)
-                find "${BLUEPRINT_DIR}/02-standard" -name "*.yaml" -type f 2>/dev/null
+            standard|features)
+                find "${BLUEPRINT_DIR}/features" -name "*.yaml" -type f 2>/dev/null
                 ;;
-            advanced)
-                find "${BLUEPRINT_DIR}/03-advanced" -name "*.yaml" -type f 2>/dev/null
+            advanced|models)
+                find "${BLUEPRINT_DIR}/models" -name "*.yaml" -type f 2>/dev/null
                 ;;
             experimental)
-                find "${BLUEPRINT_DIR}/04-experimental" -name "*.yaml" -type f 2>/dev/null
+                find "${BLUEPRINT_DIR}/experimental" -name "*.yaml" -type f 2>/dev/null
                 ;;
-            showcase)
-                find "${BLUEPRINT_DIR}/05-model-showcase" -name "*.yaml" -type f 2>/dev/null
+            showcase|observability)
+                find "${BLUEPRINT_DIR}/observability" -name "*.yaml" -type f 2>/dev/null
                 ;;
             *)
                 echo "Unknown tier: $tier" >&2
@@ -692,8 +692,9 @@ find_blueprints() {
             -path "${BLUEPRINT_DIR}/_internal" -prune -o \
             -path "${BLUEPRINT_DIR}/test-logs" -prune -o \
             -path "${BLUEPRINT_DIR}/test-results" -prune -o \
+            -path "${BLUEPRINT_DIR}/catalog" -prune -o \
             -name "*.yaml" -type f -print 2>/dev/null | \
-            grep -E "(01-core|02-standard|03-advanced|04-experimental|05-model-showcase|examples)" || true
+            grep -E "(engines|features|models|observability|experimental|examples)" || true
     fi
 }
 

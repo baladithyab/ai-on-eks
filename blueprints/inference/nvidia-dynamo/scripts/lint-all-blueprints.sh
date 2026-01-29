@@ -165,20 +165,20 @@ find_blueprint_files() {
     local search_paths=()
     
     case "$tier" in
-        core)
-            search_paths=("${BLUEPRINT_DIR}/01-core")
+        core|engines)
+            search_paths=("${BLUEPRINT_DIR}/engines")
             ;;
-        standard)
-            search_paths=("${BLUEPRINT_DIR}/02-standard")
+        standard|features)
+            search_paths=("${BLUEPRINT_DIR}/features")
             ;;
-        advanced)
-            search_paths=("${BLUEPRINT_DIR}/03-advanced")
+        advanced|models)
+            search_paths=("${BLUEPRINT_DIR}/models")
             ;;
         experimental)
-            search_paths=("${BLUEPRINT_DIR}/04-experimental")
+            search_paths=("${BLUEPRINT_DIR}/experimental")
             ;;
-        showcase)
-            search_paths=("${BLUEPRINT_DIR}/05-model-showcase")
+        showcase|observability)
+            search_paths=("${BLUEPRINT_DIR}/observability")
             ;;
         examples)
             search_paths=("${BLUEPRINT_DIR}/examples")
@@ -187,13 +187,13 @@ find_blueprint_files() {
             search_paths=("${BLUEPRINT_DIR}/config")
             ;;
         "")
-            # All tiers plus examples and config
+            # All canonical directories plus examples and config
             search_paths=(
-                "${BLUEPRINT_DIR}/01-core"
-                "${BLUEPRINT_DIR}/02-standard"
-                "${BLUEPRINT_DIR}/03-advanced"
-                "${BLUEPRINT_DIR}/04-experimental"
-                "${BLUEPRINT_DIR}/05-model-showcase"
+                "${BLUEPRINT_DIR}/engines"
+                "${BLUEPRINT_DIR}/features"
+                "${BLUEPRINT_DIR}/models"
+                "${BLUEPRINT_DIR}/observability"
+                "${BLUEPRINT_DIR}/experimental"
                 "${BLUEPRINT_DIR}/examples"
                 "${BLUEPRINT_DIR}/config"
             )

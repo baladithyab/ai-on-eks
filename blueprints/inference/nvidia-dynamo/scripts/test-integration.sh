@@ -525,8 +525,8 @@ validate_blueprint() {
 
 # Test sample blueprints
 SAMPLE_BLUEPRINTS=(
-    "01-core/vllm/vllm-aggregated-default.yaml"
-    "01-core/vllm/vllm-disaggregated-default.yaml"
+    "engines/vllm/vllm-aggregated-default.yaml"
+    "engines/vllm/vllm-disaggregated-default.yaml"
 )
 
 # Add specific blueprint if provided

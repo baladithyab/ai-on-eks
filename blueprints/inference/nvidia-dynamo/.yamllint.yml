@@ -155,12 +155,13 @@ rules:
   # Advanced Rules
   # ==========================================================================
   
-  # Allow flow style for short sequences (Kubernetes often uses this)
-  flow-style:
-    forbid-implicit: false
-    forbid-same-line: false
+  # Octal values - disabled for Kubernetes file modes
+  octal-values: disable
   
-  # Ensure anchors are used before aliases
+  # Float values - allow standard float syntax
+  float-values: disable
+  
+  # Anchors configuration - ensure anchors are used before aliases
   anchors:
     forbid-undeclared-aliases: true
     forbid-duplicated-anchors: true

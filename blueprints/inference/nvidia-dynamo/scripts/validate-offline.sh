@@ -399,9 +399,9 @@ check_guardrails() {
     fi
 
     start_check "Guardrail: autoscaling examples present"
-    local autoscaling_dir="${BLUEPRINT_DIR}/03-advanced/autoscaling"
+    local autoscaling_dir="${BLUEPRINT_DIR}/features/autoscaling"
     local missing=()
-    [ ! -d "${autoscaling_dir}" ] && missing+=("03-advanced/autoscaling/")
+    [ ! -d "${autoscaling_dir}" ] && missing+=("features/autoscaling/")
     [ ! -f "${autoscaling_dir}/README.md" ] && missing+=("README.md")
     [ ! -f "${autoscaling_dir}/hpa-frontend-cpu.yaml" ] && missing+=("hpa-frontend-cpu.yaml")
     [ ! -f "${autoscaling_dir}/keda-frontend-prometheus.yaml" ] && missing+=("keda-frontend-prometheus.yaml")
