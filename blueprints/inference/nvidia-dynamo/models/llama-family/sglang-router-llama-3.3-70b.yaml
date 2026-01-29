@@ -1,0 +1,188 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# SGLang Router Architecture for Meta Llama-3.3-70B-Instruct
+#
+# ROUTER architecture adds intelligent request routing between multiple workers
+# based on real-time KV cache metrics and load balancing decisions.
+#
+# Hardware Requirements:
+# - 4x L40S GPUs per worker (TP=4) on g6e.24xlarge
+# - Alternatively 8x H100 GPUs (TP=8) on p5.48xlarge
+# - Multiple workers recommended for router benefits
+# - ~140GB VRAM for 70B model weights (BF16)
+# - Meta license acceptance required
+#
+# Features:
+# - EFS-backed model cache for fast restarts
+# - Smart router with KV cache-aware load balancing
+# - SGLang backend for PCIe multi-GPU compatibility
+# - Real-time metrics publishing for routing decisions
+# - Industry-standard Llama 3.3 architecture
+#
+# Architecture:
+# - Processor collects KV cache metrics from workers
+# - Router makes intelligent routing decisions
+# - Multiple workers handle requests in parallel
+# - Dynamic load balancing based on GPU utilization
+#
+# Use cases:
+# - High-throughput production workloads
+# - Multi-worker scaling for increased capacity
+# - Workloads benefiting from intelligent routing
+# - Dynamic scaling with Karpenter
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: sglang-llama-70b-router
+  namespace: dynamo
+spec:
+  # Use shared HF cache from EFS
+  pvcs:
+    - name: dynamo-shared-models
+      create: false
+
+  # Set HF_HOME for model caching
+  envs:
+    - name: HF_HOME
+      value: "/models"
+
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    Processor:
+      # Processor collects metrics from workers for routing decisions
+      componentType: processor
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 8001
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8001
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 6
+      resources:
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.processor 2>&1 | tee /tmp/processor.log"
+
+    SglangWorker:
+      # Multiple workers with metrics publishing for router
+      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 2  # Multiple workers for router benefits
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "24"
+          memory: "150Gi"
+          gpu: "4"
+        limits:
+          cpu: "24"
+          memory: "150Gi"
+          gpu: "4"
+      sharedMemory:
+        size: 24Gi
+      volumeMounts:
+        - name: dynamo-shared-models
+          mountPoint: /models
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # 300 * 60s = 5 hours max startup time for 70B model loading
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          workingDir: /workspace/components/backends/sglang
+          command:
+            - /bin/sh
+            - -c
+          args:
+            # SGLang ROUTER MODE with --publish-events-and-metrics
+            # Publishes KV cache metrics for intelligent routing
+            - |
+              python3 -m dynamo.sglang \
+                --model-path meta-llama/Llama-3.3-70B-Instruct \
+                --served-model-name meta-llama/Llama-3.3-70B-Instruct \
+                --tp 4 \
+                --trust-remote-code \
+                --mem-fraction-static 0.85 \
+                --publish-events-and-metrics \
+                2>&1 | tee /tmp/sglang-worker.log

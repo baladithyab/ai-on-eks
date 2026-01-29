@@ -1,0 +1,190 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - KEDA ScaledObject for Frontend (Prometheus Metrics)
+# =============================================================================
+#
+# This KEDA ScaledObject scales the Frontend service of a DynamoGraphDeployment
+# based on Prometheus metrics. It targets the DynamoGraphDeploymentScalingAdapter
+# (DGDSA) rather than the DGD directly.
+#
+# Dynamo v0.8.0+ Note:
+#   Embedded autoscaling is deprecated. Use KEDA for advanced event-driven scaling.
+#   The DGDSA is automatically created when you deploy a DGD.
+#
+# This example uses metrics from the OTel collector that are aligned with our
+# observability configuration in config/otel-collector.yaml.
+#
+# Prerequisites:
+#   1. Dynamo v0.8.0+ operator deployed
+#   2. KEDA v2.10+ installed:
+#      helm install keda kedacore/keda -n keda --create-namespace
+#   3. Prometheus stack (kube-prometheus-stack) installed
+#   4. OTel collector deployed (config/otel-collector.yaml)
+#   5. A DynamoGraphDeployment deployed (creates DGDSA automatically)
+#
+# Usage:
+#   # First deploy a DGD with observability
+#   kubectl apply -f ../../engines/vllm/vllm-aggregated-default.yaml -n dynamo
+#
+#   # Wait for DGDSA creation
+#   kubectl get dgdsa -n dynamo
+#
+#   # Apply this ScaledObject (adjust name to match your DGD's Frontend DGDSA)
+#   kubectl apply -f keda-frontend-prometheus.yaml -n dynamo
+#
+# IMPORTANT:
+#   Update `scaleTargetRef.name` to match your actual DGDSA name.
+#   Format is typically: <dgd-name>-<service-name> (e.g., vllm-aggregated-default-frontend)
+#
+# =============================================================================
+
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: dynamo-frontend-scaledobject
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-frontend-scaledobject
+    app.kubernetes.io/component: autoscaling
+    app.kubernetes.io/part-of: nvidia-dynamo
+    dynamo.nvidia.com/backend: vllm
+    dynamo.nvidia.com/tier: advanced
+  annotations:
+    description: "KEDA ScaledObject for Dynamo Frontend based on Prometheus metrics"
+    dynamo.nvidia.com/config-version: "0.8.0"
+    dynamo.nvidia.com/scaling-type: "keda-prometheus"
+spec:
+  # Target the DynamoGraphDeploymentScalingAdapter (DGDSA)
+  scaleTargetRef:
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeploymentScalingAdapter
+    # IMPORTANT: Change this to match your DGDSA name
+    # Find with: kubectl get dgdsa -n dynamo
+    name: vllm-aggregated-default-frontend
+
+  # Replica bounds
+  minReplicaCount: 1
+  maxReplicaCount: 10
+
+  # Cooldown periods (seconds)
+  cooldownPeriod: 300  # Wait 5 minutes before scaling to zero
+  pollingInterval: 15  # Check metrics every 15 seconds
+
+  # Advanced scaling configuration
+  advanced:
+    # Horizontal Pod Autoscaler configuration
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 60
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 60
+            - type: Pods
+              value: 4
+              periodSeconds: 60
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+          selectPolicy: Min
+
+  # Prometheus-based triggers
+  triggers:
+    # Primary trigger: Request queue depth
+    # Scale up when requests are queuing
+    - type: prometheus
+      metadata:
+        # Prometheus server address
+        serverAddress: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+        # PromQL query for pending requests in the Frontend
+        # Adjust dynamo_namespace label to match your deployment
+        query: |
+          sum(dynamo_request_queue_size{
+            dynamo_namespace="vllm-aggregated-default",
+            dynamo_component="Frontend"
+          }) or vector(0)
+        # Scale up when queue depth exceeds 10 per replica
+        threshold: "10"
+        # Enable metric authentication if needed
+        # authModes: "bearer"
+      metricType: AverageValue
+
+    # Secondary trigger: Request latency (TTFT)
+    # Scale up when time-to-first-token is high
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+        # P95 latency over 5 minutes
+        query: |
+          histogram_quantile(0.95,
+            sum(rate(dynamo_request_latency_seconds_bucket{
+              dynamo_namespace="vllm-aggregated-default",
+              dynamo_component="Frontend"
+            }[5m])) by (le)
+          ) or vector(0)
+        # Scale up when P95 latency exceeds 2 seconds
+        threshold: "2"
+      metricType: Value
+
+---
+# TriggerAuthentication for Prometheus (if authentication is required)
+# Uncomment and configure if your Prometheus requires authentication
+#
+# apiVersion: keda.sh/v1alpha1
+# kind: TriggerAuthentication
+# metadata:
+#   name: prometheus-auth
+#   namespace: dynamo
+# spec:
+#   secretTargetRef:
+#     - parameter: bearerToken
+#       name: prometheus-token
+#       key: token
+
+---
+# Alternative ScaledObject using concurrent requests
+# This is a simpler alternative that scales based on current load
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: dynamo-frontend-simple-scaledobject
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-frontend-simple-scaledobject
+    app.kubernetes.io/component: autoscaling
+    app.kubernetes.io/part-of: nvidia-dynamo
+  annotations:
+    description: "Simple KEDA ScaledObject based on concurrent requests"
+    dynamo.nvidia.com/scaling-type: "keda-prometheus-simple"
+spec:
+  scaleTargetRef:
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeploymentScalingAdapter
+    name: vllm-aggregated-default-frontend
+
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  pollingInterval: 30
+  cooldownPeriod: 300
+
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+        # Scale based on concurrent requests per pod
+        query: |
+          sum(dynamo_concurrent_requests{
+            dynamo_namespace="vllm-aggregated-default"
+          }) / count(up{
+            job=~".*dynamo.*frontend.*"
+          }) or vector(0)
+        # Target 50 concurrent requests per Frontend pod
+        threshold: "50"
+      metricType: Value
