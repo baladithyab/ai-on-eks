@@ -4,6 +4,20 @@ TERRAFORM_COMMAND="terraform destroy -auto-approve"
 CLUSTERNAME="ai-stack"
 REGION="region"
 
+# -----------------------------------------------------------------------------
+# HELPER: Check if Terraform state is empty (all resources destroyed)
+# Returns 0 if state is empty, 1 otherwise
+# -----------------------------------------------------------------------------
+is_terraform_state_empty() {
+  local state_list
+  state_list=$(terraform state list 2>/dev/null || echo "")
+  if [ -z "$state_list" ]; then
+    return 0  # empty
+  else
+    return 1  # not empty
+  fi
+}
+
 # Get the deployment_id from terraform output
 DEPLOYMENT_NAME=$(terraform output -raw deployment_name)
 
@@ -39,23 +53,59 @@ if [ ${#targets[@]} -gt 0 ]; then
     target_args="$target_args -target=$target"
   done
 
-  destroy_output=$($TERRAFORM_COMMAND $target_args 2>&1 | tee /dev/tty)
-  if [[ ${PIPESTATUS[0]} -eq 0 && $destroy_output == *"Destroy complete"* ]]; then
-    echo "SUCCESS: Terraform destroy of kubectl_manifest resources completed successfully"
+  # Capture output to a temp file instead of /dev/tty to avoid non-interactive shell failures
+  destroy_output_file=$(mktemp)
+  if $TERRAFORM_COMMAND $target_args 2>&1 | tee "$destroy_output_file"; then
+    destroy_output=$(cat "$destroy_output_file")
+    rm -f "$destroy_output_file"
+    if [[ $destroy_output == *"Destroy complete"* ]]; then
+      echo "SUCCESS: Terraform destroy of kubectl_manifest resources completed successfully"
+    else
+      echo "WARNING: Terraform destroy completed but 'Destroy complete' not found in output"
+    fi
   else
-    echo "FAILED: Terraform destroy of kubectl_manifest resources failed"
-    exit 1
+    destroy_exit_code=$?
+    destroy_output=$(cat "$destroy_output_file")
+    rm -f "$destroy_output_file"
+    # Check if state is empty - if so, treat as success despite non-zero exit
+    if is_terraform_state_empty; then
+      echo "WARNING: Terraform destroy exited with code $destroy_exit_code but state is empty - treating as SUCCESS"
+      echo "         (This can happen when k8s/helm providers timeout after cluster deletion)"
+    else
+      echo "FAILED: Terraform destroy of kubectl_manifest resources failed (exit code: $destroy_exit_code)"
+      echo "Remaining resources in state:"
+      terraform state list 2>/dev/null || echo "(unable to list state)"
+      exit 1
+    fi
   fi
 fi
 
 ## Final destroy to catch any remaining resources
 echo "Destroying remaining resources..."
-destroy_output=$($TERRAFORM_COMMAND -var="region=$REGION" 2>&1 | tee /dev/tty)
-if [[ ${PIPESTATUS[0]} -eq 0 && $destroy_output == *"Destroy complete"* ]]; then
-  echo "SUCCESS: Terraform destroy of all modules completed successfully"
+# Capture output to a temp file instead of /dev/tty to avoid non-interactive shell failures
+destroy_output_file=$(mktemp)
+if $TERRAFORM_COMMAND -var="region=$REGION" 2>&1 | tee "$destroy_output_file"; then
+  destroy_output=$(cat "$destroy_output_file")
+  rm -f "$destroy_output_file"
+  if [[ $destroy_output == *"Destroy complete"* ]]; then
+    echo "SUCCESS: Terraform destroy of all modules completed successfully"
+  else
+    echo "WARNING: Terraform destroy completed but 'Destroy complete' not found in output"
+  fi
 else
-  echo "FAILED: Terraform destroy of all modules failed"
-  exit 1
+  destroy_exit_code=$?
+  destroy_output=$(cat "$destroy_output_file")
+  rm -f "$destroy_output_file"
+  # Check if state is empty - if so, treat as success despite non-zero exit
+  if is_terraform_state_empty; then
+    echo "WARNING: Terraform destroy exited with code $destroy_exit_code but state is empty - treating as SUCCESS"
+    echo "         (This can happen when k8s/helm providers timeout after cluster deletion)"
+  else
+    echo "FAILED: Terraform destroy of all modules failed (exit code: $destroy_exit_code)"
+    echo "Remaining resources in state:"
+    terraform state list 2>/dev/null || echo "(unable to list state)"
+    exit 1
+  fi
 fi
 
 echo "Cleaning up PVCs and EBS volumes for deployment: $DEPLOYMENT_NAME"

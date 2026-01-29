@@ -129,6 +129,202 @@ info "Phase 2: Cleaning up other conflicting resources..."
 info "Removing existing CloudWatch log group..."
 aws logs delete-log-group --log-group-name "/aws/eks/${CLUSTER_NAME}/cluster" --region ${REGION} 2>/dev/null || info "Log group not found or already deleted"
 
+# Phase 2.5: Remove stale aggregated APIServices to prevent namespace deletion hang
+# -----------------------------------------------------------------------------
+# WHY THIS IS NEEDED:
+# Namespace deletion requires Kubernetes to complete API discovery for all registered
+# API groups. When aggregated APIServices (like metrics-server) lose their backing
+# pods/endpoints (e.g., nodegroups scaled to 0 or already deleted), they report
+# "MissingEndpoints" and cause NamespaceDeletionDiscoveryFailure. This blocks
+# terraform destroy indefinitely with "context deadline exceeded".
+#
+# SOLUTION: Proactively delete aggregated APIServices that are in a Failed/unavailable
+# state before running terraform destroy. This is safe because:
+# 1. The cluster is being destroyed anyway
+# 2. These services have no functioning endpoints
+# 3. It unblocks namespace finalizer completion
+# -----------------------------------------------------------------------------
+if [ "$CLUSTER_ACCESSIBLE" = true ]; then
+    info "Phase 2.5: Removing stale aggregated APIServices to prevent namespace deletion hang..."
+    
+    # List of aggregated APIServices that commonly become stale during teardown
+    AGGREGATED_APISERVICES=(
+        "v1beta1.metrics.k8s.io"
+        "v1beta1.custom.metrics.k8s.io"
+        "v1beta1.external.metrics.k8s.io"
+    )
+    
+    for apiservice in "${AGGREGATED_APISERVICES[@]}"; do
+        # Check if the APIService exists
+        if kubectl get apiservice "$apiservice" >/dev/null 2>&1; then
+            # Check if the Available condition is False (stale/unhealthy)
+            AVAILABLE_STATUS=$(kubectl get apiservice "$apiservice" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "Unknown")
+            
+            if [ "$AVAILABLE_STATUS" = "False" ]; then
+                info "Deleting stale APIService: $apiservice (Available=False - would block namespace deletion)"
+                kubectl delete apiservice "$apiservice" --ignore-not-found=true 2>/dev/null || warn "Failed to delete APIService: $apiservice (continuing anyway)"
+            else
+                info "APIService $apiservice is healthy (Available=$AVAILABLE_STATUS), skipping"
+            fi
+        else
+            info "APIService $apiservice not found, skipping"
+        fi
+    done
+    
+    info "Stale APIService cleanup complete"
+else
+    info "Phase 2.5: Skipping stale APIService cleanup (cluster not accessible)"
+fi
+
+# Phase 2.6: Remove Karpenter resources to prevent Terraform destroy hang
+# -----------------------------------------------------------------------------
+# WHY THIS IS NEEDED:
+# Karpenter CRs (NodeClaim, NodePool, EC2NodeClass) have finalizers like
+# "karpenter.k8s.aws/termination" that require the Karpenter controller to remove.
+# During teardown, Terraform may delete the Karpenter controller before these CRs,
+# leaving orphaned finalizers that cause destroy to hang indefinitely with errors like:
+# "kubectl_manifest.ec2nodeclass["m6i-cpu"] ... context deadline exceeded"
+#
+# SAFE DELETE BEHAVIOR (default):
+# 1. Attempt graceful deletion first (Karpenter controller processes finalizers)
+# 2. Wait/poll up to 60 seconds for graceful deletion
+# 3. Only if explicit opt-in is provided, patch finalizers off
+#
+# FORCE PATCH BEHAVIOR (opt-in):
+# Set DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS=true to force-patch finalizers off.
+#
+# ⚠️  WARNING: Force-removing finalizers can orphan AWS resources!
+# If Karpenter is not running when finalizers are removed:
+# - EC2 instances may remain running (ongoing costs!)
+# - Security groups, ENIs, and other resources may be left behind
+# - Manual AWS cleanup will be required
+#
+# Use DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS=true ONLY when:
+# - Karpenter controller is confirmed dead/unrecoverable
+# - You accept responsibility for manual AWS resource cleanup
+# - Terraform destroy is permanently stuck
+#
+# NOTE: These are cluster-scoped resources (NOT namespaced), so we do NOT use
+# --all-namespaces flag. Using -A on cluster-scoped resources causes errors.
+# -----------------------------------------------------------------------------
+
+# Check for opt-in environment variable for force patching
+FORCE_PATCH_KARPENTER="${DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS:-false}"
+
+# Helper function: check if Karpenter controller is running
+karpenter_controller_running() {
+    kubectl get deployment -n kube-system karpenter -o jsonpath='{.status.availableReplicas}' 2>/dev/null | grep -q -E '^[1-9]'
+}
+
+# Helper function: attempt graceful deletion with timeout
+graceful_delete_karpenter_resources() {
+    local resource_type=$1
+    local timeout_seconds=${2:-60}
+    local poll_interval=5
+    local elapsed=0
+    
+    # Get list of resources
+    local resources
+    resources=$(kubectl get "$resource_type" --no-headers -o custom-columns=":metadata.name" 2>/dev/null)
+    
+    if [ -z "$resources" ]; then
+        info "No ${resource_type}s found"
+        return 0
+    fi
+    
+    # Initiate deletion (non-blocking)
+    info "Initiating graceful deletion of ${resource_type}s..."
+    kubectl delete "$resource_type" --all --timeout=10s --ignore-not-found=true 2>/dev/null || true
+    
+    # Poll for completion
+    while [ $elapsed -lt $timeout_seconds ]; do
+        remaining=$(kubectl get "$resource_type" --no-headers 2>/dev/null | wc -l)
+        if [ "$remaining" -eq 0 ]; then
+            info "All ${resource_type}s deleted gracefully"
+            return 0
+        fi
+        info "Waiting for ${resource_type}s to be deleted... (${remaining} remaining, ${elapsed}s/${timeout_seconds}s)"
+        sleep $poll_interval
+        elapsed=$((elapsed + poll_interval))
+    done
+    
+    # Timeout reached - resources still exist
+    warn "${resource_type}s not fully deleted after ${timeout_seconds}s timeout"
+    return 1
+}
+
+# Helper function: force patch finalizers off all resources of a type
+force_patch_finalizers() {
+    local resource_type=$1
+    info "Force patching finalizers off ${resource_type}s..."
+    for res in $(kubectl get "$resource_type" --no-headers -o custom-columns=":metadata.name" 2>/dev/null); do
+        kubectl patch "$resource_type" "$res" --type='merge' -p='{"metadata":{"finalizers":null}}' --timeout=30s 2>/dev/null || true
+    done
+}
+
+if [ "$CLUSTER_ACCESSIBLE" = true ]; then
+    info "Phase 2.6: Removing Karpenter resources to prevent Terraform destroy hang..."
+    
+    # Check if force patching is requested
+    if [ "$FORCE_PATCH_KARPENTER" = "true" ]; then
+        echo ""
+        warn "⚠️  =========================================================================="
+        warn "⚠️  FORCE PATCH MODE ENABLED (DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS=true)"
+        warn "⚠️  =========================================================================="
+        warn "⚠️  Force-removing Karpenter finalizers WITHOUT waiting for controller."
+        warn "⚠️  "
+        warn "⚠️  THIS MAY ORPHAN AWS RESOURCES:"
+        warn "⚠️  - EC2 instances may remain running (ongoing costs!)"
+        warn "⚠️  - Security groups, ENIs, and other resources may be left behind"
+        warn "⚠️  - Manual AWS cleanup will be required"
+        warn "⚠️  =========================================================================="
+        echo ""
+        
+        # Force patch all Karpenter resources immediately
+        force_patch_finalizers nodeclaim
+        force_patch_finalizers nodepool
+        force_patch_finalizers ec2nodeclass
+        
+        # Delete in dependency order
+        info "Deleting NodeClaims..."
+        kubectl delete nodeclaim --all --timeout=30s --ignore-not-found=true 2>/dev/null || true
+        info "Deleting NodePools..."
+        kubectl delete nodepool --all --timeout=30s --ignore-not-found=true 2>/dev/null || true
+        info "Deleting EC2NodeClasses..."
+        kubectl delete ec2nodeclass --all --timeout=30s --ignore-not-found=true 2>/dev/null || true
+    else
+        # Safe mode: attempt graceful deletion first
+        info "Attempting graceful Karpenter resource deletion (safe mode)..."
+        
+        # Check if Karpenter controller is running
+        if karpenter_controller_running; then
+            info "Karpenter controller is running - graceful deletion should work"
+        else
+            warn "Karpenter controller is NOT running or has 0 replicas"
+            warn "Graceful deletion may time out. If stuck, re-run with:"
+            warn "  DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS=true ./cleanup.sh"
+        fi
+        
+        # Try graceful deletion in dependency order with timeout
+        GRACE_TIMEOUT=60
+        
+        if ! graceful_delete_karpenter_resources nodeclaim $GRACE_TIMEOUT; then
+            warn "NodeClaims stuck. Consider: DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS=true ./cleanup.sh"
+        fi
+        
+        if ! graceful_delete_karpenter_resources nodepool $GRACE_TIMEOUT; then
+            warn "NodePools stuck. Consider: DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS=true ./cleanup.sh"
+        fi
+        
+        if ! graceful_delete_karpenter_resources ec2nodeclass $GRACE_TIMEOUT; then
+            warn "EC2NodeClasses stuck. Consider: DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS=true ./cleanup.sh"
+        fi
+    fi
+    
+    info "Karpenter resource cleanup complete"
+else
+    info "Phase 2.6: Skipping Karpenter resource cleanup (cluster not accessible)"
+fi
 
 # Phase 3: Run base cleanup and remove _LOCAL directory
 info "Phase 3: Running Terraform cleanup..."

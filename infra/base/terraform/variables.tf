@@ -36,7 +36,7 @@ variable "solution_id" {
 
 # VPC with configurable AZs - CIDR size should match AZ count
 variable "vpc_cidr" {
-  description = "VPC CIDR. This should be a valid private (RFC 1918) CIDR range. Recommended: /21 for 2 AZs, /20 for 3 AZs, /19 for 4 AZs. If the network prefix is not provided, it will be computed"
+  description = "VPC CIDR. This should be a valid private (RFC 1918) CIDR range. Recommended: /21 for 2AZs, /20 for 3AZs, /19 for 4AZs. If the network prefix is not provided, it will be computed"
   default     = "10.1.0.0"
   type        = string
 }
@@ -153,21 +153,61 @@ variable "enable_ai_ml_observability_stack" {
 }
 
 variable "enable_tempo_stack" {
-  description = "Enable Grafana Tempo for OpenTelemetry distributed tracing"
+  description = "Enable Grafana Tempo for OpenTelemetry distributed tracing (standalone toggle for non-Dynamo stacks)"
   type        = bool
   default     = false
+}
+
+variable "enable_tempo_for_dynamo" {
+  description = <<-EOF
+    Enable Grafana Tempo for the Dynamo stack specifically.
+    
+    When true (default) and enable_dynamo_stack = true, Tempo is deployed for OTEL tracing.
+    Set to false to disable Tempo when using an external OTEL backend.
+    
+    This is separate from enable_tempo_stack to avoid unexpectedly deploying Tempo
+    for other non-Dynamo stacks.
+  EOF
+  type        = bool
+  default     = true
+}
+
+variable "tempo_namespace" {
+  description = "Kubernetes namespace for Tempo deployment"
+  type        = string
+  default     = "tempo"
+}
+
+variable "tempo_storage_class" {
+  description = "Storage class for Tempo persistent volume. Use a block storage class (e.g., gp3) for RWO access."
+  type        = string
+  default     = "gp3"
+}
+
+variable "tempo_storage_size" {
+  description = "Storage size for Tempo persistent volume"
+  type        = string
+  default     = "50Gi"
 }
 
 variable "enable_dynamo_model_express" {
-  description = "Enable Model Express for managed model caching and distribution. When disabled, shared EFS HuggingFace cache PVC is created instead (recommended for most use cases)."
+  description = <<-EOF
+    Enable Model Express for managed model caching and distribution.
+    
+    Model Express is the ONLY built-in model caching mechanism for NVIDIA Dynamo:
+    - Faster pod startup (models pre-fetched to nodes)
+    - Better for large models (>50GB)
+    - Handles high pod churn efficiently
+    - Centralized model management
+    - Deploys into dynamo namespace (no cross-namespace secret copying)
+    
+    When enabled, the Dynamo operator is automatically configured with the
+    Model Express service URL for seamless integration.
+    
+    Users requiring custom caching solutions can bring their own implementations.
+  EOF
   type        = bool
-  default     = false
-}
-
-variable "dynamo_shared_cache_size" {
-  description = "Size of shared EFS PVC for HuggingFace model cache (used when enable_dynamo_model_express = false). Ignored if Model Express is enabled."
-  type        = string
-  default     = "200Gi"
+  default     = true
 }
 
 variable "enable_argo_workflows" {
@@ -229,14 +269,17 @@ variable "huggingface_token" {
   description = <<-EOF
     HuggingFace API Token for model downloads.
     
-    REQUIRED for NVIDIA Dynamo deployments (enable_dynamo_stack = true).
+    OPTIONAL for NVIDIA Dynamo deployments (enable_dynamo_stack = true).
     Get a token from: https://huggingface.co/settings/tokens
     
     Token must have read access to gated models like Llama-3, DeepSeek, etc.
-    Set in blueprint.tfvars: huggingface_token = "hf_your_token_here"
+    When empty, the HF token Kubernetes secret will not be created.
+    
+    Set via environment variable: export TF_VAR_huggingface_token="hf_..."
+    Or in a secrets.auto.tfvars file (add to .gitignore)
   EOF
   type        = string
-  default     = "DUMMY_TOKEN_REPLACE_ME"
+  default     = ""
   sensitive   = true
 }
 
@@ -251,10 +294,14 @@ variable "ngc_api_key" {
     - Pulling Dynamo runtime containers from nvcr.io
     - Accessing Dynamo Helm charts from NGC
     
-    Set in blueprint.tfvars: ngc_api_key = "your_ngc_key_here"
+    Set via environment variable: export TF_VAR_ngc_api_key="nvapi-..."
+    Or in a secrets.auto.tfvars file (add to .gitignore)
+    
+    NOTE: Terraform will fail fast with a clear error if this is empty
+    when enable_dynamo_stack = true.
   EOF
   type        = string
-  default     = "DUMMY_NGC_KEY_REPLACE_ME"
+  default     = ""
   sensitive   = true
 }
 variable "enable_rayserve_ha_elastic_cache_redis" {
@@ -341,6 +388,9 @@ variable "enable_nvidia_gpu_operator" {
   type        = bool
   default     = false
 }
+
+# NOTE: enable_nvidia_gpu_operator_crds_only variable has been removed.
+# GPU Operator CRD-only installation is no longer supported as Grove/KAI integration is disabled.
 
 variable "enable_nvidia_device_plugin" {
   description = <<-EOF
@@ -492,17 +542,9 @@ variable "dynamo_stack_version" {
 # Per-workload features (KV Router, SLA Planner, KVBM, OTEL tracing, audit logging, gRPC)
 # are configured in individual DynamoGraphDeployment CRs when deploying inference workloads.
 
-variable "dynamo_enable_grove" {
-  description = "Enable Grove for multi-node inference coordination. If enabled, the Grove operator will be deployed cluster-wide. Required for multi-node deployments."
-  type        = bool
-  default     = false
-}
-
-variable "dynamo_enable_kai_scheduler" {
-  description = "Enable Kai Scheduler via Dynamo platform Helm chart (v0.9.4). Provides GPU-aware scheduling with queue management."
-  type        = bool
-  default     = true
-}
+# NOTE: Grove and Kai Scheduler variables have been removed.
+# Grove and Kai integration is disabled entirely pending GPU scheduler resolution.
+# See https://github.com/awslabs/ai-on-eks/issues/XXX for tracking.
 
 variable "dynamo_enable_nats_etcd" {
   description = <<-EOF
@@ -538,6 +580,66 @@ variable "dynamo_model_express_url" {
   type        = string
   default     = ""
 }
+
+variable "dynamo_namespace" {
+  description = "Kubernetes namespace for NVIDIA Dynamo platform deployment"
+  type        = string
+  default     = "dynamo"
+}
+
+variable "dynamo_storage_class" {
+  description = "Storage class for Dynamo components (NATS JetStream, etcd, global storage). Must support ReadWriteMany for shared storage."
+  type        = string
+  default     = "efs-sc-dynamic"
+}
+
+#---------------------------------------------------------------
+# Shared Model Cache PVC (fallback when Model Express is disabled)
+# Provides a ReadWriteMany volume for model weights/artifacts cache
+#---------------------------------------------------------------
+variable "dynamo_shared_cache_pvc_name" {
+  description = "Name of the shared PVC for model weights cache (used when Model Express is disabled)"
+  type        = string
+  default     = "dynamo-shared-model-cache"
+}
+
+variable "dynamo_shared_cache_size" {
+  description = "Size of the shared model cache PVC"
+  type        = string
+  default     = "500Gi"
+}
+
+variable "dynamo_shared_cache_storage_class" {
+  description = "Storage class for the shared model cache PVC. Must support ReadWriteMany (e.g., efs-sc-dynamic)."
+  type        = string
+  default     = "efs-sc-dynamic"
+}
+
+variable "dynamo_shared_cache_access_modes" {
+  description = "Access modes for the shared model cache PVC"
+  type        = list(string)
+  default     = ["ReadWriteMany"]
+}
+
+variable "enable_lws_for_dynamo" {
+  description = <<-EOF
+    Enable LeaderWorkerSet (LWS) controller for Dynamo multi-replica deployments.
+    
+    LWS is the RECOMMENDED orchestrator for Dynamo on EKS:
+    - Native Kubernetes-based multi-replica coordination
+    - Required for aggregated and disaggregated inference deployments
+    - Works with all Dynamo backends (vLLM, SGLang, TensorRT-LLM)
+    
+    When enabled, LWS is automatically installed alongside the Dynamo stack.
+    This is separate from the standalone enable_leader_worker_set flag.
+  EOF
+  type        = bool
+  default     = true
+}
+
+# NOTE: enable_volcano variable removed from Dynamo footprint.
+# Volcano scheduler is still available for other ai-on-eks modules (Trainium/Inferentia training)
+# via their own installation paths. For Dynamo, LWS + default Kubernetes scheduler is sufficient.
 
 # Enable SOCI snapshotter parallel pull/unpack mode
 variable "enable_soci_snapshotter" {

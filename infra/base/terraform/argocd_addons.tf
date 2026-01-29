@@ -28,39 +28,39 @@ resource "kubectl_manifest" "kuberay_operator" {
 
 # Tempo for OpenTelemetry distributed tracing
 # Separate from observability stack to allow independent control
+# For Dynamo stack: enabled by default via enable_tempo_for_dynamo
+# For other stacks: controlled independently via enable_tempo_stack
 resource "kubectl_manifest" "tempo_yaml" {
-  count     = var.enable_tempo_stack ? 1 : 0
-  yaml_body = file("${path.module}/argocd-addons/tempo.yaml")
-
-  depends_on = [
-    helm_release.argocd
-  ]
-}
-
-# Model Express for managed model caching and distribution
-# Only deployed when explicitly enabled (advanced use case)
-resource "kubectl_manifest" "dynamo_model_express_yaml" {
-  count     = var.enable_dynamo_stack && var.enable_dynamo_model_express ? 1 : 0
-  yaml_body = file("${path.module}/argocd-addons/dynamo-model-express.yaml")
-
-  depends_on = [
-    helm_release.argocd
-  ]
-}
-
-# Shared HuggingFace cache PVC (default approach)
-# Created when Model Express is NOT enabled
-# Provides EFS-backed persistent cache for all Dynamo deployments
-resource "kubectl_manifest" "dynamo_shared_hf_cache" {
-  count = var.enable_dynamo_stack && !var.enable_dynamo_model_express ? 1 : 0
-  yaml_body = templatefile("${path.module}/argocd-addons/dynamo-shared-hf-cache.yaml", {
-    storage_class = "efs-sc-dynamic"
-    cache_size    = var.dynamo_shared_cache_size
+  count = var.enable_tempo_stack || (var.enable_dynamo_stack && var.enable_tempo_for_dynamo) ? 1 : 0
+  yaml_body = templatefile("${path.module}/argocd-addons/tempo.yaml", {
+    tempo_namespace     = var.tempo_namespace
+    tempo_storage_class = var.tempo_storage_class
+    tempo_storage_size  = var.tempo_storage_size
   })
 
   depends_on = [
+    helm_release.argocd
+  ]
+}
+
+#---------------------------------------------------------------
+# Model Express for Managed Model Caching (Default)
+# Provides pre-fetching and centralized model distribution
+# Enabled by default when Dynamo stack is enabled
+# This is the ONLY built-in model caching option for Dynamo.
+#---------------------------------------------------------------
+resource "kubectl_manifest" "dynamo_model_express_yaml" {
+  count = var.enable_dynamo_stack && var.enable_dynamo_model_express ? 1 : 0
+  yaml_body = templatefile("${path.module}/argocd-addons/dynamo-model-express.yaml", {
+    dynamo_namespace = var.dynamo_namespace
+  })
+
+  # Note: hf_token_secret is now conditional (only created if huggingface_token != "")
+  # Model Express doesn't strictly require HF token - it's optional for gated model access
+  depends_on = [
     helm_release.argocd,
-    kubectl_manifest.nvidia_dynamo_platform_yaml
+    kubernetes_namespace_v1.dynamo_cloud,
+    kubernetes_secret_v1.ngc_secret
   ]
 }
 
@@ -154,6 +154,19 @@ resource "kubectl_manifest" "nvidia_gpu_operator" {
   depends_on = [
     helm_release.argocd
   ]
+}
+
+#---------------------------------------------------------------
+# Model Express URL Computation
+# Auto-configure the Dynamo operator to use Model Express when enabled.
+# Service URL: http://modelexpress.${dynamo_namespace}.svc.cluster.local:8001
+# If user provides explicit dynamo_model_express_url, use that instead.
+#---------------------------------------------------------------
+locals {
+  model_express_url = (
+    var.dynamo_model_express_url != "" ? var.dynamo_model_express_url :
+    var.enable_dynamo_model_express ? "http://modelexpress.${var.dynamo_namespace}.svc.cluster.local:8001" : ""
+  )
 }
 
 # NVIDIA Device Plugin (standalone - GPU scheduling only)
@@ -251,6 +264,35 @@ resource "kubernetes_secret_v1" "nvidia_dynamo_repo" {
 }
 
 #---------------------------------------------------------------
+# NVIDIA Dynamo - Input Validation
+# Fail fast with clear error if required credentials are missing
+#---------------------------------------------------------------
+resource "terraform_data" "dynamo_ngc_api_key_validation" {
+  count = var.enable_dynamo_stack ? 1 : 0
+
+  lifecycle {
+    precondition {
+      condition     = var.ngc_api_key != ""
+      error_message = <<-EOT
+        ERROR: ngc_api_key is REQUIRED when enable_dynamo_stack = true.
+        
+        The NGC API key is needed to:
+        - Pull Dynamo runtime containers from nvcr.io
+        - Access Dynamo Helm charts from NGC
+        
+        Get an API key from: https://ngc.nvidia.com/setup/api-key
+        
+        Set it via environment variable:
+          export TF_VAR_ngc_api_key="nvapi-..."
+        
+        Or in a secrets.auto.tfvars file (add to .gitignore):
+          ngc_api_key = "nvapi-..."
+      EOT
+    }
+  }
+}
+
+#---------------------------------------------------------------
 # NVIDIA Dynamo Namespace
 # Create explicitly to avoid race conditions with ArgoCD
 # ArgoCD's CreateNamespace=true is idempotent and won't fail
@@ -259,11 +301,12 @@ resource "kubernetes_namespace_v1" "dynamo_cloud" {
   count = var.enable_dynamo_stack ? 1 : 0
 
   metadata {
-    name = "dynamo"
+    name = var.dynamo_namespace
   }
 
   depends_on = [
-    helm_release.argocd
+    helm_release.argocd,
+    terraform_data.dynamo_ngc_api_key_validation
   ]
 }
 
@@ -302,8 +345,10 @@ resource "kubernetes_secret_v1" "ngc_secret" {
 }
 
 # HuggingFace Token Secret (for model downloads)
+# Only created when huggingface_token is provided (non-empty)
+# This avoids creating useless cluster artifacts when no HF token is needed
 resource "kubernetes_secret_v1" "hf_token_secret" {
-  count = var.enable_dynamo_stack ? 1 : 0
+  count = var.enable_dynamo_stack && var.huggingface_token != "" ? 1 : 0
 
   metadata {
     name      = "hf-token-secret"
@@ -343,21 +388,71 @@ resource "kubectl_manifest" "nvidia_dynamo_platform_yaml" {
   count = var.enable_dynamo_stack ? 1 : 0
   yaml_body = templatefile("${path.module}/argocd-addons/nvidia-dynamo-platform.yaml", {
     dynamo_version                                = var.dynamo_stack_version
-    dynamo_enable_grove                           = var.dynamo_enable_grove
-    dynamo_enable_kai_scheduler                   = var.dynamo_enable_kai_scheduler
+    dynamo_namespace                              = var.dynamo_namespace
+    dynamo_storage_class                          = var.dynamo_storage_class
     dynamo_enable_nats_etcd                       = var.dynamo_enable_nats_etcd
     dynamo_operator_namespace_restriction_enabled = var.dynamo_operator_namespace_restriction_enabled
-    dynamo_model_express_url                      = var.dynamo_model_express_url
+    enable_model_express                          = var.enable_dynamo_model_express
+    dynamo_model_express_url                      = local.model_express_url
     enable_prometheus_endpoint                    = var.enable_ai_ml_observability_stack
   })
 
+  # Note: hf_token_secret is now conditional (only created if huggingface_token != "")
+  # Dynamo platform doesn't strictly require HF token - it's optional for gated model access
   depends_on = [
     helm_release.argocd,
     kubectl_manifest.nvidia_dynamo_crds_yaml,
     kubernetes_secret_v1.nvidia_dynamo_repo,
     kubernetes_namespace_v1.dynamo_cloud,
-    kubernetes_secret_v1.ngc_secret,
-    kubernetes_secret_v1.hf_token_secret
+    kubernetes_secret_v1.ngc_secret
   ]
 }
+
+#---------------------------------------------------------------
+# Shared Model Weights PVC (fallback when Model Express is disabled)
+# Creates a ReadWriteMany PVC for model weights/artifacts cache
+# This allows pods to share model downloads via EFS
+#---------------------------------------------------------------
+resource "kubernetes_persistent_volume_claim_v1" "dynamo_shared_model_cache" {
+  count = var.enable_dynamo_stack && !var.enable_dynamo_model_express ? 1 : 0
+
+  metadata {
+    name      = var.dynamo_shared_cache_pvc_name
+    namespace = kubernetes_namespace_v1.dynamo_cloud[0].metadata[0].name
+  }
+
+  spec {
+    access_modes       = var.dynamo_shared_cache_access_modes
+    storage_class_name = var.dynamo_shared_cache_storage_class
+
+    resources {
+      requests = {
+        storage = var.dynamo_shared_cache_size
+      }
+    }
+  }
+
+  depends_on = [
+    kubernetes_namespace_v1.dynamo_cloud
+  ]
+}
+
+#---------------------------------------------------------------
+# LeaderWorkerSet (LWS) for Dynamo Multi-Replica Deployments
+# Installed by default when Dynamo is enabled (enable_lws_for_dynamo = true)
+# Required for aggregated and disaggregated inference deployments
+#---------------------------------------------------------------
+resource "kubectl_manifest" "lws_for_dynamo_yaml" {
+  count     = var.enable_dynamo_stack && var.enable_lws_for_dynamo ? 1 : 0
+  yaml_body = file("${path.module}/argocd-addons/leader-worker-set.yaml")
+
+  depends_on = [
+    helm_release.argocd,
+    kubectl_manifest.nvidia_dynamo_crds_yaml
+  ]
+}
+
+# NOTE: Volcano scheduler has been removed from Dynamo footprint.
+# Volcano is still available for other ai-on-eks modules (Trainium/Inferentia training)
+# via their own installation paths. For Dynamo, use LWS with the default Kubernetes scheduler.
 

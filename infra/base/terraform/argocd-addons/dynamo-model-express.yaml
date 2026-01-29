@@ -1,3 +1,10 @@
+# Model Express - NVIDIA Dynamo Model Caching Service
+# Provides pre-fetching and centralized model distribution for Dynamo workloads
+#
+# Source: https://github.com/ai-dynamo/modelexpress (official Helm chart)
+# Service: http://modelexpress.${dynamo_namespace}.svc.cluster.local:8001
+#
+# This is the ONLY built-in model caching option for Dynamo deployments.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -8,36 +15,74 @@ metadata:
 spec:
   project: default
   source:
-    # Model Express deployment using kustomize
-    # Note: Model Express doesn't have an official Helm chart yet
-    # Using direct Kubernetes manifests
+    # Official Model Express Helm chart from ai-dynamo repo
     repoURL: https://github.com/ai-dynamo/modelexpress.git
-    targetRevision: main
-    path: k8s  # Kubernetes deployment manifests
-    kustomize:
-      patches:
-        # Patch to use EFS storage class
-        - target:
-            kind: PersistentVolumeClaim
-            name: modelexpress-cache
-          patch: |-
-            - op: replace
-              path: /spec/storageClassName
-              value: efs-sc-dynamic
-        # Patch to use HuggingFace token secret
-        - target:
-            kind: Deployment
-            name: modelexpress-server
-          patch: |-
-            - op: add
-              path: /spec/template/spec/containers/0/envFrom
-              value:
-                - secretRef:
-                    name: hf-token-secret
+    # Pin to specific commit/tag for reproducibility
+    # Note: v0.2.2 tag does not exist; using release/0.2.2 branch commit SHA
+    targetRevision: b6bcdf4d9a1712f8185197478563c1f982a56fc5
+    path: helm
+    helm:
+      releaseName: modelexpress
+      values: |
+        # Model Express configuration for ai-on-eks
+        replicaCount: 1
+        
+        image:
+          repository: nvcr.io/nvidia/ai-dynamo/modelexpress-server
+          pullPolicy: IfNotPresent
+          tag: "0.2.1"
+        
+        # Disable OpenTelemetry auto-instrumentation injection
+        # (AWS CloudWatch Observability / OTEL webhook can cause CreateContainerConfigError)
+        podAnnotations:
+          instrumentation.opentelemetry.io/inject-java: "false"
+          instrumentation.opentelemetry.io/inject-nodejs: "false"
+          instrumentation.opentelemetry.io/inject-python: "false"
+          instrumentation.opentelemetry.io/inject-dotnet: "false"
+          sidecar.opentelemetry.io/inject: "false"
+        
+        # Use NGC registry secret (must exist in target namespace)
+        imagePullSecrets:
+          - name: ngc-secret
+        
+        # Service configuration - deterministic name and port
+        service:
+          type: ClusterIP
+          port: 8001
+          name: modelexpress
+        
+        # HuggingFace token from secret
+        envFrom:
+          - secretRef:
+              name: hf-token-secret
+              optional: true
+        
+        # EFS storage for model cache (ReadWriteMany for shared access)
+        persistence:
+          enabled: true
+          storageClass: efs-sc-dynamic
+          accessMode: ReadWriteMany
+          size: 200Gi
+        
+        # Resource limits for model express server
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
 
+        # Security context - image runs as root, so must allow it
+        podSecurityContext:
+          runAsNonRoot: false
+        securityContext:
+          runAsNonRoot: false
+          runAsUser: 0
+        
   destination:
     server: https://kubernetes.default.svc
-    namespace: model-express
+    namespace: ${dynamo_namespace}
 
   syncPolicy:
     automated:

@@ -1,6 +1,6 @@
 # NVIDIA Dynamo on Amazon EKS - Infrastructure
 
-Deploy NVIDIA Dynamo v0.6.1 platform on Amazon EKS with Terraform and ArgoCD.
+Deploy NVIDIA Dynamo v0.8.0 platform on Amazon EKS with Terraform and ArgoCD.
 
 ## Overview
 
@@ -8,18 +8,16 @@ NVIDIA Dynamo is a high-performance distributed inference framework for LLMs sup
 - **Multiple backends**: vLLM, SGLang, TensorRT-LLM
 - **Disaggregated serving architecture**: Separate prefill/decode workers for optimal resource utilization
 - **Advanced features**: KVBM (GPU-to-disk caching), KV Router (cache-aware routing), SLA Planner (auto-scaling)
-- **Multi-node deployments**: Tensor parallelism (TP) across multiple nodes with Grove coordination
+- **Multi-node deployments**: Tensor parallelism (TP) across multiple nodes with LeaderWorkerSet
 - **Observability**: OpenTelemetry tracing, Prometheus metrics, audit logging
 
 This infrastructure module deploys the platform layer including:
 - Dynamo Operator and CRDs
-- NATS messaging system for inter-component communication
-- etcd state storage for service discovery
-- Optional: Grove (multi-node coordination)
-- Optional: Kai Scheduler (resource optimization)
-- Optional: Model Express (managed model caching)
-- Shared EFS model cache (default)
-- Tempo distributed tracing (optional)
+- Optional: NATS messaging system (for KV-aware routing)
+- Optional: etcd state storage
+- LeaderWorkerSet (LWS) for multi-replica deployments
+- Model Express (default and only built-in model caching)
+- Tempo distributed tracing (enabled by default for Dynamo)
 
 ## Prerequisites
 
@@ -63,15 +61,9 @@ kubectl get pods -n dynamo
 
 # Expected output:
 # dynamo-operator-xxx        Running
-# etcd-0                     Running
-# nats-0                     Running
-# dynamo-shared-hf-cache-xxx Running (if using EFS cache)
 
-# Check persistent volume claims
-kubectl get pvc -n dynamo
-
-# Expected output:
-# dynamo-shared-hf-cache   Bound   (500Gi EFS volume)
+# Check Model Express (if enabled)
+kubectl get pods -n dynamo -l app.kubernetes.io/name=modelexpress
 ```
 
 ### 4. Deploy Examples
@@ -93,65 +85,85 @@ Edit [`terraform/blueprint.tfvars`](terraform/blueprint.tfvars) to configure the
 
 ```hcl
 # Platform Version
-dynamo_stack_version = "v0.6.1"  # Latest stable version
+dynamo_stack_version = "v0.8.0"  # Latest stable version
 enable_dynamo_stack  = true      # Enable Dynamo deployment
 
-# Storage Configuration
-dynamo_shared_cache_size     = "500Gi"  # Shared model cache size
-enable_dynamo_model_express  = false    # Use EFS (true = Model Express)
+# Infrastructure Parameterization
+dynamo_namespace     = "dynamo"  # Target namespace
+dynamo_storage_class = "efs-sc"  # Storage class for PVCs
+
+# Model Caching Configuration
+enable_dynamo_model_express = true  # Model Express (default: true)
+# If disabled, a shared PVC is created for model caching
 
 # Observability
 enable_ai_ml_observability_stack = true   # Prometheus/Grafana
-enable_tempo_stack              = true   # OpenTelemetry tracing
-
-# Multi-Node Features (Alpha)
-dynamo_enable_grove         = false  # Multi-node coordination
-dynamo_enable_kai_scheduler = false  # Resource scheduler
+enable_tempo_for_dynamo          = true   # OpenTelemetry tracing (default: true)
 ```
 
-### Storage Options
+### Orchestrator & Scheduler
 
-#### Option 1: Shared EFS Cache (Default, Recommended)
+Dynamo v0.8.0 uses **LeaderWorkerSet (LWS)** for multi-node workloads.
 
-**Description**: Simple PVC mounted to all workers for model storage.
+```hcl
+enable_lws_for_dynamo = true  # Default: true
+```
 
-**Pros**:
-- ✅ Simple setup (automatic via install.sh)
-- ✅ Cost-effective (~$8-16/month for 500Gi)
-- ✅ Works for most deployments
-- ✅ No additional configuration needed
+**Note on Scheduler Integration**:
+Integration with Grove and Kai schedulers is currently **disabled** pending GPU scheduler resolution.
+- **Supported**: Default Kubernetes scheduler + LeaderWorkerSet (LWS).
+- **Disabled**: Grove/Kai scheduler integrations and GPU Operator CRD-only installation.
 
-**Cons**:
-- ⚠️ Slower initial model load (~2-5 min for large models)
-- ⚠️ Not ideal for high pod churn scenarios
+### Event/KV Plane
 
-**Cost**: ~$8-16/month (500Gi EFS Standard)
+Dynamo v0.8.0 defaults to a TCP request plane and Kubernetes-native discovery.
 
-**Configuration**: Already enabled by default
+- **Standard Mode**: Uses TCP for requests and K8s for discovery. No NATS required.
+- **KV-Aware Routing**: Disaggregated setups with KV-aware routing require NATS for event propagation.
+- **--no-kv-events**: Use this flag in your workload configuration to disable KV-events if NATS is not deployed.
 
-#### Option 2: Model Express (Advanced)
+To enable NATS/Etcd for advanced routing features:
 
-**Description**: Managed model pre-fetching service with centralized caching.
+```hcl
+dynamo_enable_nats_etcd = true
+```
 
-**Pros**:
+### Model Caching with Model Express
+
+Model Express is the built-in model caching mechanism for NVIDIA Dynamo deployments.
+
+**Features:**
 - ✅ Faster pod startup (models pre-fetched to nodes)
 - ✅ Better for large models (>50GB)
 - ✅ Handles high pod churn efficiently
 - ✅ Centralized model management
+- ✅ Automatic integration with Dynamo operator
 
-**Cons**:
-- ⚠️ More complex setup
-- ⚠️ Higher cost (~$30-60/month)
-- ⚠️ Requires additional monitoring
-
-**Cost**: ~$30-60/month (includes storage + compute)
-
-**Configuration**:
+**Configuration**: Enabled by default
 ```hcl
-enable_dynamo_model_express = true
+enable_dynamo_model_express = true  # Default
 ```
 
-**Best For**: Large-scale production deployments with frequent pod scaling.
+**Disabling Model Express (Shared PVC Fallback)**:
+If you disable Model Express, the system falls back to a shared PVC for model caching.
+
+```hcl
+enable_dynamo_model_express = false
+
+# Shared PVC Configuration (defaults)
+dynamo_shared_cache_pvc_name        = "dynamo-shared-model-cache"
+dynamo_shared_cache_size            = "500Gi"
+dynamo_shared_cache_storage_class   = "efs-sc-dynamic" # Must support ReadWriteMany
+```
+
+**Model Express Service URL** (auto-configured when enabled):
+```
+http://modelexpress.dynamo.svc.cluster.local:8001
+```
+
+**Best For**: Production deployments, large-scale inference, high pod churn.
+
+**Note**: Users requiring custom caching solutions can bring their own implementations.
 
 ### Observability
 
@@ -177,43 +189,45 @@ kubectl port-forward -n observability svc/kube-prometheus-stack-grafana 3000:80
 
 #### OpenTelemetry Distributed Tracing
 
-Enable Tempo for distributed tracing:
+Tempo is enabled by default for distributed tracing in Dynamo stacks.
 
 ```hcl
-enable_tempo_stack = true
+enable_tempo_for_dynamo = true # Default: true
 ```
 
 Traces are automatically collected from Dynamo components and can be viewed in Grafana.
+
+**Disabling Tempo / External OTEL**:
+To use an external OpenTelemetry backend (e.g., Honeycomb, Datadog) or disable tracing entirely:
+
+```hcl
+enable_tempo_for_dynamo = false
+```
+
+When disabled, you can configure your own OTEL exporter endpoints in your `DynamoGraphDeployment` workload configurations.
 
 **Use Cases**:
 - End-to-end request tracing across components
 - Latency breakdowns (prefill vs decode)
 - Debugging performance issues
 
-### Multi-Node Features (Alpha)
+### Multi-Node Features
 
-For deploying workloads across multiple nodes with tensor parallelism (TP=8+):
+For deploying workloads across multiple nodes with tensor parallelism (TP=8+), LeaderWorkerSet (LWS) is used.
 
 ```hcl
-dynamo_enable_grove         = true   # Required for multi-node
-dynamo_enable_kai_scheduler = true   # Intelligent resource allocation
+enable_lws_for_dynamo = true  # Default: true
 ```
 
 **What Gets Deployed**:
-- **Grove Operator**: Multi-node coordination (v0.1.0-alpha.3+)
-- **Kai Scheduler**: Resource allocation and placement optimization
+- **LeaderWorkerSet Controller**: Multi-replica coordination
 
 **Infrastructure Impact**:
 - ✅ No changes to existing EKS configuration
 - ✅ Works seamlessly with Karpenter
-- ✅ Minimal resource overhead (~100m CPU, ~128Mi memory per operator)
+- ✅ Minimal resource overhead
 
-**When to Enable**:
-- Deploying models requiring TP=8 or higher (e.g., Llama 405B)
-- Using multi-GPU instances (p5.48xlarge with 8x H100)
-- Need coordinated scheduling across nodes
-
-**See Also**: [`UPGRADE_TO_V0.6.1.md`](UPGRADE_TO_V0.6.1.md) for detailed multi-node setup guide.
+**See Also**: [`UPGRADE_TO_V0.8.0.md`](UPGRADE_TO_V0.8.0.md) for detailed multi-node setup guide.
 
 ## Infrastructure Components
 
@@ -223,7 +237,7 @@ dynamo_enable_kai_scheduler = true   # Intelligent resource allocation
 |-----------|-----------|-------------|
 | **dynamo-crds** | default | Custom Resource Definitions for Dynamo |
 | **dynamo-platform** | dynamo | Core platform (operator, etcd, NATS) |
-| **dynamo-shared-hf-cache** | dynamo | Shared model cache (EFS PVC) |
+| **model-express** | dynamo | Model caching service (when enabled) |
 | **tempo** (optional) | observability | Distributed tracing backend |
 
 ### Deployed via Terraform
@@ -242,81 +256,65 @@ dynamo_enable_kai_scheduler = true   # Intelligent resource allocation
 │ Amazon EKS Cluster                                          │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ dynamo namespace                               │  │
-│  │                                                      │  │
-│  │  ┌────────────────┐  ┌────────────────┐            │  │
-│  │  │ Dynamo         │  │ etcd           │            │  │
-│  │  │ Operator       │  │ (Discovery)    │            │  │
-│  │  └────────────────┘  └────────────────┘            │  │
-│  │                                                      │  │
-│  │  ┌────────────────┐  ┌────────────────┐            │  │
-│  │  │ NATS           │  │ Shared Model   │            │  │
-│  │  │ (Messaging)    │  │ Cache (EFS)    │            │  │
-│  │  └────────────────┘  └────────────────┘            │  │
-│  │                                                      │  │
-│  │  ┌───────────────────────────────────────────────┐  │  │
-│  │  │ User Workloads (DynamoGraphDeployments)      │  │  │
-│  │  │ - vLLM Workers                               │  │  │
-│  │  │ - SGLang Workers                             │  │  │
-│  │  │ - TensorRT-LLM Workers                       │  │  │
-│  │  │ - Frontends (OpenAI API)                     │  │  │
-│  │  └───────────────────────────────────────────────┘  │  │
+│  │ dynamo namespace                                      │  │
+│  │                                                       │  │
+│  │  ┌────────────────┐  ┌────────────────┐              │  │
+│  │  │ Dynamo         │  │ etcd           │              │  │
+│  │  │ Operator       │  │ (Discovery)    │              │  │
+│  │  └────────────────┘  └────────────────┘              │  │
+│  │                                                       │  │
+│  │  ┌────────────────┐  ┌────────────────┐              │  │
+│  │  │ NATS           │  │ Model Express  │              │  │
+│  │  │ (Messaging)    │  │ (Caching)      │              │  │
+│  │  └────────────────┘  └────────────────┘              │  │
+│  │                                                       │  │
+│  │  ┌───────────────────────────────────────────────┐   │  │
+│  │  │ User Workloads (DynamoGraphDeployments)       │   │  │
+│  │  │ - vLLM Workers                                │   │  │
+│  │  │ - SGLang Workers                              │   │  │
+│  │  │ - TensorRT-LLM Workers                        │   │  │
+│  │  │ - Frontends (OpenAI API)                      │   │  │
+│  │  └───────────────────────────────────────────────┘   │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ observability namespace (optional)                   │  │
-│  │  - Prometheus                                        │  │
-│  │  - Grafana                                           │  │
-│  │  - Tempo                                             │  │
+│  │ observability namespace (optional)                    │  │
+│  │  - Prometheus                                         │  │
+│  │  - Grafana                                            │  │
+│  │  - Tempo                                              │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ Karpenter (Auto-provisioning GPU nodes)             │  │
+│  │ Karpenter (Auto-provisioning GPU nodes)               │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Upgrade to v0.6.1
+## Upgrade to v0.8.0
 
-### New in v0.6.1
+### New in v0.8.0
 
 **Production Readiness**:
-- ✅ Stable vLLM disaggregated multi-node (TP=8+)
-- ✅ Automated DGDR profiling for SLA Planner
-- ✅ Grove v0.1.0 improvements (certificate rotation, stability)
+- ✅ **Kubernetes-Native Discovery**: Reduced dependency on NATS/Etcd.
+- ✅ **TCP Request Plane**: Default high-performance communication.
+- ✅ **LeaderWorkerSet**: Kubernetes-native multi-replica coordination.
 
-**KVBM Enhancements**:
-- ✅ **GPU-to-disk offloading**: Multi-tier caching (GPU→CPU→Disk→Remote)
-- ✅ `DYN_KVBM_DISK_CACHE_GB` for 500GB+ disk caching
-- ✅ Access pattern filtering to extend SSD lifespan
-
-**Benchmarking**:
-- ✅ **AIPerf** replaces genai-perf for standardized testing
-- ✅ Built into NGC containers
-
-**Platform Support**:
-- ✅ GKE (Google Kubernetes Engine) production templates
-- ✅ GB200 platform with FP4 quantization (experimental)
-- ✅ WideEP for MoE models (DeepSeek-R1)
-
-**Bug Fixes**:
-- Fixed NATS streaming timeout issues
-- Fixed OOM handling improvements
-- Fixed memory leak in disaggregated deployments
+**Infrastructure**:
+- ✅ **Parameterization**: Configurable namespace and storage class.
+- ✅ **Tempo Tracing**: Enabled by default for observability (toggle available).
 
 ### Upgrade Steps
 
-**From v0.5.0-v0.6.0**:
+**From v0.6.x/v0.7.x**:
 
 1. **Update version in blueprint.tfvars**:
    ```hcl
-   dynamo_stack_version = "v0.6.1"
+   dynamo_stack_version = "v0.8.0"
    ```
 
-2. **Review new configuration options**:
+2. **Ensure LWS is enabled** (default):
    ```hcl
-   dynamo_enable_grove         = false  # Enable for multi-node
-   dynamo_enable_kai_scheduler = false  # Enable with Grove
+   enable_lws_for_dynamo = true
    ```
 
 3. **Apply infrastructure changes**:
@@ -324,16 +322,9 @@ dynamo_enable_kai_scheduler = true   # Intelligent resource allocation
    ./install.sh  # Re-run to update platform
    ```
 
-4. **Update deployed workloads** to v0.6.1 container images:
-   ```yaml
-   image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1
-   ```
+4. **Update deployed workloads** to v0.8.0 container images.
 
-**See**: [`UPGRADE_TO_V0.6.1.md`](UPGRADE_TO_V0.6.1.md) for:
-- Detailed migration steps
-- Breaking changes
-- New features and configuration options
-- Multi-node setup guide
+**See**: [`UPGRADE_TO_V0.8.0.md`](UPGRADE_TO_V0.8.0.md) for detailed migration steps.
 
 ## Cleanup
 
@@ -368,9 +359,9 @@ kubectl delete dynamographdeployment <name> -n dynamo
 |-----------|--------------|-------|
 | **EKS Control Plane** | ~$73 | Standard EKS cluster |
 | **Dynamo Platform Pods** | ~$10-20 | CPU nodes (operator, etcd, NATS) |
-| **EFS Storage (500Gi)** | ~$8-16 | Shared model cache |
+| **Model Express** | ~$30-60 | Compute + EFS storage |
 | **Observability** | ~$30-50 | Prometheus, Grafana, Tempo (optional) |
-| **Total Base** | **~$120-160** | Before GPU workloads |
+| **Total Base** | **~$150-200** | Before GPU workloads |
 
 ### Workload Costs (Examples)
 

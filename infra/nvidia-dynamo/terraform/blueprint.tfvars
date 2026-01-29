@@ -42,7 +42,7 @@ enable_tempo_stack = true # Set to true after deliberation on OTEL tracing needs
 #   - Advanced features: model registry, pre-fetching, managed cache
 #   - Cost: ~$30-60/month (service + storage)
 #   - Use case: Large models (>50GB), high pod churn (>50 restarts/day)
-enable_dynamo_model_express = false # DISABLED - Using simpler EFS cache approach
+enable_dynamo_model_express = true
 
 # Option 2: Shared EFS HuggingFace Cache PVC (default, recommended)
 #   - Simple: Just a PVC mounted to /models with HF_HOME env var
@@ -50,33 +50,37 @@ enable_dynamo_model_express = false # DISABLED - Using simpler EFS cache approac
 #   - Use case: Most deployments, small-medium models
 #   - Created automatically when Model Express is disabled
 #   - All backends (vLLM, SGLang, TensorRT-LLM) use HF_HOME for caching
-dynamo_shared_cache_size = "500Gi" # Size of shared model cache PVC
+# dynamo_shared_cache_size = "500Gi" # Size of shared model cache PVC
 
 #---------------------------------------------------------------
 # Required Secrets
+# IMPORTANT: Set these values via environment variables or a secrets file.
+# DO NOT commit real credentials to version control!
+#
+# Option 1 (recommended): Export as environment variables before running terraform:
+#   export TF_VAR_ngc_api_key="nvapi-..."
+#   export TF_VAR_huggingface_token="hf_..."
+#
+# Option 2: Create a local .auto.tfvars file (add to .gitignore):
+#   echo 'ngc_api_key = "nvapi-..."' >> secrets.auto.tfvars
+#   echo 'huggingface_token = "hf_..."' >> secrets.auto.tfvars
+#
 # Get NGC API key from: https://ngc.nvidia.com/setup/api-key
 # Get HuggingFace token from: https://huggingface.co/settings/tokens
 #---------------------------------------------------------------
-ngc_api_key       = "your-ngc-api-key"
-huggingface_token = "your-huggingface-token"
+# ngc_api_key is REQUIRED when enable_dynamo_stack = true
+# huggingface_token is OPTIONAL but needed for gated model downloads
+ngc_api_key       = "" # REQUIRED: Set via TF_VAR_ngc_api_key env var
+huggingface_token = "" # OPTIONAL: Set via TF_VAR_huggingface_token env var
 
 #---------------------------------------------------------------
 # Platform-Level Features (Optional)
 # For detailed documentation, see:
 # https://awslabs.github.io/ai-on-eks/docs/infra/nvidia-dynamo#platform-level-feature-configuration
 #---------------------------------------------------------------
-# Multi-node orchestration with Grove + Kai Scheduler
-#
-# NOTE: Grove v0.1.0-alpha.3 bundled with Dynamo v0.7.1 had cert-rotation bugs.
-# v0.8.0 status: Grove version may have been updated but still requires validation.
-# Keep disabled until Grove has been tested in a staging environment.
-#
-# RECOMMENDATION: Re-enable Grove once the following are confirmed:
-# 1. Cert-rotation behavior no longer causes crash loops
-# 2. Testing validates multi-node gang scheduling works correctly
+# Multi-node deployments use LeaderWorkerSet (LWS) with the default
+# Kubernetes scheduler. LWS is enabled by default (enable_lws_for_dynamo = true).
 #---------------------------------------------------------------
-dynamo_enable_grove         = false # DISABLED - Pending v0.8.0 Grove validation
-dynamo_enable_kai_scheduler = false # DISABLED - Enable with Grove for full multi-node support
 
 #---------------------------------------------------------------
 # NATS/etcd Legacy Mode Toggle (v0.8.0)
@@ -94,14 +98,12 @@ dynamo_enable_kai_scheduler = false # DISABLED - Enable with Grove for full mult
 #   - Service discovery: etcd cluster for distributed state
 #   - Requires: EFS StorageClass (efs-sc-dynamic) for persistence
 #   - Use cases: existing workflows depending on NATS/etcd, complex routing
-#
-# RECOMMENDATION: Keep disabled for new v0.8.0 deployments.
-# Only enable if migrating from v0.7.x with NATS/etcd dependencies.
 #---------------------------------------------------------------
-dynamo_enable_nats_etcd = false # v0.8.0 default: TCP + K8s-native discovery
+dynamo_enable_nats_etcd = true
 
 #---------------------------------------------------------------
 # Optional Overrides
 #---------------------------------------------------------------
 # region                           = "us-west-2"  # Uncomment to override default
 # eks_cluster_version              = "1.34"  # Uncomment to override default
+#

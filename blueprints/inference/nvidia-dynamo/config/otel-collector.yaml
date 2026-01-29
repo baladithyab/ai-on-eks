@@ -16,7 +16,7 @@
 #
 # Prerequisites:
 #   - Kubernetes namespace: dynamo
-#   - Jaeger (for traces): tempo.monitoring.svc.cluster.local:4317 or Jaeger collector
+#   - Jaeger (for traces): tempo.tempo.svc.cluster.local:4317 or Jaeger collector
 #   - Prometheus (for metrics): kube-prometheus-stack installed
 #
 # Usage:
@@ -219,8 +219,9 @@ data:
       # ========================================================================
       # OTLP Exporter - Primary trace export to Tempo/Jaeger
       # ========================================================================
+      # Endpoint is overrideable via OTEL_EXPORTER_OTLP_ENDPOINT env var
       otlp:
-        endpoint: tempo.dynamo.svc.cluster.local:4317
+        endpoint: ${env:OTEL_EXPORTER_OTLP_ENDPOINT:-tempo.tempo.svc.cluster.local:4317}
         tls:
           insecure: true
         retry_on_failure:
@@ -442,7 +443,7 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "tempo.monitoring.svc.cluster.local:4317"
+              value: "tempo.tempo.svc.cluster.local:4317"
             - name: PROMETHEUS_REMOTE_WRITE_ENDPOINT
               value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090/api/v1/write"
             - name: DEPLOYMENT_ENVIRONMENT

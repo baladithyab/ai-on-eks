@@ -36,8 +36,8 @@ spec:
         # Persistence for trace storage
         persistence:
           enabled: true
-          storageClassName: gp3  # AWS EBS gp3 for better performance
-          size: 50Gi
+          storageClassName: ${tempo_storage_class}
+          size: ${tempo_storage_size}
           accessModes:
             - ReadWriteOnce
 
@@ -71,7 +71,7 @@ spec:
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: dynamo
+    namespace: ${tempo_namespace}
   syncPolicy:
     automated:
       prune: true

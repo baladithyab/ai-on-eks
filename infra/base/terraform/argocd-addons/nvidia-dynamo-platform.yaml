@@ -32,9 +32,9 @@ spec:
           %{~ if dynamo_operator_namespace_restriction_enabled ~}
           namespaceRestriction:
             enabled: true
-            targetNamespace: dynamo
+            targetNamespace: ${dynamo_namespace}
           %{~ endif ~}
-          %{~ if dynamo_model_express_url != "" ~}
+          %{~ if enable_model_express && dynamo_model_express_url != "" ~}
           modelExpressURL: ${dynamo_model_express_url}
           %{~ endif ~}
           %{~ if enable_prometheus_endpoint ~}
@@ -47,36 +47,8 @@ spec:
               prometheusEndpoint: "http://kube-prometheus-stack-prometheus.kube-prometheus-stack.svc.cluster.local:9090"
           %{~ endif ~}
 
-        # Multi-node orchestration with Grove + Kai Scheduler
-        # Grove: Network topology-aware gang scheduling and auto-scaling
-        # Kai Scheduler: GPU-aware scheduler with queue management
-        #
-        # v0.8.0 STATUS: Grove version may have been updated from v0.1.0-alpha.3
-        # but cert-rotation behavior requires validation before enabling.
-        #
-        # RECOMMENDATION: Keep disabled until:
-        # 1. Cert-rotation crash loop behavior is confirmed fixed in v0.8.0 Grove
-        # 2. Multi-node gang scheduling tested in staging environment
-        grove:
-          enabled: ${dynamo_enable_grove}
-
-        # Kai Scheduler via Dynamo (v0.9.4)
-        # Provides GPU-aware scheduling with queue management
-        kai-scheduler:
-          enabled: ${dynamo_enable_kai_scheduler}
-          global:
-            gpuSharing: true
-            clusterAutoscaling: true
-            leaderElection: false  # Single replica, no HA needed
-            nodeSelector:
-              NodeGroupType: core
-            tolerations:
-              - key: "CriticalAddonsOnly"
-                operator: "Exists"
-          defaultQueue:
-            createDefaultQueue: true
-            parentName: dynamo-default
-            childName: dynamo
+        # NOTE: Grove and Kai Scheduler are disabled in the upstream helm chart defaults.
+        # Multi-node deployments use LeaderWorkerSet (LWS) with the default Kubernetes scheduler.
 
         # NATS/etcd Configuration - v0.8.0 DEFAULT: DISABLED
         #
@@ -95,7 +67,7 @@ spec:
               enabled: true
               fileStore:
                 pvc:
-                  storageClassName: efs-sc-dynamic
+                  storageClassName: ${dynamo_storage_class}
                   size: 10Gi
           # Pod Disruption Budget for NATS cluster stability
           podDisruptionBudget:
@@ -112,7 +84,7 @@ spec:
           preUpgradeJob:
             enabled: false
           persistence:
-            storageClass: efs-sc-dynamic
+            storageClass: ${dynamo_storage_class}
             size: 8Gi
           # Pod Disruption Budget for etcd cluster stability
           pdb:
@@ -131,10 +103,10 @@ spec:
 
         # Use EFS for shared storage (global setting for any component that needs it)
         global:
-          storageClass: efs-sc-dynamic
+          storageClass: ${dynamo_storage_class}
   destination:
     server: https://kubernetes.default.svc
-    namespace: dynamo
+    namespace: ${dynamo_namespace}
   syncPolicy:
     automated:
       prune: true
