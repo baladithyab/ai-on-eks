@@ -1,6 +1,23 @@
 #!/bin/bash
 
 # NVIDIA Dynamo cleanup script - removes all deployments and infrastructure
+# =============================================================================
+# _LOCAL PRESERVATION BEHAVIOR (deterministic)
+# -----------------------------------------------------------------------------
+# terraform/_LOCAL is deleted only when the base terraform/_LOCAL/cleanup.sh
+# exists and exits 0. Otherwise terraform/_LOCAL is preserved for safety.
+#
+# Flags:
+#   --force         : Skip confirmation prompt (does not change _LOCAL deletion)
+#
+# On terraform failure, interrupts (Ctrl+C), missing base cleanup script,
+# or non-zero base cleanup exit:
+#   - _LOCAL is ALWAYS preserved
+#   - Clear instructions are printed for retry/troubleshooting
+#
+# See: docs/cleanup-guardrails.md for full workflow guidance
+# =============================================================================
+
 set -euo pipefail
 
 # Ensure we're in the right directory
@@ -12,10 +29,14 @@ CLUSTER_NAME="dynamo-on-eks"
 REGION="us-west-2"
 NAMESPACE="dynamo"
 
+# Flag defaults
+FORCE_MODE=false
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 info() {
@@ -30,13 +51,136 @@ error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+debug() {
+    echo -e "${BLUE}[DEBUG]${NC} $1"
+}
+
+# -----------------------------------------------------------------------------
+# HELPER: Check if Terraform state is empty (all resources destroyed)
+# Returns 0 if state is empty, 1 otherwise
+# Adapted from ai-on-eks/infra/base/terraform/cleanup.sh
+# -----------------------------------------------------------------------------
+is_terraform_state_empty() {
+    local state_dir="${1:-terraform/_LOCAL}"
+    if [ ! -d "$state_dir" ]; then
+        return 0  # No directory = empty for our purposes
+    fi
+    
+    local state_list
+    state_list=$(cd "$state_dir" && terraform state list 2>/dev/null || echo "")
+    if [ -z "$state_list" ]; then
+        return 0  # empty
+    else
+        return 1  # not empty
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# HELPER: Print next-step instructions on failure
+# -----------------------------------------------------------------------------
+print_failure_instructions() {
+    local exit_reason="${1:-unknown}"
+    echo ""
+    error "=============================================================================="
+    error " TERRAFORM DESTROY FAILED: $exit_reason"
+    error "=============================================================================="
+    echo ""
+    echo -e "${YELLOW}The terraform/_LOCAL directory has been PRESERVED to prevent orphaning resources.${NC}"
+    echo ""
+    echo "NEXT STEPS:"
+    echo "  1. Inspect the Terraform state:"
+    echo "       cd $SCRIPT_DIR/terraform/_LOCAL"
+    echo "       terraform state list"
+    echo ""
+    echo "  2. Check for specific resource issues:"
+    echo "       terraform show"
+    echo ""
+    echo "  3. Retry the cleanup:"
+    echo "       cd $SCRIPT_DIR && ./cleanup.sh"
+    echo ""
+    echo "  4. If cluster is inaccessible but state has resources:"
+    echo "       # Manually remove orphaned resources from state"
+    echo "       terraform state rm <resource_address>"
+    echo ""
+    echo "  5. For stuck finalizers (e.g., Karpenter):"
+    echo "       DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS=true ./cleanup.sh"
+    echo ""
+    echo "  6. If you are certain all cloud resources are gone and want to remove _LOCAL:"
+    echo "       rm -rf $SCRIPT_DIR/terraform/_LOCAL"
+    echo ""
+    echo "PATHS:"
+    echo "  - Terraform state:   $SCRIPT_DIR/terraform/_LOCAL/terraform.tfstate"
+    echo "  - Terraform vars:    $SCRIPT_DIR/terraform/blueprint.tfvars"
+    echo "  - This script:       $SCRIPT_DIR/cleanup.sh"
+    echo ""
+    error "=============================================================================="
+}
+
+# -----------------------------------------------------------------------------
+# TRAP: Handle interrupts gracefully
+# -----------------------------------------------------------------------------
+cleanup_on_interrupt() {
+    echo ""
+    error "=============================================================================="
+    error " INTERRUPTED (SIGINT/SIGTERM)"
+    error "=============================================================================="
+    warn "Cleanup was interrupted. The terraform/_LOCAL directory has been PRESERVED."
+    warn "Re-run ./cleanup.sh to resume cleanup."
+    echo ""
+    exit 130
+}
+
+trap cleanup_on_interrupt SIGINT SIGTERM
+
+# -----------------------------------------------------------------------------
+# Parse command-line arguments
+# -----------------------------------------------------------------------------
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force)
+                FORCE_MODE=true
+                shift
+                ;;
+            -h|--help)
+                echo "Usage: $0 [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --force          Skip confirmation prompt (does not change _LOCAL deletion behavior)"
+                echo "  -h, --help       Show this help message"
+                echo ""
+                echo "Environment variables:"
+                echo "  DYNAMO_FORCE_PATCH_KARPENTER_FINALIZERS=true"
+                echo "      Force-remove Karpenter finalizers (may orphan AWS resources!)"
+                echo ""
+                echo "See: docs/cleanup-guardrails.md for full workflow guidance."
+                exit 0
+                ;;
+            *)
+                warn "Unknown option: $1 (ignored)"
+                shift
+                ;;
+        esac
+    done
+}
+
+parse_args "$@"
+
+# Log configured behavior
+info "Cleanup mode:"
+info "  Force mode (skip confirmation): $FORCE_MODE"
+info "  _LOCAL deletion: only when base cleanup script exits 0"
+
 # Confirmation prompt (skip if --force flag is provided)
-if [[ "${1:-}" != "--force" ]]; then
+if [[ "$FORCE_MODE" != "true" ]]; then
     echo ""
     warn "⚠️  This will completely remove all NVIDIA Dynamo infrastructure and deployments!"
     echo "   Cluster: ${CLUSTER_NAME}"
     echo "   Region: ${REGION}"
     echo "   This action cannot be undone."
+    echo ""
+    info "   terraform/_LOCAL will be deleted only if the base cleanup script exits 0;"
+    info "   otherwise it is preserved for safety."
     echo ""
     read -p "Are you sure you want to proceed? (yes/no): " -r
     if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
@@ -326,10 +470,14 @@ else
     info "Phase 2.6: Skipping Karpenter resource cleanup (cluster not accessible)"
 fi
 
-# Phase 3: Run base cleanup and remove _LOCAL directory
+# Phase 3: Run base cleanup and handle _LOCAL directory
 info "Phase 3: Running Terraform cleanup..."
 
 TERRAFORM_SUCCESS=false
+TERRAFORM_EXIT_CODE=0
+BASE_CLEANUP_RAN=false
+BASE_CLEANUP_SUCCESS=false
+BASE_CLEANUP_EXIT_CODE=0
 
 if [ -d "terraform/_LOCAL" ]; then
     info "Found terraform/_LOCAL directory, running cleanup..."
@@ -340,12 +488,26 @@ if [ -d "terraform/_LOCAL" ]; then
 
     if [ -f "./cleanup.sh" ]; then
         info "Running base cleanup script..."
+        BASE_CLEANUP_RAN=true
         if ./cleanup.sh; then
             info "Base cleanup script completed successfully"
+            BASE_CLEANUP_SUCCESS=true
             TERRAFORM_SUCCESS=true
         else
-            error "Base cleanup script failed!"
-            TERRAFORM_SUCCESS=false
+            BASE_CLEANUP_EXIT_CODE=$?
+            TERRAFORM_EXIT_CODE=$BASE_CLEANUP_EXIT_CODE
+            BASE_CLEANUP_SUCCESS=false
+            error "Base cleanup script failed with exit code: $BASE_CLEANUP_EXIT_CODE"
+            # Check if state is empty (success despite non-zero exit)
+            cd "$ORIGINAL_DIR"
+            if is_terraform_state_empty "terraform/_LOCAL"; then
+                warn "Terraform exited non-zero but state is empty - treating as SUCCESS"
+                warn "(This can happen when k8s/helm providers timeout after cluster deletion)"
+                TERRAFORM_SUCCESS=true
+            else
+                TERRAFORM_SUCCESS=false
+            fi
+            cd terraform/_LOCAL
         fi
     else
         warn "Base cleanup script not found, attempting manual cleanup..."
@@ -355,8 +517,17 @@ if [ -d "terraform/_LOCAL" ]; then
                 info "Terraform destroy completed successfully"
                 TERRAFORM_SUCCESS=true
             else
-                error "Terraform destroy failed!"
-                TERRAFORM_SUCCESS=false
+                TERRAFORM_EXIT_CODE=$?
+                error "Terraform destroy failed with exit code: $TERRAFORM_EXIT_CODE"
+                # Check if state is empty (success despite non-zero exit)
+                cd "$ORIGINAL_DIR"
+                if is_terraform_state_empty "terraform/_LOCAL"; then
+                    warn "Terraform exited non-zero but state is empty - treating as SUCCESS"
+                    TERRAFORM_SUCCESS=true
+                else
+                    TERRAFORM_SUCCESS=false
+                fi
+                cd terraform/_LOCAL
             fi
         else
             warn "No terraform.tfstate found, assuming infrastructure was already destroyed"
@@ -367,14 +538,30 @@ if [ -d "terraform/_LOCAL" ]; then
     # Return to original directory
     cd "$ORIGINAL_DIR"
 
-    # Only remove the directory if terraform cleanup was successful
+    # ---------------------------------------------------------------------
+    # _LOCAL DELETION LOGIC (deterministic)
+    # ---------------------------------------------------------------------
+    # Delete only if the base cleanup script ran and exited 0.
+    # Otherwise preserve, even if Terraform reports success.
+    # ---------------------------------------------------------------------
+    
     if [ "$TERRAFORM_SUCCESS" = true ]; then
-        info "Removing terraform/_LOCAL directory..."
-        rm -rf terraform/_LOCAL
-        info "Terraform working directory cleaned up"
+        if [ "$BASE_CLEANUP_RAN" = true ] && [ "$BASE_CLEANUP_SUCCESS" = true ]; then
+            info "Removing terraform/_LOCAL directory (base cleanup succeeded)..."
+            rm -rf terraform/_LOCAL
+            info "Terraform working directory cleaned up"
+        else
+            if [ "$BASE_CLEANUP_RAN" = true ]; then
+                warn "Base cleanup script failed (exit code $BASE_CLEANUP_EXIT_CODE); preserving terraform/_LOCAL."
+                info "Inspect terraform/_LOCAL or re-run base cleanup before deleting."
+            else
+                warn "Base cleanup script not found; preserving terraform/_LOCAL."
+                info "If you are certain cleanup completed, remove terraform/_LOCAL manually."
+            fi
+        fi
     else
-        error "Terraform cleanup failed - preserving terraform/_LOCAL directory for troubleshooting"
-        error "Please check the terraform state and resolve any issues, then re-run cleanup.sh"
+        # Terraform failed
+        print_failure_instructions "exit code $TERRAFORM_EXIT_CODE"
     fi
 else
     warn "terraform/_LOCAL directory not found, skipping Terraform cleanup"
@@ -393,7 +580,12 @@ if [ "$TERRAFORM_SUCCESS" = true ]; then
         echo "  ⚠ Kubernetes resources (skipped - cluster not accessible)"
     fi
     echo "  ✓ Conflicting CloudWatch log groups"
-    echo "  ✓ Terraform infrastructure and working directory"
+    echo "  ✓ Terraform infrastructure"
+    if [ -d "terraform/_LOCAL" ]; then
+        echo "  ℹ terraform/_LOCAL preserved (base cleanup did not succeed or was not found)"
+    else
+        echo "  ✓ terraform/_LOCAL directory removed"
+    fi
     echo ""
     if [ "$CLUSTER_ACCESSIBLE" = true ]; then
         echo "Note: The dynamo namespace and ArgoCD applications will be"
@@ -415,18 +607,9 @@ else
     echo "  ✓ Conflicting CloudWatch log groups"
     echo "  ❌ Terraform infrastructure cleanup failed"
     echo ""
-    echo "⚠️  IMPORTANT: Terraform destroy failed!"
-    echo "   The terraform/_LOCAL directory has been preserved for troubleshooting."
-    echo "   Please:"
-    echo "   1. Check the terraform state in terraform/_LOCAL/"
-    echo "   2. Resolve any resource conflicts or dependencies"
-    echo "   3. Re-run this cleanup script: ./cleanup.sh"
-    echo ""
-    echo "   Common issues:"
-    echo "   - Resources still in use by other services"
-    echo "   - Network dependencies (VPC, subnets, security groups)"
-    echo "   - IAM roles or policies still attached"
-    echo "   - Load balancers or other AWS resources not properly cleaned up"
+    if [ -d "terraform/_LOCAL" ]; then
+        echo "  ℹ terraform/_LOCAL PRESERVED for troubleshooting"
+    fi
     echo ""
     exit 1
 fi
