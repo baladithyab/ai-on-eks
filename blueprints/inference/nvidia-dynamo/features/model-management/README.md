@@ -31,6 +31,45 @@ For full integration testing, see: `_internal/test-dgd-with-modelref.yaml`
 |------|-------------|
 | [base-model.yaml](./base-model.yaml) | Simple base model registration for endpoint tracking |
 | [lora-adapter.yaml](./lora-adapter.yaml) | LoRA adapter deployment examples (S3, HuggingFace) |
+| [vllm-aggregated-lora.yaml](./vllm-aggregated-lora.yaml) | DynamoGraphDeployment with LoRA support enabled (engine side) |
+
+## End-to-End LoRA Deployment
+
+To run a complete LoRA example, you need **both** the engine deployment and the model registration:
+
+```bash
+# Step 1: Deploy the vLLM engine with LoRA support enabled
+kubectl apply -f vllm-aggregated-lora.yaml
+
+# Step 2: Wait for the worker pods to become ready
+kubectl wait --for=condition=ready pod -l nvidia.com/dynamo-component-type=worker -n dynamo --timeout=600s
+
+# Step 3: (Optional) Register the base model for endpoint tracking
+kubectl apply -f base-model.yaml
+
+# Step 4: Register a LoRA adapter - the operator will load it on all matching workers
+kubectl apply -f lora-adapter.yaml
+
+# Step 5: Verify LoRA endpoints are discovered
+kubectl get dynamomodel -n dynamo-system
+```
+
+### How the Resources Connect
+
+```
+vllm-aggregated-lora.yaml (DynamoGraphDeployment)
+  └── VllmWorker:
+        modelRef.name: Qwen/Qwen3-0.6B  ◄──┐  Engine args: --enable-lora
+                                             │
+lora-adapter.yaml (DynamoModel)             │
+  └── spec:                                  │
+        baseModelName: Qwen/Qwen3-0.6B  ────┘  Links adapter to engine
+        modelType: lora
+        source.uri: s3://...                    Where to fetch LoRA weights
+```
+
+The Dynamo operator matches `DynamoModel.spec.baseModelName` to `DGD.services.<name>.modelRef.name`
+to discover which worker pods should load the LoRA adapter.
 
 ## Prerequisites
 
@@ -193,3 +232,7 @@ kubectl get dynamomodel my-lora -n dynamo-system -o json | jq '.status.endpoints
 - [DynamoModel CRD Guide](../../../../website/docs/infra/dynamo-model-management.md)
 - [DynamoGraphDeployment Documentation](../vllm/)
 - [NVIDIA Dynamo Infrastructure](../../../../infra/nvidia-dynamo/)
+
+2
+
+

@@ -104,6 +104,7 @@ spec:
         - name: UCX_TLS
           value: ^mm  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
+      subComponentType: decode
       replicas: 1
       livenessProbe:
         httpGet:
@@ -174,6 +175,7 @@ spec:
         - name: UCX_TLS
           value: ^mm  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
+      subComponentType: prefill
       replicas: 1
       livenessProbe:
         httpGet:

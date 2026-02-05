@@ -68,6 +68,7 @@ spec:
     VllmDecodeWorker:
       envFromSecret: hf-token-secret
       componentType: worker
+      subComponentType: decode
       replicas: 2  # Multiple replicas to demonstrate KV Router benefits
       livenessProbe:
         httpGet:
@@ -113,6 +114,7 @@ spec:
     VllmPrefillWorker:
       envFromSecret: hf-token-secret
       componentType: worker
+      subComponentType: prefill
       replicas: 1
       livenessProbe:
         httpGet:
