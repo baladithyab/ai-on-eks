@@ -51,6 +51,7 @@ data:
 
     cache_transceiver_config:
       backend: DEFAULT
+# yamllint disable-line rule:document-start
 ---
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
@@ -74,7 +75,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+            - curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -84,24 +85,24 @@ spec:
       resources:
         requests:
           cpu: "2"
-          memory: "4Gi"
+          memory: 4Gi
         limits:
           cpu: "2"
-          memory: "4Gi"
+          memory: 4Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.frontend --http-port 8000"
+            - python3 -m dynamo.frontend --http-port 8000
     TRTLLMDecodeWorker:
       envFromSecret: hf-token-secret
       envs:
         - name: UCX_TLS
-          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+          value: ^mm  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       replicas: 1
       livenessProbe:
@@ -121,11 +122,11 @@ spec:
       resources:
         requests:
           cpu: "8"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
         limits:
           cpu: "8"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
       extraPodSpec:
         nodeSelector:
@@ -147,7 +148,7 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 120
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
           volumeMounts:
@@ -171,7 +172,7 @@ spec:
       envFromSecret: hf-token-secret
       envs:
         - name: UCX_TLS
-          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+          value: ^mm  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       replicas: 1
       livenessProbe:
@@ -191,11 +192,11 @@ spec:
       resources:
         requests:
           cpu: "8"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
         limits:
           cpu: "8"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
       extraPodSpec:
         nodeSelector:
@@ -217,7 +218,7 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 120
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
           volumeMounts:

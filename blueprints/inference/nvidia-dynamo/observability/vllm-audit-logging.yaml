@@ -37,7 +37,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+            - curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -47,19 +47,19 @@ spec:
       resources:
         requests:
           cpu: "1"
-          memory: "2Gi"
+          memory: 2Gi
         limits:
           cpu: "1"
-          memory: "2Gi"
+          memory: 2Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.frontend --http-port 8000"
+            - python3 -m dynamo.frontend --http-port 8000
 
     VllmWorker:
       envFromSecret: hf-token-secret
@@ -82,11 +82,11 @@ spec:
       resources:
         requests:
           cpu: "10"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
         limits:
           cpu: "10"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
       extraPodSpec:
         nodeSelector:
@@ -98,11 +98,11 @@ spec:
               port: 9090
             periodSeconds: 60
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm.log"
+            - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm.log"
 

@@ -16,7 +16,7 @@ spec:
   pvcs:
     - name: dynamo-pvc
       create: false
-  
+
   services:
     Frontend:
       componentType: frontend
@@ -30,7 +30,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
           command:
             - python3
@@ -39,7 +39,7 @@ spec:
           args:
             - --http-port
             - "8000"
-    
+
     Planner:
       envFromSecret: hf-token-secret
       componentType: planner
@@ -56,7 +56,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/src/dynamo/planner
           ports:
             - name: metrics
@@ -71,7 +71,7 @@ spec:
             - --adjustment-interval=60
             - --profile-results-dir=/data/profiling_results
             - --prometheus-port=9085
-    
+
     SGLangDecodeWorker:
       envFromSecret: hf-token-secret
       componentType: worker
@@ -109,7 +109,7 @@ spec:
             effect: NoSchedule
         terminationGracePeriodSeconds: 600
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
           command:
             - python3
@@ -134,7 +134,7 @@ spec:
             - "12345"
             - --host
             - "0.0.0.0"
-    
+
     SGLangPrefillWorker:
       envFromSecret: hf-token-secret
       componentType: worker
@@ -172,7 +172,7 @@ spec:
             effect: NoSchedule
         terminationGracePeriodSeconds: 600
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
           command:
             - python3

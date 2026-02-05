@@ -29,7 +29,7 @@ profiles:
   # ---------------------------------------------------------------------------
   # Frontend Profiles - CPU-only pods for request handling
   # ---------------------------------------------------------------------------
-  
+
   frontend-minimal:
     # Minimal frontend for development/testing
     description: "Minimal CPU resources for frontend dev/test"
@@ -42,7 +42,7 @@ profiles:
       cpu: "1"
       memory: "2Gi"
       ephemeral-storage: "10Gi"
-  
+
   frontend-standard:
     # Standard frontend for production workloads
     description: "Standard frontend for production"
@@ -55,7 +55,7 @@ profiles:
       cpu: "4"
       memory: "8Gi"
       ephemeral-storage: "50Gi"
-  
+
   frontend-high-throughput:
     # High-throughput frontend for heavy request loads
     description: "High-throughput frontend for heavy traffic"
@@ -72,7 +72,7 @@ profiles:
   # ---------------------------------------------------------------------------
   # Small Profiles - 1 GPU (g5.xlarge, g5.2xlarge, g6.xlarge)
   # ---------------------------------------------------------------------------
-  
+
   small-a10g-1:
     # Single A10G GPU - 24GB VRAM
     # Target instances: g5.xlarge (4 vCPU, 16GB), g5.2xlarge (8 vCPU, 32GB)
@@ -95,7 +95,7 @@ profiles:
       nvidia.com/gpu: "1"
       ephemeral-storage: "100Gi"
     sharedMemory: "8Gi"
-  
+
   small-l4-1:
     # Single L4 GPU - 24GB VRAM
     # Target instances: g6.xlarge, g6.2xlarge
@@ -122,7 +122,7 @@ profiles:
   # ---------------------------------------------------------------------------
   # Medium Profiles - 4 GPUs (g5.12xlarge, g6e.12xlarge)
   # ---------------------------------------------------------------------------
-  
+
   medium-a10g-4:
     # 4x A10G GPUs - 96GB total VRAM
     # Target instance: g5.12xlarge (48 vCPU, 192GB RAM)
@@ -145,7 +145,7 @@ profiles:
       nvidia.com/gpu: "4"
       ephemeral-storage: "500Gi"
     sharedMemory: "24Gi"
-  
+
   medium-l40s-4:
     # 4x L40S GPUs - 192GB total VRAM
     # Target instance: g6e.12xlarge (48 vCPU, 384GB RAM)
@@ -172,7 +172,7 @@ profiles:
   # ---------------------------------------------------------------------------
   # Large Profiles - 8 GPUs (g5.48xlarge, g6e.48xlarge, p4d.24xlarge, p5.48xlarge)
   # ---------------------------------------------------------------------------
-  
+
   large-a10g-8:
     # 8x A10G GPUs - 192GB total VRAM
     # Target instance: g5.48xlarge (192 vCPU, 768GB RAM)
@@ -195,7 +195,7 @@ profiles:
       nvidia.com/gpu: "8"
       ephemeral-storage: "1Ti"
     sharedMemory: "48Gi"
-  
+
   large-l40s-8:
     # 8x L40S GPUs - 384GB total VRAM
     # Target instance: g6e.48xlarge (192 vCPU, 1536GB RAM)
@@ -218,7 +218,7 @@ profiles:
       nvidia.com/gpu: "8"
       ephemeral-storage: "1Ti"
     sharedMemory: "48Gi"
-  
+
   large-a100-8:
     # 8x A100 GPUs - 320GB or 640GB total VRAM (40GB or 80GB models)
     # Target instance: p4d.24xlarge (96 vCPU, 1152GB RAM, 8x A100 40GB)
@@ -241,7 +241,7 @@ profiles:
       nvidia.com/gpu: "8"
       ephemeral-storage: "1Ti"
     sharedMemory: "48Gi"
-  
+
   large-h100-8:
     # 8x H100 GPUs - 640GB total VRAM
     # Target instance: p5.48xlarge (192 vCPU, 2048GB RAM)
@@ -269,7 +269,7 @@ profiles:
   # ---------------------------------------------------------------------------
   # XLarge Profiles - Multi-Node (for disaggregated or very large models)
   # ---------------------------------------------------------------------------
-  
+
   xlarge-h100-16:
     # 16x H100 GPUs (2 nodes, distributed)
     # Target: 2x p5.48xlarge nodes
@@ -298,7 +298,7 @@ profiles:
   # ---------------------------------------------------------------------------
   # KVBM (KV Cache Block Manager) Profiles
   # ---------------------------------------------------------------------------
-  
+
   kvbm-standard:
     # Standard KVBM server with GPU for cache management
     description: "KVBM server with GPU for KV cache management"
@@ -317,7 +317,7 @@ profiles:
       nvidia.com/gpu: "1"
       ephemeral-storage: "500Gi"
     sharedMemory: "8Gi"
-  
+
   kvbm-disk:
     # KVBM with disk-based overflow
     description: "KVBM server with disk overflow support"
@@ -344,7 +344,7 @@ profiles:
 modelSizeGuide:
   # Model parameters to required VRAM (approximate, FP16)
   # Formula: params * 2 bytes + 20% overhead
-  
+
   "1B-7B":
     vramRequired: "16-24Gi"
     recommendedProfiles:
@@ -352,7 +352,7 @@ modelSizeGuide:
       - small-l4-1
     tensorParallelism: 1
     notes: "Single GPU sufficient for most 7B models"
-  
+
   "8B-13B":
     vramRequired: "24-48Gi"
     recommendedProfiles:
@@ -361,7 +361,7 @@ modelSizeGuide:
       - medium-l40s-4
     tensorParallelism: "1-2"
     notes: "May require TP=2 or quantization for larger context"
-  
+
   "14B-30B":
     vramRequired: "48-96Gi"
     recommendedProfiles:
@@ -369,7 +369,7 @@ modelSizeGuide:
       - medium-l40s-4
     tensorParallelism: "2-4"
     notes: "Recommend 4 GPUs for production workloads"
-  
+
   "31B-70B":
     vramRequired: "96-192Gi"
     recommendedProfiles:
@@ -380,7 +380,7 @@ modelSizeGuide:
       - large-h100-8
     tensorParallelism: "4-8"
     notes: "Use L40S/H100 for best performance; PCIe instances use SGLang"
-  
+
   "71B-140B":
     vramRequired: "192-400Gi"
     recommendedProfiles:
@@ -388,7 +388,7 @@ modelSizeGuide:
       - large-h100-8
     tensorParallelism: 8
     notes: "H100 recommended for production; consider FP8 quantization"
-  
+
   "140B+":
     vramRequired: "400Gi+"
     recommendedProfiles:
@@ -422,7 +422,7 @@ backendRecommendations:
       - g6e.12xlarge
       - g6e.24xlarge
       - g6e.48xlarge
-  
+
   nvlink:
     # For NVLink-based instances (p4d, p5)
     primary: vllm

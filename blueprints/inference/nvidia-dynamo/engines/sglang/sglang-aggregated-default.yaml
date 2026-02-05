@@ -19,31 +19,39 @@ spec:
         timeoutSeconds: 30
         failureThreshold: 10
       readinessProbe:
-        exec:
-          command:
-            - /bin/sh
-            - -c
-            - "exit 0"
+        command:
+          - /bin/sh
+          - -c
+          - exit 0
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - exit 0
+          initialDelaySeconds: 60
+          periodSeconds: 60
+          timeoutSeconds: 30
+          failureThreshold: 10
       componentType: frontend
       replicas: 1
       resources:
         requests:
           cpu: "5"
-          memory: "10Gi"
+          memory: 10Gi
         limits:
           cpu: "5"
-          memory: "10Gi"
+          memory: 10Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
-          command: ["sh", "-c"]
+          command: [sh, -c]
           args:
-            - "python3 -m dynamo.frontend --http-port=8000"
+            - python3 -m dynamo.frontend --http-port=8000
     SGLangWorker:
       envFromSecret: hf-token-secret
       livenessProbe:
@@ -51,7 +59,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - "exit 0"
+            - exit 0
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
@@ -60,7 +68,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - "exit 0"
+            - exit 0
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -70,20 +78,27 @@ spec:
       resources:
         requests:
           cpu: "10"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
         limits:
           cpu: "10"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
       extraPodSpec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.sglang --model-path Qwen/Qwen3-0.6B --served-model-name Qwen/Qwen3-0.6B --page-size 16 --tp 1 --trust-remote-code --skip-tokenizer-init"
+            - |
+              python3 -m dynamo.sglang \
+                --model-path Qwen/Qwen3-0.6B \
+                --served-model-name Qwen/Qwen3-0.6B \
+                --page-size 16 \
+                --tp 1 \
+                --trust-remote-code \
+                --skip-tokenizer-init

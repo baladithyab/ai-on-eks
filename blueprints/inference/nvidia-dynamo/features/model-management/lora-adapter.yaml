@@ -22,13 +22,13 @@ metadata:
 spec:
   # Unique identifier for this LoRA adapter
   modelName: customer-support-v1
-  
+
   # Base model that this LoRA extends - must match modelRef.name in DGD
   baseModelName: meta-llama/Llama-3.3-70B-Instruct
-  
+
   # Specify this is a LoRA adapter
   modelType: lora
-  
+
   # Source location for LoRA weights
   source:
     # S3 URI format: s3://bucket-name/path/to/lora

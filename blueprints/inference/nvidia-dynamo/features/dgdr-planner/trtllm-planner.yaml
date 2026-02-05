@@ -69,16 +69,16 @@ data:
     backend: pytorch
     enable_chunked_prefill: true
     disable_overlap_scheduler: false
-    
+
     cuda_graph_config:
       max_batch_size: 16
-    
+
     kv_cache_config:
       free_gpu_memory_fraction: 0.85
-    
+
     cache_transceiver_config:
       backend: default
-  
+
   prefill.yaml: |
     # TensorRT-LLM Prefill Worker Configuration
     tensor_parallel_size: 1
@@ -89,13 +89,13 @@ data:
     backend: pytorch
     enable_chunked_prefill: true
     disable_overlap_scheduler: true
-    
+
     cuda_graph_config:
       max_batch_size: 16
-    
+
     kv_cache_config:
       free_gpu_memory_fraction: 0.85
-    
+
     cache_transceiver_config:
       backend: default
 ---
@@ -110,7 +110,7 @@ spec:
   pvcs:
     - name: dynamo-pvc
       create: false
-  
+
   services:
     Frontend:
       componentType: frontend
@@ -124,7 +124,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           command:
             - python3
@@ -142,7 +142,7 @@ spec:
             - --router-temperature
             - "0.0"
             - --no-kv-events
-    
+
     Planner:
       envFromSecret: hf-token-secret
       componentType: planner
@@ -159,7 +159,7 @@ spec:
           memory: "4Gi"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/planner/src/dynamo/planner
           ports:
             - name: metrics
@@ -174,7 +174,7 @@ spec:
             - --adjustment-interval=60
             - --profile-results-dir=/data/profiling_results
             - --prometheus-port=9085
-    
+
     TRTLLMDecodeWorker:
       envFromSecret: hf-token-secret
       componentType: worker
@@ -217,7 +217,7 @@ spec:
             configMap:
               name: trtllm-planner-config
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
           volumeMounts:
@@ -280,7 +280,7 @@ spec:
             configMap:
               name: trtllm-planner-config
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
           volumeMounts:

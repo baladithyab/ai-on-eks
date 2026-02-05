@@ -12,6 +12,7 @@ This directory contains **feature-oriented examples** that work across multiple 
 | **[model-management/](model-management/)** | DynamoModel CRD examples | Model lifecycle |
 | **Model-Express** | Automated model loading | **Enabled by Default** |
 | **[multimodal/](multimodal/)** | LLaVA, Qwen-VL vision models | Image/video understanding |
+| **[multinode/](multinode/)** | Multinode inference (LWS) | Scale-out inference |
 | **[multi-replica/](multi-replica/)** | Multi-replica HA patterns | High availability |
 
 ## Quick Start
@@ -24,6 +25,9 @@ cd ai-on-eks/blueprints/inference/nvidia-dynamo
 
 # Multi-replica pattern
 ./deploy.sh multi-replica-vllm
+
+# Multinode (LWS)
+./deploy.sh vllm-multinode-lws
 
 # Multimodal (LLaVA)
 ./deploy.sh llava-1.5-7b

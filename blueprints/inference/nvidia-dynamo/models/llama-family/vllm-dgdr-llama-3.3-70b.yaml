@@ -30,7 +30,7 @@ spec:
   backend: vllm
 
   profilingConfig:
-    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0"
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1"
     # Reference ConfigMap with EFS cache configuration
     configMapRef:
       name: llama-3.3-70b-dgd-config
@@ -55,7 +55,7 @@ spec:
         itl: 50.0      # Inter-Token Latency (ms)
 
   deploymentOverrides:
-    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0"
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1"
 
   autoApply: true
 ---
@@ -87,7 +87,7 @@ data:
               mountPoint: /models
           extraPodSpec:
             mainContainer:
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
               workingDir: /workspace/components/backends/vllm
               command:
                 - /bin/sh
@@ -117,7 +117,7 @@ data:
             nodeSelector:
               karpenter.sh/nodepool: p5-nvidia
             mainContainer:
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
               workingDir: /workspace/components/backends/vllm
               command:
               - python3
@@ -155,7 +155,7 @@ data:
             nodeSelector:
               karpenter.sh/nodepool: p5-nvidia
             mainContainer:
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
               workingDir: /workspace/components/backends/vllm
               command:
               - python3

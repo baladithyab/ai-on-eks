@@ -106,6 +106,17 @@ entries:
     cost_per_hour: "$2.24+"
     test_date: "2026-01-01"
 
+  - id: vllm-multinode-lws
+    path: features/multinode/vllm-multinode-lws.yaml
+    backend: vllm
+    tier: core
+    prereqs: "2+ Nodes; LWS installed"
+    notes: "Multinode inference using LeaderWorkerSet (LWS)"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (2+ Nodes)"
+    cost_per_hour: "$2.24+"
+    test_date: "2026-01-01"
+
   - id: vllm-full-observability
     path: observability/vllm-full-observability.yaml
     backend: vllm
@@ -508,7 +519,7 @@ entries:
   # v0.7.1 Validation: 3 model families tested (6 blueprints)
   # This tier focuses on model families rather than Dynamo features
   # ---------------------------------------------------------------------------
-  
+
   # GPT-OSS (NVIDIA) - Production-ready reasoning models
   - id: showcase-gptoss-20b-vllm
     path: models/gpt-oss/vllm-aggregated-gptoss-20b.yaml

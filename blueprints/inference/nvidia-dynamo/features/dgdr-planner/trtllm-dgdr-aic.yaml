@@ -22,7 +22,7 @@ spec:
   backend: trtllm
 
   profilingConfig:
-    profilerImage: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1"
     config:
       # Sweep/profiling configuration
       sweep:
@@ -40,7 +40,7 @@ spec:
         itl: 30.0      # Inter-Token Latency (ms)
 
   deploymentOverrides:
-    workersImage: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
+    workersImage: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1"
 
   # Auto-deploy after profiling
   autoApply: true

@@ -19,10 +19,10 @@ metadata:
 spec:
   # Full model identifier - same as the model being served
   modelName: Qwen/Qwen3-0.6B
-  
+
   # Base model name - must match modelRef.name in your DGD
   baseModelName: Qwen/Qwen3-0.6B
-  
+
   # Model type: base, lora, or adapter
   modelType: base
 

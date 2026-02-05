@@ -49,7 +49,7 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
 
     VllmDecodeWorker:
       componentType: worker
@@ -75,12 +75,12 @@ spec:
         size: 40Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - python3
+            - -m
+            - dynamo.vllm
           args:
             - --model
             - deepseek-ai/DeepSeek-R1-Distill-Llama-70B
@@ -117,12 +117,12 @@ spec:
         size: 40Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - python3
+            - -m
+            - dynamo.vllm
           args:
             - --model
             - deepseek-ai/DeepSeek-R1-Distill-Llama-70B

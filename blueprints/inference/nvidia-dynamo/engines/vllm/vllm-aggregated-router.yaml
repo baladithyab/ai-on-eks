@@ -38,7 +38,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+            - curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -47,25 +47,25 @@ spec:
       replicas: 1
       resources:
         requests:
-          cpu: "2"
-          memory: "4Gi"
+          cpu: 2
+          memory: 4Gi
         limits:
-          cpu: "2"
-          memory: "4Gi"
+          cpu: 2
+          memory: 4Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
             # Enable KV Router by setting DYN_ROUTER_MODE=kv
-            - "python3 -m dynamo.frontend --http-port 8000 --router-mode kv"
+            - python3 -m dynamo.frontend --http-port 8000 --router-mode kv
       envs:
         # Alternative: Set via environment variable
         - name: DYN_ROUTER_MODE
-          value: "kv"
+          value: kv
     VllmWorker:
       envFromSecret: hf-token-secret
       livenessProbe:
@@ -87,11 +87,11 @@ spec:
       resources:
         requests:
           cpu: "10"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
         limits:
           cpu: "10"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
       extraPodSpec:
         nodeSelector:
@@ -103,7 +103,7 @@ spec:
               port: 9090
             periodSeconds: 10
             failureThreshold: 60
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
@@ -111,5 +111,5 @@ spec:
           args:
             # Enable prefix caching for better KV Router performance
             # Using Qwen3-0.6B for efficient resource utilization
-            - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B --enable-prefix-caching 2>&1 | tee /tmp/vllm.log"
+            - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B --enable-prefix-caching 2>&1 | tee /tmp/vllm.log"
 

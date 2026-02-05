@@ -29,7 +29,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - "exit 0"
+            - exit 0
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -37,22 +37,22 @@ spec:
       resources:
         requests:
           cpu: "2"
-          memory: "4Gi"
+          memory: 4Gi
         limits:
           cpu: "2"
-          memory: "4Gi"
+          memory: 4Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
-          command: ["sh", "-c"]
+          command: [sh, -c]
           args:
-            - "python3 -m dynamo.frontend --http-port=8000"
+            - python3 -m dynamo.frontend --http-port=8000
     SGLangDecodeWorker:
       envFromSecret: hf-token-secret
       envs:
         - name: UCX_TLS
-          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+          value: ^mm  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       subComponentType: decode
       replicas: 1
@@ -61,7 +61,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - "exit 0"
+            - exit 0
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
@@ -70,7 +70,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - "exit 0"
+            - exit 0
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -78,17 +78,17 @@ spec:
       resources:
         requests:
           cpu: "8"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
         limits:
           cpu: "8"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
       extraPodSpec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh
@@ -112,7 +112,7 @@ spec:
       envFromSecret: hf-token-secret
       envs:
         - name: UCX_TLS
-          value: "^mm"  # Disable shared memory transport to avoid broadcast deadlock
+          value: ^mm  # Disable shared memory transport to avoid broadcast deadlock
       componentType: worker
       subComponentType: prefill
       replicas: 1
@@ -121,7 +121,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - "exit 0"
+            - exit 0
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
@@ -130,7 +130,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - "exit 0"
+            - exit 0
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -138,17 +138,17 @@ spec:
       resources:
         requests:
           cpu: "8"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
         limits:
           cpu: "8"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
       extraPodSpec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh

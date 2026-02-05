@@ -4,7 +4,7 @@
 # SGLang Aggregated Deployment for GPT-OSS-20B
 #
 # ALTERNATIVE to vLLM for PCIe GPU topologies (g5, g6, g6e instances).
-# 
+#
 # vLLM with TP>1 on PCIe exhibits shared memory broadcast deadlock
 # (shm_broadcast.acquire_read stalls). SGLang uses different multi-GPU
 # coordination that may avoid this issue.
@@ -74,7 +74,7 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh
@@ -126,7 +126,7 @@ spec:
             periodSeconds: 60
             # 300 * 60s = 5 hours max startup time for large model loading
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.8.1
           workingDir: /workspace/components/backends/sglang
           command:
             - /bin/sh

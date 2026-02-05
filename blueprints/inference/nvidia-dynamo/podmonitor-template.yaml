@@ -14,6 +14,7 @@
 #   - KVBM (Port 6880): KV cache backend metrics for disaggregated serving
 #
 # Reference: https://docs.nvidia.com/dynamo/observability/metrics.html
+# yamllint disable-line rule:document-start
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor

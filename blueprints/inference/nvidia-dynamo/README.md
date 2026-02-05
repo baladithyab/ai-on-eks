@@ -76,6 +76,7 @@ features/
 ├── kvbm/             # KV Block Manager (disk/memory caching)
 ├── model-management/ # DynamoModel CRD examples
 ├── multimodal/       # LLaVA, Qwen-VL vision models
+├── multinode/        # Multinode inference (LWS)
 └── multi-replica/    # Multi-replica HA patterns
 ```
 

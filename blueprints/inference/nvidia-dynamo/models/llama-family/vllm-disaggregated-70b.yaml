@@ -10,14 +10,14 @@ spec:
   pvcs:
     - name: dynamo-shared-models
       create: false
-  
+
   # Set HF_HOME and offline mode for all services
   envs:
     - name: HF_HOME
       value: "/models"
     - name: HF_HUB_OFFLINE
       value: "1"
-  
+
   services:
     Frontend:
       componentType: frontend
@@ -28,8 +28,8 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
-    
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+
     VllmDecodeWorker:
       componentType: worker
       subComponentType: decode
@@ -54,12 +54,12 @@ spec:
         size: 40Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - python3
+            - -m
+            - dynamo.vllm
           args:
             - --model
             - meta-llama/Llama-3.3-70B-Instruct
@@ -95,12 +95,12 @@ spec:
         size: 40Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - python3
+            - -m
+            - dynamo.vllm
           args:
             - --model
             - meta-llama/Llama-3.3-70B-Instruct

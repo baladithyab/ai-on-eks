@@ -9,12 +9,12 @@
 # CPU utilization. It targets the DynamoGraphDeploymentScalingAdapter (DGDSA)
 # rather than the DGD directly.
 #
-# Dynamo v0.8.0+ Note:
+# Dynamo v0.8.1+ Note:
 #   Embedded autoscaling is deprecated. Use this HPA approach instead.
 #   The DGDSA is automatically created when you deploy a DGD.
 #
 # Prerequisites:
-#   1. Dynamo v0.8.0+ operator deployed
+#   1. Dynamo v0.8.1+ operator deployed
 #   2. Metrics Server installed (standard in EKS)
 #   3. A DynamoGraphDeployment deployed (creates DGDSA automatically)
 #
@@ -46,9 +46,9 @@ metadata:
     dynamo.nvidia.com/backend: vllm
     dynamo.nvidia.com/tier: advanced
   annotations:
-    description: "HPA for Dynamo Frontend based on CPU utilization"
-    dynamo.nvidia.com/config-version: "0.8.0"
-    dynamo.nvidia.com/scaling-type: "hpa-cpu"
+    description: HPA for Dynamo Frontend based on CPU utilization
+    dynamo.nvidia.com/config-version: 0.8.1
+    dynamo.nvidia.com/scaling-type: hpa-cpu
 spec:
   # Target the DynamoGraphDeploymentScalingAdapter (DGDSA)
   # The DGDSA is automatically created by the Dynamo operator

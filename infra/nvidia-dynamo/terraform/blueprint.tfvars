@@ -11,12 +11,12 @@ enable_ai_ml_observability_stack = true
 # - NVIDIA driver, container toolkit, device plugin, and CDI specs
 # The GPU Operator conflicts with Bottlerocket's CDI-based runtime
 enable_nvidia_gpu_operator = false
-# Dynamo version: v0.8.0 - major improvements over v0.7.1:
+# Dynamo version: v0.8.1 - builds on v0.8.0 improvements:
+# - CRD standardization (camelCase fields)
+# - Model-cache PVC support for persistent model caching
 # - TCP request plane default (replaces NATS for data plane traffic)
 # - Kubernetes-native service discovery default (replaces etcd)
-# - vLLM 0.12.0, SGLang 0.5.6.post2, TensorRT-LLM 1.2.0rc4
-# - Enhanced multimodal support (audio/video)
-dynamo_stack_version = "v0.8.0"
+dynamo_stack_version = "v0.8.1"
 
 #---------------------------------------------------------------
 # VPC and Availability Zones

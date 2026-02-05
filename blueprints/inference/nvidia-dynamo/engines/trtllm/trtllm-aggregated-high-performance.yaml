@@ -23,7 +23,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+            - curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -33,19 +33,19 @@ spec:
       resources:
         requests:
           cpu: "1"
-          memory: "2Gi"
+          memory: 2Gi
         limits:
           cpu: "1"
-          memory: "2Gi"
+          memory: 2Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.frontend --http-port 8000"
+            - python3 -m dynamo.frontend --http-port 8000
     TRTLLMWorker:
       envFromSecret: hf-token-secret
       livenessProbe:
@@ -67,11 +67,11 @@ spec:
       resources:
         requests:
           cpu: "16"
-          memory: "32Gi"
+          memory: 32Gi
           gpu: "1"
         limits:
           cpu: "16"
-          memory: "32Gi"
+          memory: 32Gi
           gpu: "1"
       extraPodSpec:
         nodeSelector:
@@ -81,7 +81,7 @@ spec:
             operator: Exists
             effect: NoSchedule
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           startupProbe:
             httpGet:
@@ -117,4 +117,7 @@ spec:
               EOF
 
               # Start TensorRT-LLM worker
-              python3 -m dynamo.trtllm --model-path Qwen/Qwen3-0.6B --served-model-name Qwen/Qwen3-0.6B --extra-engine-args /tmp/engine_configs/agg.yaml
+              python3 -m dynamo.trtllm \
+                --model-path Qwen/Qwen3-0.6B \
+                --served-model-name Qwen/Qwen3-0.6B \
+                --extra-engine-args /tmp/engine_configs/agg.yaml

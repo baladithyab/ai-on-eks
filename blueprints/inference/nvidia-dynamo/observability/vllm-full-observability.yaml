@@ -30,7 +30,7 @@ spec:
       value: "1"
     # Tempo endpoint - defaults to tempo namespace; adjust if Tempo is elsewhere
     - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-      value: "http://tempo.tempo.svc.cluster.local:4317"
+      value: http://tempo.tempo.svc.cluster.local:4317
 
   services:
     Frontend:
@@ -47,7 +47,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+            - curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -56,24 +56,24 @@ spec:
       replicas: 1
       resources:
         requests:
-          cpu: "1"
-          memory: "2Gi"
+          cpu: 1
+          memory: 2Gi
         limits:
-          cpu: "1"
-          memory: "2Gi"
+          cpu: 1
+          memory: 2Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.frontend --http-port 8000"
+            - python3 -m dynamo.frontend --http-port 8000
           env:
             # Service name for identifying frontend in traces
             - name: OTEL_SERVICE_NAME
-              value: "dynamo-frontend"
+              value: dynamo-frontend
 
     VllmWorker:
       envFromSecret: hf-token-secret
@@ -95,13 +95,13 @@ spec:
       replicas: 1
       resources:
         requests:
-          cpu: "10"
-          memory: "20Gi"
-          gpu: "1"
+          cpu: 10
+          memory: 20Gi
+          gpu: 1
         limits:
-          cpu: "10"
-          memory: "20Gi"
-          gpu: "1"
+          cpu: 10
+          memory: 20Gi
+          gpu: 1
       extraPodSpec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
@@ -112,15 +112,15 @@ spec:
               port: 9090
             periodSeconds: 60
             failureThreshold: 300
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm.log"
+            - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm.log
           env:
             # Service name for identifying worker in traces
             - name: OTEL_SERVICE_NAME
-              value: "dynamo-worker"
+              value: dynamo-worker
 

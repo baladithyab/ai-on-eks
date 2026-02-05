@@ -1,15 +1,28 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+---
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: vllm-aggregated-default
+  name: vllm-multinode-lws
   namespace: dynamo
+  annotations:
+    # Force usage of LeaderWorkerSet (LWS) instead of Grove
+    nvidia.com/enable-grove: "false"
 spec:
   backendFramework: vllm
   services:
     Frontend:
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
       livenessProbe:
         httpGet:
           path: /health
@@ -23,38 +36,40 @@ spec:
           command:
             - /bin/sh
             - -c
-            - curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""
+            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
         failureThreshold: 10
-      componentType: frontend
-      replicas: 1
-      resources:
-        requests:
-          cpu: "1"
-          memory: 2Gi
-        limits:
-          cpu: "1"
-          memory: 2Gi
       extraPodSpec:
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
-          workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.frontend --http-port 8000
+            - "python3 -m dynamo.frontend --http-port 8000"
     VllmWorker:
-      envFromSecret: hf-token-secret
+      componentType: worker
+      replicas: 1
+      multinode:
+        nodeCount: 2
+      resources:
+        requests:
+          cpu: "4"
+          memory: "16Gi"
+          gpu: "1"
+        limits:
+          cpu: "4"
+          memory: "16Gi"
+          gpu: "1"
       livenessProbe:
         httpGet:
           path: /live
           port: 9090
-        periodSeconds: 5
+        periodSeconds: 15
         timeoutSeconds: 30
-        failureThreshold: 1
+        failureThreshold: 3
       readinessProbe:
         httpGet:
           path: /health
@@ -62,31 +77,19 @@ spec:
         periodSeconds: 10
         timeoutSeconds: 30
         failureThreshold: 60
-      componentType: worker
-      replicas: 1
-      resources:
-        requests:
-          cpu: "10"
-          memory: 20Gi
-          gpu: "1"
-        limits:
-          cpu: "10"
-          memory: 20Gi
-          gpu: "1"
       extraPodSpec:
-        nodeSelector:
-          karpenter.sh/nodepool: g5-nvidia
         mainContainer:
           startupProbe:
             httpGet:
               path: /health
               port: 9090
-            periodSeconds: 60
-            failureThreshold: 300
+            periodSeconds: 10
+            failureThreshold: 60
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
-          workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/vllm.log
+            # TP=2 matches (2 nodes * 1 GPU/node)
+            - "python3 -m dynamo.vllm --model Qwen/Qwen2.5-0.5B-Instruct \
+               --tensor-parallel-size 2 2>&1 | tee /tmp/vllm.log"

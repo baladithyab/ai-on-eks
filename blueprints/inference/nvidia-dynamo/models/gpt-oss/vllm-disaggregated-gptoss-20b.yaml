@@ -49,7 +49,7 @@ spec:
           mountPoint: /models
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
 
     VllmDecodeWorker:
       componentType: worker
@@ -74,12 +74,12 @@ spec:
         size: 24Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - python3
+            - -m
+            - dynamo.vllm
           args:
             - --model
             - openai/gpt-oss-20b
@@ -119,12 +119,12 @@ spec:
         size: 24Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - python3
+            - -m
+            - dynamo.vllm
           args:
             - --model
             - openai/gpt-oss-20b

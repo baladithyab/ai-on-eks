@@ -19,12 +19,12 @@ spec:
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.frontend
+            - python3
+            - -m
+            - dynamo.frontend
           args:
             - --http-port
             - "8000"
@@ -62,12 +62,12 @@ spec:
           value: "true"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - python3
+            - -m
+            - dynamo.vllm
           args:
             - --model
             - Qwen/Qwen3-0.6B
@@ -130,12 +130,12 @@ spec:
         #   value: "6880"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/components/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - python3
+            - -m
+            - dynamo.vllm
           args:
             - --model
             - Qwen/Qwen3-0.6B

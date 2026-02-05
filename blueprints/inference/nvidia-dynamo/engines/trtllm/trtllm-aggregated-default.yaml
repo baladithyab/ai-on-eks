@@ -27,6 +27,7 @@ data:
 
     cuda_graph_config:
       max_batch_size: 16
+# yamllint disable-line rule:document-start
 ---
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
@@ -50,7 +51,7 @@ spec:
           command:
             - /bin/sh
             - -c
-            - 'curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""'
+            - curl -s http://localhost:8000/health | jq -e ".status == \"healthy\""
         initialDelaySeconds: 60
         periodSeconds: 60
         timeoutSeconds: 30
@@ -60,19 +61,19 @@ spec:
       resources:
         requests:
           cpu: "1"
-          memory: "2Gi"
+          memory: 2Gi
         limits:
           cpu: "1"
-          memory: "2Gi"
+          memory: 2Gi
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           command:
             - /bin/sh
             - -c
           args:
-            - "python3 -m dynamo.frontend --http-port 8000"
+            - python3 -m dynamo.frontend --http-port 8000
     TRTLLMWorker:
       envFromSecret: hf-token-secret
       livenessProbe:
@@ -94,11 +95,11 @@ spec:
       resources:
         requests:
           cpu: "10"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
         limits:
           cpu: "10"
-          memory: "20Gi"
+          memory: 20Gi
           gpu: "1"
       extraPodSpec:
         nodeSelector:
@@ -113,7 +114,7 @@ spec:
             configMap:
               name: trtllm-agg-config
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
           workingDir: /workspace/components/backends/trtllm
           startupProbe:
             httpGet:

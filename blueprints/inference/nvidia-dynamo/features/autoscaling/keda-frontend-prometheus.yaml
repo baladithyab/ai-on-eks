@@ -9,7 +9,7 @@
 # based on Prometheus metrics. It targets the DynamoGraphDeploymentScalingAdapter
 # (DGDSA) rather than the DGD directly.
 #
-# Dynamo v0.8.0+ Note:
+# Dynamo v0.8.1+ Note:
 #   Embedded autoscaling is deprecated. Use KEDA for advanced event-driven scaling.
 #   The DGDSA is automatically created when you deploy a DGD.
 #
@@ -17,7 +17,7 @@
 # observability configuration in config/otel-collector.yaml.
 #
 # Prerequisites:
-#   1. Dynamo v0.8.0+ operator deployed
+#   1. Dynamo v0.8.1+ operator deployed
 #   2. KEDA v2.10+ installed:
 #      helm install keda kedacore/keda -n keda --create-namespace
 #   3. Prometheus stack (kube-prometheus-stack) installed
@@ -52,9 +52,9 @@ metadata:
     dynamo.nvidia.com/backend: vllm
     dynamo.nvidia.com/tier: advanced
   annotations:
-    description: "KEDA ScaledObject for Dynamo Frontend based on Prometheus metrics"
-    dynamo.nvidia.com/config-version: "0.8.0"
-    dynamo.nvidia.com/scaling-type: "keda-prometheus"
+    description: KEDA ScaledObject for Dynamo Frontend based on Prometheus metrics
+    dynamo.nvidia.com/config-version: 0.8.1
+    dynamo.nvidia.com/scaling-type: keda-prometheus
 spec:
   # Target the DynamoGraphDeploymentScalingAdapter (DGDSA)
   scaleTargetRef:
@@ -133,9 +133,9 @@ spec:
         threshold: "2"
       metricType: Value
 
+# yamllint disable-line rule:document-start
 ---
 # TriggerAuthentication for Prometheus (if authentication is required)
-# Uncomment and configure if your Prometheus requires authentication
 #
 # apiVersion: keda.sh/v1alpha1
 # kind: TriggerAuthentication
@@ -148,6 +148,7 @@ spec:
 #       name: prometheus-token
 #       key: token
 
+# yamllint disable-line rule:document-start
 ---
 # Alternative ScaledObject using concurrent requests
 # This is a simpler alternative that scales based on current load
@@ -161,8 +162,8 @@ metadata:
     app.kubernetes.io/component: autoscaling
     app.kubernetes.io/part-of: nvidia-dynamo
   annotations:
-    description: "Simple KEDA ScaledObject based on concurrent requests"
-    dynamo.nvidia.com/scaling-type: "keda-prometheus-simple"
+    description: Simple KEDA ScaledObject based on concurrent requests
+    dynamo.nvidia.com/scaling-type: keda-prometheus-simple
 spec:
   scaleTargetRef:
     apiVersion: nvidia.com/v1alpha1

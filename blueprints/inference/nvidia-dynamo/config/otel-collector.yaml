@@ -40,7 +40,7 @@ data:
     # ==========================================================================
     # OpenTelemetry Collector Configuration for NVIDIA Dynamo
     # ==========================================================================
-    
+
     receivers:
       # ========================================================================
       # OTLP Receiver - Primary receiver for Dynamo components
@@ -57,7 +57,7 @@ data:
             cors:
               allowed_origins:
                 - "*"  # Allows browser-based applications
-      
+
       # ========================================================================
       # Prometheus Receiver - Scrapes metrics from Dynamo components
       # ========================================================================
@@ -91,7 +91,7 @@ data:
                 - source_labels: [__name__]
                   regex: 'dynamo_.*'
                   action: keep
-            
+
             # Worker metrics (backend-specific, KV cache stats)
             - job_name: 'dynamo-workers'
               scrape_interval: 15s
@@ -115,7 +115,7 @@ data:
                   target_label: pod
                 - source_labels: [__meta_kubernetes_namespace]
                   target_label: namespace
-            
+
             # KVBM metrics (disaggregated deployments)
             - job_name: 'dynamo-kvbm'
               scrape_interval: 30s
@@ -132,7 +132,7 @@ data:
                   target_label: __address__
                   regex: (.+):.*
                   replacement: ${1}:6880
-    
+
     processors:
       # ========================================================================
       # Batch Processor - Batches telemetry data for efficient export
@@ -141,7 +141,7 @@ data:
         timeout: 5s
         send_batch_size: 256
         send_batch_max_size: 512
-      
+
       # ========================================================================
       # Memory Limiter - Prevents OOM conditions
       # ========================================================================
@@ -149,7 +149,7 @@ data:
         check_interval: 1s
         limit_mib: 1536
         spike_limit_mib: 512
-      
+
       # ========================================================================
       # Resource Detection - Adds Kubernetes metadata
       # ========================================================================
@@ -159,7 +159,7 @@ data:
           - system
         timeout: 5s
         override: false
-      
+
       # ========================================================================
       # K8s Attributes - Enriches with Kubernetes context
       # ========================================================================
@@ -183,7 +183,7 @@ data:
             - tag_name: backend_framework
               key: dynamo.nvidia.com/backend
               from: pod
-      
+
       # ========================================================================
       # Resource Processor - Adds standard resource attributes
       # ========================================================================
@@ -195,7 +195,7 @@ data:
           - key: deployment.environment
             value: "production"
             action: insert
-      
+
       # ========================================================================
       # Filter Processor - Removes noisy or unwanted telemetry
       # ========================================================================
@@ -206,7 +206,7 @@ data:
             - 'attributes["http.target"] == "/health"'
             - 'attributes["http.target"] == "/live"'
             - 'attributes["http.target"] == "/ready"'
-    
+
     exporters:
       # ========================================================================
       # Debug Exporter - For troubleshooting (low verbosity in production)
@@ -215,7 +215,7 @@ data:
         verbosity: basic
         sampling_initial: 5
         sampling_thereafter: 200
-      
+
       # ========================================================================
       # OTLP Exporter - Primary trace export to Tempo/Jaeger
       # ========================================================================
@@ -229,7 +229,7 @@ data:
           initial_interval: 5s
           max_interval: 30s
           max_elapsed_time: 300s
-      
+
       # ========================================================================
       # Prometheus Exporter - Exposes metrics for Prometheus scraping
       # ========================================================================
@@ -241,7 +241,7 @@ data:
         resource_to_telemetry_conversion:
           enabled: true
         enable_open_metrics: true
-      
+
       # ========================================================================
       # Prometheus Remote Write - Push metrics to central Prometheus
       # ========================================================================
@@ -251,7 +251,7 @@ data:
           insecure: true
         resource_to_telemetry_conversion:
           enabled: true
-      
+
       # ========================================================================
       # AWS CloudWatch Exporter (Optional) - For AWS-native observability
       # ========================================================================
@@ -261,27 +261,27 @@ data:
       #   log_stream_name: "otel-collector"
       #   region: "us-west-2"
       #   raw_log: true
-    
+
     extensions:
       # Health check endpoint for collector monitoring
       health_check:
         endpoint: 0.0.0.0:13133
         path: /health
-      
+
       # Performance profiling (optional, disable in production)
       pprof:
         endpoint: 0.0.0.0:1777
-      
+
       # Zpages for debugging (disable in production)
       zpages:
         endpoint: 0.0.0.0:55679
-    
+
     service:
       extensions:
         - health_check
         - pprof
         - zpages
-      
+
       telemetry:
         logs:
           level: info
@@ -289,7 +289,7 @@ data:
         metrics:
           level: detailed
           address: 0.0.0.0:8888
-      
+
       pipelines:
         # ======================================================================
         # Traces Pipeline - Full distributed tracing
@@ -306,7 +306,7 @@ data:
           exporters:
             - otlp
             - debug
-        
+
         # ======================================================================
         # Metrics Pipeline - Prometheus metrics collection
         # ======================================================================

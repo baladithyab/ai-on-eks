@@ -344,7 +344,7 @@ topologySelectors:
     nodeSelector:
       node.kubernetes.io/gpu-topology: pcie
     recommendedBackend: sglang
-  
+
   # For NVLink-connected GPUs (p4d, p5)
   nvlink:
     description: "Any NVLink-connected GPU instance"
@@ -362,23 +362,23 @@ zoneSelectors:
   us-west-2a:
     nodeSelector:
       topology.kubernetes.io/zone: us-west-2a
-  
+
   us-west-2b:
     nodeSelector:
       topology.kubernetes.io/zone: us-west-2b
-  
+
   us-west-2c:
     nodeSelector:
       topology.kubernetes.io/zone: us-west-2c
-  
+
   us-east-1a:
     nodeSelector:
       topology.kubernetes.io/zone: us-east-1a
-  
+
   us-east-1b:
     nodeSelector:
       topology.kubernetes.io/zone: us-east-1b
-  
+
   us-east-1c:
     nodeSelector:
       topology.kubernetes.io/zone: us-east-1c
@@ -393,7 +393,7 @@ capacitySelectors:
     description: "On-demand instances only (production workloads)"
     nodeSelector:
       karpenter.sh/capacity-type: on-demand
-  
+
   spot:
     description: "Spot instances for cost savings (dev/test only)"
     nodeSelector:
