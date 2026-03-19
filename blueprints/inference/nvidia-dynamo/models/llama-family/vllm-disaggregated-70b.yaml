@@ -1,0 +1,133 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Disaggregated Deployment for Llama 3.3 70B
+#
+# Hardware Requirements:
+# - 2x g6e.24xlarge (4x L40S each, 192GB VRAM per node)
+# - ~140GB VRAM per worker for BF16 weights (TP=4)
+# - Uses --enforce-eager to avoid CUDA graph OOM on L40S
+#
+# Features:
+# - Disaggregated architecture (separate prefill/decode)
+# - Model downloaded from HuggingFace Hub (requires hf-token-secret)
+# - Dense architecture (compatible with vLLM profiler)
+#
+# Note: Model files are ~140GB, first deployment may take time for download
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-70b-disagg
+  namespace: dynamo
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      componentType: frontend
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      replicas: 1
+      envFromSecret: hf-token-secret
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+
+    VllmDecodeWorker:
+      componentType: worker
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      subComponentType: decode
+      replicas: 1
+      envFromSecret: hf-token-secret
+      resources:
+        requests:
+          cpu: "32"
+          memory: "256Gi"
+          gpu: "4"
+        limits:
+          cpu: "64"
+          memory: "512Gi"
+          gpu: "4"
+      sharedMemory:
+        size: 40Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - meta-llama/Llama-3.3-70B-Instruct
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --enforce-eager
+            - --tensor-parallel-size
+            - "4"
+
+    VllmPrefillWorker:
+      componentType: worker
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      subComponentType: prefill
+      replicas: 1
+      envFromSecret: hf-token-secret
+      resources:
+        requests:
+          cpu: "32"
+          memory: "256Gi"
+          gpu: "4"
+        limits:
+          cpu: "64"
+          memory: "512Gi"
+          gpu: "4"
+      sharedMemory:
+        size: 40Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - meta-llama/Llama-3.3-70B-Instruct
+            - --is-prefill-worker
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --enforce-eager
+            - --tensor-parallel-size
+            - "4"

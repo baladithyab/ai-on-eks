@@ -1,0 +1,407 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - OpenTelemetry Instrumentation Configuration
+# =============================================================================
+#
+# This file provides ConfigMaps with OTEL environment variables for Dynamo
+# components. Each runtime (vLLM, SGLang, TRT-LLM) can use these configs to
+# enable distributed tracing and metrics export.
+#
+# Usage:
+#   kubectl apply -f config/otel-instrumentation.yaml -n dynamo
+#
+# Reference in blueprints:
+#   spec:
+#     services:
+#       Worker:
+#         extraPodSpec:
+#           envFrom:
+#             - configMapRef:
+#                 name: dynamo-otel-common
+#
+# =============================================================================
+
+---
+# Common OTEL configuration for all Dynamo components
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-otel-common
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-otel-config
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+    app.kubernetes.io/managed-by: dynamo-blueprints
+  annotations:
+    description: "Common OpenTelemetry configuration for all Dynamo runtimes"
+data:
+  # ==========================================================================
+  # OTEL Core Configuration
+  # ==========================================================================
+  # Service name - should be overridden per deployment via pod metadata
+  OTEL_SERVICE_NAME: "nvidia-dynamo"
+
+  # SDK enabled/disabled (set to "true" to enable)
+  OTEL_SDK_DISABLED: "false"
+
+  # Propagators for distributed tracing context
+  # W3C trace context is standard, B3 for compatibility with Zipkin
+  OTEL_PROPAGATORS: "tracecontext,baggage,b3"
+
+  # ==========================================================================
+  # Trace Exporter Configuration
+  # ==========================================================================
+  # CRITICAL: Use OTEL_EXPORTER_OTLP_TRACES_ENDPOINT (not OTEL_EXPORT_ENDPOINT)
+  # This is the correct environment variable per OTEL specification
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.dynamo.svc.cluster.local:4317"
+
+  # Protocol for trace export (grpc recommended for performance)
+  OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: "grpc"
+
+  # Compression for trace export
+  OTEL_EXPORTER_OTLP_TRACES_COMPRESSION: "gzip"
+
+  # Timeout for export operations (in milliseconds)
+  OTEL_EXPORTER_OTLP_TRACES_TIMEOUT: "30000"
+
+  # ==========================================================================
+  # Metrics Exporter Configuration
+  # ==========================================================================
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector.dynamo.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_METRICS_PROTOCOL: "grpc"
+  OTEL_EXPORTER_OTLP_METRICS_COMPRESSION: "gzip"
+
+  # Metrics export interval (in milliseconds)
+  OTEL_METRIC_EXPORT_INTERVAL: "15000"
+
+  # ==========================================================================
+  # Sampling Configuration
+  # ==========================================================================
+  # Sampling strategy: always_on, always_off, traceidratio, parentbased_*
+  OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+
+  # Sample ratio (0.0 to 1.0) - 0.1 = 10% of traces
+  # Adjust based on traffic volume:
+  # - Development: 1.0 (100%)
+  # - Staging: 0.5 (50%)
+  # - Production high-traffic: 0.01-0.1 (1-10%)
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
+
+  # ==========================================================================
+  # Resource Attributes
+  # ==========================================================================
+  # Standard resource attributes for Dynamo deployments
+  # Additional attributes are added via k8sattributes processor
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nvidia-dynamo,deployment.environment=production"
+
+  # ==========================================================================
+  # Logging Integration
+  # ==========================================================================
+  # Enable OTEL logging export (optional)
+  OTEL_LOGS_EXPORTER: "none"
+
+  # Log level for OTEL SDK itself
+  OTEL_LOG_LEVEL: "info"
+
+  # ==========================================================================
+  # Python-specific OTEL Configuration
+  # ==========================================================================
+  # Auto-instrumentation for Python (vLLM, SGLang)
+  OTEL_PYTHON_LOG_CORRELATION: "true"
+  OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "false"
+
+  # Excluded URLs from tracing (health checks)
+  OTEL_PYTHON_EXCLUDED_URLS: "/health,/live,/ready,/metrics"
+
+  # ==========================================================================
+  # Batch Span Processor Configuration
+  # ==========================================================================
+  # Maximum queue size for pending spans
+  OTEL_BSP_MAX_QUEUE_SIZE: "2048"
+
+  # Maximum export batch size
+  OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "512"
+
+  # Delay between batch exports (in milliseconds)
+  OTEL_BSP_SCHEDULE_DELAY: "5000"
+
+  # ==========================================================================
+  # Dynamo-specific Tracing Configuration
+  # ==========================================================================
+  # Enable Dynamo internal tracing
+  DYN_TRACING_ENABLED: "true"
+
+  # Trace span naming includes model name
+  DYN_TRACING_INCLUDE_MODEL: "true"
+
+  # Include request/response metadata in spans (may increase trace size)
+  DYN_TRACING_INCLUDE_METADATA: "false"
+
+---
+# vLLM-specific OTEL configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-otel-vllm
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-otel-config
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+    app.kubernetes.io/managed-by: dynamo-blueprints
+    dynamo.nvidia.com/backend: vllm
+  annotations:
+    description: "OpenTelemetry configuration optimized for vLLM runtime"
+data:
+  # Inherit from common config, add vLLM-specific settings
+  OTEL_SERVICE_NAME: "dynamo-vllm"
+
+  # vLLM-specific trace configuration
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.dynamo.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: "grpc"
+  OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
+  OTEL_PROPAGATORS: "tracecontext,baggage"
+
+  # vLLM resource attributes
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nvidia-dynamo,service.name=vllm-worker,deployment.environment=production,runtime.name=vllm"
+
+  # vLLM Python instrumentation
+  OTEL_PYTHON_LOG_CORRELATION: "true"
+  OTEL_PYTHON_EXCLUDED_URLS: "/health,/live,/ready,/metrics"
+
+  # vLLM metrics configuration
+  DYN_VLLM_METRICS_ENABLED: "true"
+  DYN_VLLM_METRICS_PORT: "8081"
+
+  # vLLM tracing spans to capture
+  DYN_VLLM_TRACE_PREFILL: "true"
+  DYN_VLLM_TRACE_DECODE: "true"
+  DYN_VLLM_TRACE_SCHEDULER: "false"
+
+---
+# SGLang-specific OTEL configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-otel-sglang
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-otel-config
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+    app.kubernetes.io/managed-by: dynamo-blueprints
+    dynamo.nvidia.com/backend: sglang
+  annotations:
+    description: "OpenTelemetry configuration optimized for SGLang runtime"
+data:
+  # SGLang-specific OTEL configuration
+  OTEL_SERVICE_NAME: "dynamo-sglang"
+
+  # SGLang trace configuration
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.dynamo.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: "grpc"
+  OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
+  OTEL_PROPAGATORS: "tracecontext,baggage"
+
+  # SGLang resource attributes
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nvidia-dynamo,service.name=sglang-worker,deployment.environment=production,runtime.name=sglang"
+
+  # SGLang Python instrumentation
+  OTEL_PYTHON_LOG_CORRELATION: "true"
+  OTEL_PYTHON_EXCLUDED_URLS: "/health,/live,/ready,/metrics"
+
+  # SGLang metrics configuration
+  DYN_SGLANG_METRICS_ENABLED: "true"
+  DYN_SGLANG_METRICS_PORT: "8081"
+
+  # SGLang-specific tracing for RadixAttention
+  DYN_SGLANG_TRACE_RADIX: "true"
+  DYN_SGLANG_TRACE_CACHE_HIT: "true"
+  DYN_SGLANG_TRACE_PREFILL: "true"
+  DYN_SGLANG_TRACE_DECODE: "true"
+
+---
+# TRT-LLM-specific OTEL configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-otel-trtllm
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-otel-config
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+    app.kubernetes.io/managed-by: dynamo-blueprints
+    dynamo.nvidia.com/backend: trtllm
+  annotations:
+    description: "OpenTelemetry configuration optimized for TensorRT-LLM runtime"
+data:
+  # TRT-LLM-specific OTEL configuration
+  OTEL_SERVICE_NAME: "dynamo-trtllm"
+
+  # TRT-LLM trace configuration
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.dynamo.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: "grpc"
+  OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
+  OTEL_PROPAGATORS: "tracecontext,baggage"
+
+  # TRT-LLM resource attributes
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nvidia-dynamo,service.name=trtllm-worker,deployment.environment=production,runtime.name=tensorrt-llm"
+
+  # TRT-LLM Python instrumentation
+  OTEL_PYTHON_LOG_CORRELATION: "true"
+  OTEL_PYTHON_EXCLUDED_URLS: "/health,/live,/ready,/metrics"
+
+  # TRT-LLM metrics configuration
+  DYN_TRTLLM_METRICS_ENABLED: "true"
+  DYN_TRTLLM_METRICS_PORT: "8081"
+
+  # TRT-LLM-specific tracing
+  DYN_TRTLLM_TRACE_INFERENCE: "true"
+  DYN_TRTLLM_TRACE_ENGINE: "false"
+
+---
+# Frontend-specific OTEL configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-otel-frontend
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-otel-config
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+    app.kubernetes.io/managed-by: dynamo-blueprints
+  annotations:
+    description: "OpenTelemetry configuration for Dynamo frontend/router components"
+data:
+  # Frontend OTEL configuration
+  OTEL_SERVICE_NAME: "dynamo-frontend"
+
+  # Frontend trace configuration (higher sampling for request tracing)
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.dynamo.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: "grpc"
+  OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+  # Higher sampling rate for frontends to capture request flow
+  OTEL_TRACES_SAMPLER_ARG: "0.25"
+  OTEL_PROPAGATORS: "tracecontext,baggage"
+
+  # Frontend resource attributes
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nvidia-dynamo,service.name=frontend,deployment.environment=production,runtime.name=frontend"
+
+  # Frontend Python instrumentation
+  OTEL_PYTHON_LOG_CORRELATION: "true"
+  # Don't exclude health checks from frontend (useful for debugging)
+  OTEL_PYTHON_EXCLUDED_URLS: ""
+
+  # Frontend metrics
+  DYN_FRONTEND_METRICS_ENABLED: "true"
+  DYN_FRONTEND_METRICS_PORT: "8000"
+
+  # Frontend tracing - capture routing decisions
+  DYN_FRONTEND_TRACE_ROUTING: "true"
+  DYN_FRONTEND_TRACE_PREPROCESSING: "true"
+  DYN_FRONTEND_TRACE_STREAMING: "true"
+
+---
+# Development environment OTEL configuration (100% sampling)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-otel-development
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-otel-config
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+    app.kubernetes.io/managed-by: dynamo-blueprints
+  annotations:
+    description: "OpenTelemetry configuration for development/debugging (100% sampling)"
+data:
+  # Development OTEL configuration - full tracing
+  OTEL_SERVICE_NAME: "dynamo-dev"
+
+  # Development trace configuration
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.dynamo.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: "grpc"
+
+  # 100% sampling for development
+  OTEL_TRACES_SAMPLER: "always_on"
+  OTEL_TRACES_SAMPLER_ARG: "1.0"
+  OTEL_PROPAGATORS: "tracecontext,baggage,b3"
+
+  # Development resource attributes
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nvidia-dynamo,deployment.environment=development"
+
+  # Full Python instrumentation for debugging
+  OTEL_PYTHON_LOG_CORRELATION: "true"
+  OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
+  OTEL_PYTHON_EXCLUDED_URLS: ""
+
+  # Verbose logging
+  OTEL_LOG_LEVEL: "debug"
+
+  # Smaller batch sizes for faster export in development
+  OTEL_BSP_MAX_QUEUE_SIZE: "512"
+  OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "128"
+  OTEL_BSP_SCHEDULE_DELAY: "1000"
+
+  # Enable all tracing features
+  DYN_TRACING_ENABLED: "true"
+  DYN_TRACING_INCLUDE_MODEL: "true"
+  DYN_TRACING_INCLUDE_METADATA: "true"
+
+---
+# High-performance production OTEL configuration (low overhead)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamo-otel-production
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-otel-config
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: nvidia-dynamo
+    app.kubernetes.io/managed-by: dynamo-blueprints
+  annotations:
+    description: "OpenTelemetry configuration for production (low sampling, optimized)"
+data:
+  # Production OTEL configuration - minimal overhead
+  OTEL_SERVICE_NAME: "dynamo-production"
+
+  # Production trace configuration
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.dynamo.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: "grpc"
+  OTEL_EXPORTER_OTLP_TRACES_COMPRESSION: "gzip"
+
+  # Low sampling for production (1% of traces)
+  OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+  OTEL_TRACES_SAMPLER_ARG: "0.01"
+  OTEL_PROPAGATORS: "tracecontext"
+
+  # Production resource attributes
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=nvidia-dynamo,deployment.environment=production"
+
+  # Minimal Python instrumentation
+  OTEL_PYTHON_LOG_CORRELATION: "false"
+  OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "false"
+  OTEL_PYTHON_EXCLUDED_URLS: "/health,/live,/ready,/metrics"
+
+  # Production logging level
+  OTEL_LOG_LEVEL: "warn"
+
+  # Large batch sizes for efficiency
+  OTEL_BSP_MAX_QUEUE_SIZE: "4096"
+  OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "1024"
+  OTEL_BSP_SCHEDULE_DELAY: "10000"
+
+  # Minimal tracing features
+  DYN_TRACING_ENABLED: "true"
+  DYN_TRACING_INCLUDE_MODEL: "false"
+  DYN_TRACING_INCLUDE_METADATA: "false"

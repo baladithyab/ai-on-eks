@@ -1,0 +1,432 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - Resource Profile Templates
+# =============================================================================
+#
+# This file defines standardized resource profiles for different AWS GPU
+# instance types. Reference these profiles in blueprints instead of hardcoding
+# resource values to ensure consistency and easy maintenance.
+#
+# Usage:
+#   - Select profile based on your target instance type and workload
+#   - Use with kustomize patches or Helm values for injection
+#   - Profiles include requests and limits to ensure proper scheduling
+#
+# Profile Naming Convention:
+#   <size>-<gpu-type>-<gpu-count>
+#   Example: medium-a10g-4 = 4x A10G GPUs (g5.12xlarge equivalent)
+#
+# =============================================================================
+
+# =============================================================================
+# Frontend/Router Profiles (No GPU)
+# =============================================================================
+# These profiles are for non-GPU components like Frontend, Router, Planner
+
+profiles:
+  # ---------------------------------------------------------------------------
+  # Frontend Profiles - CPU-only pods for request handling
+  # ---------------------------------------------------------------------------
+
+  frontend-minimal:
+    # Minimal frontend for development/testing
+    description: "Minimal CPU resources for frontend dev/test"
+    instanceTypes: ["any"]
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+      ephemeral-storage: "10Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+      ephemeral-storage: "10Gi"
+
+  frontend-standard:
+    # Standard frontend for production workloads
+    description: "Standard frontend for production"
+    instanceTypes: ["any"]
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+      ephemeral-storage: "20Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+      ephemeral-storage: "50Gi"
+
+  frontend-high-throughput:
+    # High-throughput frontend for heavy request loads
+    description: "High-throughput frontend for heavy traffic"
+    instanceTypes: ["any"]
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+      ephemeral-storage: "50Gi"
+    limits:
+      cpu: "8"
+      memory: "16Gi"
+      ephemeral-storage: "100Gi"
+
+  # ---------------------------------------------------------------------------
+  # Small Profiles - 1 GPU (g5.xlarge, g5.2xlarge, g6.xlarge)
+  # ---------------------------------------------------------------------------
+
+  small-a10g-1:
+    # Single A10G GPU - 24GB VRAM
+    # Target instances: g5.xlarge (4 vCPU, 16GB), g5.2xlarge (8 vCPU, 32GB)
+    # Model capacity: Up to 7B models (FP16) or 14B (INT8/FP8)
+    description: "1x A10G GPU for small models (up to 7B FP16)"
+    instanceTypes:
+      - g5.xlarge
+      - g5.2xlarge
+    gpuType: "nvidia.com/gpu"
+    gpuModel: "NVIDIA A10G"
+    vram: "24Gi"
+    requests:
+      cpu: "4"
+      memory: "16Gi"
+      nvidia.com/gpu: "1"
+      ephemeral-storage: "50Gi"
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: "1"
+      ephemeral-storage: "100Gi"
+    sharedMemory: "8Gi"
+
+  small-l4-1:
+    # Single L4 GPU - 24GB VRAM
+    # Target instances: g6.xlarge, g6.2xlarge
+    # Model capacity: Up to 7B models (FP16) or 14B (INT8/FP8)
+    description: "1x L4 GPU for small models (up to 7B FP16)"
+    instanceTypes:
+      - g6.xlarge
+      - g6.2xlarge
+    gpuType: "nvidia.com/gpu"
+    gpuModel: "NVIDIA L4"
+    vram: "24Gi"
+    requests:
+      cpu: "4"
+      memory: "16Gi"
+      nvidia.com/gpu: "1"
+      ephemeral-storage: "50Gi"
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: "1"
+      ephemeral-storage: "100Gi"
+    sharedMemory: "8Gi"
+
+  # ---------------------------------------------------------------------------
+  # Medium Profiles - 4 GPUs (g5.12xlarge, g6e.12xlarge)
+  # ---------------------------------------------------------------------------
+
+  medium-a10g-4:
+    # 4x A10G GPUs - 96GB total VRAM
+    # Target instance: g5.12xlarge (48 vCPU, 192GB RAM)
+    # Model capacity: Up to 30B FP16, 70B INT8/FP8
+    # Note: PCIe topology - use SGLang for multi-GPU inference
+    description: "4x A10G GPUs for medium models (up to 30B FP16)"
+    instanceTypes:
+      - g5.12xlarge
+    gpuType: "nvidia.com/gpu"
+    gpuModel: "NVIDIA A10G"
+    vram: "96Gi"
+    requests:
+      cpu: "32"
+      memory: "128Gi"
+      nvidia.com/gpu: "4"
+      ephemeral-storage: "200Gi"
+    limits:
+      cpu: "48"
+      memory: "192Gi"
+      nvidia.com/gpu: "4"
+      ephemeral-storage: "500Gi"
+    sharedMemory: "24Gi"
+
+  medium-l40s-4:
+    # 4x L40S GPUs - 192GB total VRAM
+    # Target instance: g6e.12xlarge (48 vCPU, 384GB RAM)
+    # Model capacity: Up to 70B FP16, 140B INT8/FP8
+    # Note: PCIe topology - use SGLang for multi-GPU inference
+    description: "4x L40S GPUs for large models (up to 70B FP16)"
+    instanceTypes:
+      - g6e.12xlarge
+    gpuType: "nvidia.com/gpu"
+    gpuModel: "NVIDIA L40S"
+    vram: "192Gi"
+    requests:
+      cpu: "32"
+      memory: "192Gi"
+      nvidia.com/gpu: "4"
+      ephemeral-storage: "200Gi"
+    limits:
+      cpu: "48"
+      memory: "384Gi"
+      nvidia.com/gpu: "4"
+      ephemeral-storage: "500Gi"
+    sharedMemory: "24Gi"
+
+  # ---------------------------------------------------------------------------
+  # Large Profiles - 8 GPUs (g5.48xlarge, g6e.48xlarge, p4d.24xlarge, p5.48xlarge)
+  # ---------------------------------------------------------------------------
+
+  large-a10g-8:
+    # 8x A10G GPUs - 192GB total VRAM
+    # Target instance: g5.48xlarge (192 vCPU, 768GB RAM)
+    # Model capacity: Up to 70B FP16
+    # Note: PCIe topology - use SGLang for multi-GPU inference
+    description: "8x A10G GPUs for large models (up to 70B FP16)"
+    instanceTypes:
+      - g5.48xlarge
+    gpuType: "nvidia.com/gpu"
+    gpuModel: "NVIDIA A10G"
+    vram: "192Gi"
+    requests:
+      cpu: "96"
+      memory: "512Gi"
+      nvidia.com/gpu: "8"
+      ephemeral-storage: "500Gi"
+    limits:
+      cpu: "192"
+      memory: "768Gi"
+      nvidia.com/gpu: "8"
+      ephemeral-storage: "1Ti"
+    sharedMemory: "48Gi"
+
+  large-l40s-8:
+    # 8x L40S GPUs - 384GB total VRAM
+    # Target instance: g6e.48xlarge (192 vCPU, 1536GB RAM)
+    # Model capacity: Up to 140B FP16
+    # Note: PCIe topology - use SGLang for multi-GPU inference
+    description: "8x L40S GPUs for very large models (up to 140B FP16)"
+    instanceTypes:
+      - g6e.48xlarge
+    gpuType: "nvidia.com/gpu"
+    gpuModel: "NVIDIA L40S"
+    vram: "384Gi"
+    requests:
+      cpu: "96"
+      memory: "1024Gi"
+      nvidia.com/gpu: "8"
+      ephemeral-storage: "500Gi"
+    limits:
+      cpu: "192"
+      memory: "1536Gi"
+      nvidia.com/gpu: "8"
+      ephemeral-storage: "1Ti"
+    sharedMemory: "48Gi"
+
+  large-a100-8:
+    # 8x A100 GPUs - 320GB or 640GB total VRAM (40GB or 80GB models)
+    # Target instance: p4d.24xlarge (96 vCPU, 1152GB RAM, 8x A100 40GB)
+    # Model capacity: 140B+ FP16
+    # Note: NVSwitch/NVLink topology - vLLM recommended
+    description: "8x A100 40GB GPUs with NVLink (140B+ models)"
+    instanceTypes:
+      - p4d.24xlarge
+    gpuType: "nvidia.com/gpu"
+    gpuModel: "NVIDIA A100-SXM4-40GB"
+    vram: "320Gi"
+    requests:
+      cpu: "64"
+      memory: "768Gi"
+      nvidia.com/gpu: "8"
+      ephemeral-storage: "500Gi"
+    limits:
+      cpu: "96"
+      memory: "1152Gi"
+      nvidia.com/gpu: "8"
+      ephemeral-storage: "1Ti"
+    sharedMemory: "48Gi"
+
+  large-h100-8:
+    # 8x H100 GPUs - 640GB total VRAM
+    # Target instance: p5.48xlarge (192 vCPU, 2048GB RAM)
+    # Model capacity: 400B+ FP16, 800B+ FP8
+    # Note: NVSwitch/NVLink topology - vLLM recommended
+    # Features: FP8 support, Transformer Engine, NVLink 4.0
+    description: "8x H100 80GB GPUs with NVLink (400B+ models)"
+    instanceTypes:
+      - p5.48xlarge
+    gpuType: "nvidia.com/gpu"
+    gpuModel: "NVIDIA H100 80GB HBM3"
+    vram: "640Gi"
+    requests:
+      cpu: "96"
+      memory: "1536Gi"
+      nvidia.com/gpu: "8"
+      ephemeral-storage: "500Gi"
+    limits:
+      cpu: "192"
+      memory: "2048Gi"
+      nvidia.com/gpu: "8"
+      ephemeral-storage: "2Ti"
+    sharedMemory: "64Gi"
+
+  # ---------------------------------------------------------------------------
+  # XLarge Profiles - Multi-Node (for disaggregated or very large models)
+  # ---------------------------------------------------------------------------
+
+  xlarge-h100-16:
+    # 16x H100 GPUs (2 nodes, distributed)
+    # Target: 2x p5.48xlarge nodes
+    # Model capacity: 800B+ models
+    # Note: Requires LeaderWorkerSet or multi-pod deployment
+    description: "16x H100 GPUs across 2 nodes for 800B+ models"
+    instanceTypes:
+      - p5.48xlarge
+    gpuType: "nvidia.com/gpu"
+    gpuModel: "NVIDIA H100 80GB HBM3"
+    vram: "1280Gi"
+    nodeCount: 2
+    perNode:
+      requests:
+        cpu: "96"
+        memory: "1536Gi"
+        nvidia.com/gpu: "8"
+        ephemeral-storage: "500Gi"
+      limits:
+        cpu: "192"
+        memory: "2048Gi"
+        nvidia.com/gpu: "8"
+        ephemeral-storage: "2Ti"
+      sharedMemory: "64Gi"
+
+  # ---------------------------------------------------------------------------
+  # KVBM (KV Cache Block Manager) Profiles
+  # ---------------------------------------------------------------------------
+
+  kvbm-standard:
+    # Standard KVBM server with GPU for cache management
+    description: "KVBM server with GPU for KV cache management"
+    instanceTypes:
+      - g5.xlarge
+      - g5.2xlarge
+    gpuType: "nvidia.com/gpu"
+    requests:
+      cpu: "4"
+      memory: "16Gi"
+      nvidia.com/gpu: "1"
+      ephemeral-storage: "100Gi"
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: "1"
+      ephemeral-storage: "500Gi"
+    sharedMemory: "8Gi"
+
+  kvbm-disk:
+    # KVBM with disk-based overflow
+    description: "KVBM server with disk overflow support"
+    instanceTypes:
+      - any
+    gpuType: "nvidia.com/gpu"
+    requests:
+      cpu: "4"
+      memory: "16Gi"
+      nvidia.com/gpu: "1"
+      ephemeral-storage: "500Gi"
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: "1"
+      ephemeral-storage: "1Ti"
+    sharedMemory: "8Gi"
+
+# =============================================================================
+# Model Size to Profile Mapping
+# =============================================================================
+# Use this as a reference for selecting the appropriate profile
+
+modelSizeGuide:
+  # Model parameters to required VRAM (approximate, FP16)
+  # Formula: params * 2 bytes + 20% overhead
+
+  "1B-7B":
+    vramRequired: "16-24Gi"
+    recommendedProfiles:
+      - small-a10g-1
+      - small-l4-1
+    tensorParallelism: 1
+    notes: "Single GPU sufficient for most 7B models"
+
+  "8B-13B":
+    vramRequired: "24-48Gi"
+    recommendedProfiles:
+      - small-a10g-1  # With quantization
+      - medium-a10g-4
+      - medium-l40s-4
+    tensorParallelism: "1-2"
+    notes: "May require TP=2 or quantization for larger context"
+
+  "14B-30B":
+    vramRequired: "48-96Gi"
+    recommendedProfiles:
+      - medium-a10g-4
+      - medium-l40s-4
+    tensorParallelism: "2-4"
+    notes: "Recommend 4 GPUs for production workloads"
+
+  "31B-70B":
+    vramRequired: "96-192Gi"
+    recommendedProfiles:
+      - medium-l40s-4  # With quantization
+      - large-a10g-8
+      - large-l40s-8
+      - large-a100-8
+      - large-h100-8
+    tensorParallelism: "4-8"
+    notes: "Use L40S/H100 for best performance; PCIe instances use SGLang"
+
+  "71B-140B":
+    vramRequired: "192-400Gi"
+    recommendedProfiles:
+      - large-l40s-8
+      - large-h100-8
+    tensorParallelism: 8
+    notes: "H100 recommended for production; consider FP8 quantization"
+
+  "140B+":
+    vramRequired: "400Gi+"
+    recommendedProfiles:
+      - large-h100-8
+      - xlarge-h100-16
+    tensorParallelism: "8-16"
+    notes: "Multi-node deployment may be required"
+
+# =============================================================================
+# Runtime Backend Recommendations
+# =============================================================================
+
+backendRecommendations:
+  pcie:
+    # For PCIe-based instances (g5, g6, g6e)
+    primary: sglang
+    reason: "Avoids vLLM's shm_broadcast deadlock on PCIe topologies"
+    instances:
+      - g5.xlarge
+      - g5.2xlarge
+      - g5.4xlarge
+      - g5.8xlarge
+      - g5.12xlarge
+      - g5.16xlarge
+      - g5.24xlarge
+      - g5.48xlarge
+      - g6.xlarge
+      - g6.2xlarge
+      - g6e.xlarge
+      - g6e.2xlarge
+      - g6e.12xlarge
+      - g6e.24xlarge
+      - g6e.48xlarge
+
+  nvlink:
+    # For NVLink-based instances (p4d, p5)
+    primary: vllm
+    reason: "vLLM optimized for NVLink communication patterns"
+    instances:
+      - p4d.24xlarge
+      - p5.48xlarge

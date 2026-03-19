@@ -1,0 +1,137 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example: vLLM Aggregated Deployment with KVBM (KV Block Manager)
+#
+# This example demonstrates how to enable KVBM features (v0.6.0+) for advanced
+# KV cache management. KVBM is a WORKLOAD-LEVEL feature configured in the
+# DynamoGraphDeployment spec, not a platform-level toggle.
+#
+# KVBM Features:
+# - Disk offloading: Extend SSD lifespan with access pattern filtering
+# - CPU cache: Use host memory for KV cache overflow
+# - Better memory management for large context windows
+#
+# For more information, see:
+# - Upgrade guide: infra/nvidia-dynamo/UPGRADE_TO_V0.6.0.md
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-aggregated-kvbm
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "10"
+          memory: "200Gi" # Large memory for CPU cache
+          gpu: "1"
+        limits:
+          cpu: "10"
+          memory: "250Gi"
+          gpu: "1"
+      envs:
+        # Enable KVBM CPU cache (100GB of host memory for KV cache)
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "100"
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            # Enable KVBM connector and configure for large context
+            # DeepSeek-R1-8B on L40S (48GB) with 0.85 GPU util, ~15% headroom for KVBM GPU tier
+            - |
+              python3 -m dynamo.vllm \
+                --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+                --connector kvbm \
+                --gpu-memory-utilization 0.85 \
+                --max-model-len 16384 \
+                --enforce-eager \
+                --disable-log-requests \
+                2>&1 | tee /tmp/vllm.log

@@ -1,0 +1,164 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Aggregated Deployment for GPT-OSS-20B
+#
+# OpenAI's GPT-OSS-20B is a smaller reasoning model with tool calling support.
+# Uses AGGREGATED architecture (single worker) to bypass shared memory broadcast
+# issues found in disaggregated deployments on PCIe GPU topologies.
+#
+# Hardware Requirements:
+# - 1x g6e instance with 1x L40S (48GB) — model is 13GB mxfp4, fits single GPU
+# - TP=1 required: vLLM TP>1 deadlocks on PCIe (shm_broadcast bug, no workaround in v0.8.1)
+# - For TP>1 on PCIe, use SGLang backend instead
+# - Single node deployment
+#
+# Features:
+# - EFS-backed model cache
+# - Reasoning parser (gpt_oss) for chain-of-thought
+# - Tool call parser (harmony) for function calling
+# - No inter-process communication (bypasses shared memory bug)
+# - RECOMMENDED pattern for large models until upstream bug fixed
+#
+# Use cases:
+# - Development and testing of reasoning pipelines
+# - Production inference when disaggregated fails
+# - Single-worker deployment for maximum reliability
+#
+# Why Aggregated?
+# - Disaggregated deployments hit shared memory broadcast synchronization
+#   deadlock on PCIe GPU topologies (tested: DeepSeek-70B, GPT-OSS-20B)
+# - Aggregated single-worker mode bypasses all inter-process communication
+# - Proven stable pattern for ai-on-eks deployments
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-gptoss-20b-agg
+  namespace: dynamo
+spec:
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - "exit 0"
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmWorker:
+      # AGGREGATED: Single worker handles both prefill and decode
+      # NO inter-process communication = NO shared memory broadcast issues
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+        # GPT-OSS uses XET storage format which needs writable HF_HOME for decompression
+      - name: HF_HOME
+        value: "/tmp/hf-home"
+      - name: HF_HUB_CACHE
+        value: "/home/dynamo/.cache/huggingface/hub"
+      - name: HF_HUB_OFFLINE
+        value: "1"
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "4"
+          memory: "24Gi"
+          gpu: "1"
+        limits:
+          cpu: "4"
+          memory: "24Gi"
+          gpu: "1"
+      sharedMemory:
+        size: 12Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g7e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # 300 * 60s = 5 hours max startup time for large model loading
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+            # AGGREGATED MODE: Single worker, TP=1 (model is 13GB mxfp4, fits single L40S)
+            # --connector none: disables NIXL KV transfer (not needed in aggregated mode)
+            #   Without this, Dynamo forces mp executor for NIXL GIL workaround,
+            #   which triggers shm_broadcast deadlock on PCIe topologies
+          - |
+            python3 -m dynamo.vllm \
+              --model openai/gpt-oss-20b \
+              --tensor-parallel-size 1 \
+              --max-model-len 8192 \
+              --gpu-memory-utilization 0.90 \
+              --enforce-eager \
+              --connector none \
+              --dyn-reasoning-parser gpt_oss \
+              --dyn-tool-call-parser harmony \
+              2>&1 | tee /tmp/vllm.log

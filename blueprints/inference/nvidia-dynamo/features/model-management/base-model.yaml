@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example: Base Model Registration with DynamoModel
+#
+# This example demonstrates how to register a base model with DynamoModel CRD
+# to track its endpoints. This is useful for monitoring which pods are serving
+# a particular model.
+#
+# Prerequisites:
+# 1. A running DynamoGraphDeployment with modelRef configured
+# 2. Worker pods must be ready and serving the base model
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: qwen-base
+  namespace: dynamo-system
+spec:
+  # Full model identifier - same as the model being served
+  modelName: Qwen/Qwen3-0.6B
+
+  # Base model name - must match modelRef.name in your DGD
+  baseModelName: Qwen/Qwen3-0.6B
+
+  # Model type: base, lora, or adapter
+  modelType: base
+
+---
+# Alternative: Llama Base Model Example
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: llama-base
+  namespace: dynamo-system
+spec:
+  modelName: meta-llama/Llama-3.3-70B-Instruct
+  baseModelName: meta-llama/Llama-3.3-70B-Instruct
+  modelType: base

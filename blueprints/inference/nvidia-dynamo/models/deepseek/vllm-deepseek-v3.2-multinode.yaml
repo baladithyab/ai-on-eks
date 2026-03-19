@@ -1,0 +1,141 @@
+# DeepSeek V3.2 (685B MoE) - Multi-Node vLLM Deployment
+# Architecture: deepseek_v32 with DeepSeek Sparse Attention (DSA)
+# Hardware: 2x p5.48xlarge (16x H100, 80GB each = 1280GB VRAM)
+#   NOTE: g7e (RTX PRO 6000, sm_120) does NOT work — DeepSeek V3.2's MLA + Sparse
+#   Attention requires FlashMLA Sparse, which only supports sm_90 (H100) and sm_100 (B200).
+#   Use p5-nvidia (H100) or p6-nvidia (B200) NodePools.
+# Parallelism: TP=16 across 2 nodes (8 GPUs per node)
+# Precision: FP8 (native, tagged on HuggingFace)
+#
+# vLLM recipe notes (docs.vllm.ai):
+#   - Blackwell optimal: TP=1 + EP/DP (avoids FlashMLA-Sparse padding at TP=8)
+#   - Requires --tokenizer-mode deepseek_v32
+#   - DeepGEMM needed for MQA logits computation
+#   - Currently using TP=16 for multi-node; can be tuned to EP/DP later
+#
+# Cost: ~2x p5.48xlarge on-demand
+# Prerequisites: p5-nvidia Karpenter NodePool, EFA device plugin, HuggingFace token
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-deepseek-v3-2
+  namespace: dynamo
+  # Grove handles multi-node via PodCliqueSets (LWS detection is broken in operator 0.8.1)
+spec:
+  backendFramework: vllm
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 20
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - "python3 -m dynamo.frontend --http-port 8000"
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: worker
+      replicas: 1
+      multinode:
+        nodeCount: 2
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        # Note: shared-memory volume + /dev/shm mount are added automatically by the operator
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            # 671B model takes a long time to load
+            failureThreshold: 120
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          # NOTE: For Grove multinode, use command: ["python3"] (NOT ["/bin/sh", "-c"]).
+          # The operator wraps with: ray start --head && <command> <args> --distributed-executor-backend ray
+          # Using /bin/sh -c creates a broken nested shell since operator also wraps with /bin/sh -c.
+          command:
+          - python3
+          args:
+          - "-m"
+          - "dynamo.vllm"
+          - "--model"
+          - "deepseek-ai/DeepSeek-V3.2"
+          - "--tensor-parallel-size"
+          - "16"
+            # NOTE: --tokenizer-mode deepseek_v32 requires vLLM >= 0.13
+            # The Dynamo 0.8.1 image ships vLLM 0.12.0 which only supports hf/mistral
+            # Omitting uses 'auto' (defaults to 'hf'), which works for chat completion
+          - "--max-model-len"
+          - "8192"
+          - "--trust-remote-code"

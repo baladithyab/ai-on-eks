@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM DGDR - Qwen2.5-Coder-32B-Instruct Online Profiling
+#
+# This profiles and auto-deploys Qwen2.5-Coder-32B-Instruct for code generation:
+# - Model Express for automated model loading and caching
+# - No gated model access required (open weights)
+# - Requires 2-4 GPUs with ~80GB combined (TP=2 on g6e.12xlarge recommended)
+# - Optimized for code completion and generation tasks
+#
+# Expected profiling time: 2-3 hours
+#
+# Prerequisites:
+# - kube-prometheus-stack installed
+# - g6e.12xlarge or similar (4x L40S, 192GB total VRAM)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-qwen-coder-32b
+  namespace: dynamo
+spec:
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1"
+    config:
+      deployment:
+        # Model loading timeout (32B takes ~15-20 mins to download + load)
+        # Increased to 60 minutes for decode interpolation phase
+        timeout: 3600  # 60 minutes
+      hardware:
+        # 32B model needs ~64GB VRAM, fits on 2x L40S (96GB)
+        min_num_gpus_per_engine: 2
+        max_num_gpus_per_engine: 4
+        num_gpus_per_node: 4
+      sweep:
+        # Online profiling (AIPerf benchmarks) - required for L40S
+        use_ai_configurator: false
+      sla:
+        # Code generation optimized SLA targets
+        isl: 2048      # Typical code context
+        osl: 256       # Code completion length
+        ttft: 300.0    # Time To First Token (ms)
+        itl: 30.0      # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1"
+
+  autoApply: true

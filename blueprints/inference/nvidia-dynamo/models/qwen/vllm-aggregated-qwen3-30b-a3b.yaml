@@ -1,0 +1,156 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Aggregated Deployment for Qwen3-30B-A3B (Mixture of Experts)
+#
+# Qwen3-30B-A3B is a Mixture-of-Experts (MoE) model from the Qwen3 family.
+# It has 30B total parameters across 128 experts, with 8 experts active per
+# token (~3B active parameters). This gives near-dense-model quality at a
+# fraction of the per-token compute cost.
+#
+# Hardware Requirements:
+# - g6e.12xlarge (2x L40S, 96GB VRAM total) with TP=2
+# - ~60GB VRAM for model weights (BF16)
+# - Single node deployment
+#
+# Features:
+# - Model Express for automated model loading and caching
+# - vLLM backend with native MoE support
+# - Aggregated single-worker architecture
+# - 128 experts, 8 active per token
+# - Supports up to 40K context length
+#
+# Use cases:
+# - Cost-efficient inference (3B active params, 30B quality)
+# - Code generation and reasoning tasks
+# - Multilingual applications
+# - Production MoE inference on PCIe GPUs
+#
+# Why MoE?
+# - Higher quality per FLOP than dense models of equivalent compute
+# - All 30B weights loaded in VRAM, but only 8/128 experts fire per token
+# - vLLM handles expert routing and load balancing natively
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-qwen3-30b-a3b
+  namespace: dynamo
+spec:
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - "exit 0"
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmWorker:
+      # AGGREGATED: Single worker handles both prefill and decode
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "10"
+          memory: "80Gi"
+          gpu: "2"
+        limits:
+          cpu: "10"
+          memory: "80Gi"
+          gpu: "2"
+      sharedMemory:
+        size: 12Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g7e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # 300 * 60s = 5 hours max startup time for MoE model loading
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+            # vLLM AGGREGATED MODE for Qwen3-30B-A3B (MoE)
+            # vLLM handles expert routing natively
+          - |
+            python3 -m dynamo.vllm \
+              --model Qwen/Qwen3-30B-A3B \
+              --tensor-parallel-size 2 \
+              --max-model-len 16384 \
+              --gpu-memory-utilization 0.90 \
+              --enforce-eager \
+              --connector none \
+              2>&1 | tee /tmp/vllm.log

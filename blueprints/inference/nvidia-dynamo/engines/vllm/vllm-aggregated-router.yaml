@@ -1,0 +1,131 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example: vLLM Aggregated Deployment with KV Router Enabled
+#
+# This example demonstrates how to enable the KV Router feature (v0.5.0+) for
+# cache-aware routing. KV Router is a WORKLOAD-LEVEL feature configured in the
+# DynamoGraphDeployment spec, not a platform-level toggle.
+#
+# KV Router Benefits:
+# - Improved cache hit rates for workloads with shared prompt prefixes
+# - Reduced latency by routing requests to workers with relevant KV cache
+# - Better GPU utilization through intelligent request routing
+#
+# For more information, see:
+# - Dynamo docs: docs/benchmarks/kv-router-ab-testing.md
+# - Upgrade guide: infra/nvidia-dynamo/UPGRADE_TO_V0.6.0.md
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-aggregated-kv-router
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+            # Enable KV Router by setting DYN_ROUTER_MODE=kv
+          - python3 -m dynamo.frontend --http-port 8000 --router-mode kv
+      envs:
+        # Alternative: Set via environment variable
+      - name: DYN_ROUTER_MODE
+        value: kv
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      componentType: worker
+      replicas: 2  # 2 replicas for load balancing with KV Router
+      resources:
+        requests:
+          cpu: "10"
+          memory: 20Gi
+          gpu: "1"
+        limits:
+          cpu: "10"
+          memory: 20Gi
+          gpu: "1"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 10
+            failureThreshold: 60
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+            # Enable prefix caching for better KV Router performance
+            # Using Qwen3-0.6B for efficient resource utilization
+          - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B --enable-prefix-caching 2>&1 | tee /tmp/vllm.log

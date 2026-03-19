@@ -1,0 +1,113 @@
+# prefetch-job.yaml — Kubernetes Job template for model prefetching
+#
+# This Job signals the Model Express server to download HuggingFace models
+# using the modelexpress-cli with --strategy server-only. The CLI connects
+# to the MX server's gRPC API; the server handles all storage/caching.
+#
+# The Job does NOT mount the PVC or download files directly — it's a pure
+# orchestrator that tells the MX server what to download, then waits for
+# each download to complete.
+#
+# Partial failures are tracked and reported but do NOT cause the Job to
+# fail — this avoids pointless retries for models that are genuinely
+# unavailable (gated, too large for disk, etc.).
+#
+# Placeholders (replaced by prefetch-models.sh via sed):
+#   IMAGE_PLACEHOLDER       → MX server image (read from active deployment)
+#   MODELS_PLACEHOLDER      → comma-separated model IDs
+#   PARALLEL_PLACEHOLDER    → max concurrent downloads (integer)
+#   NAMESPACE_PLACEHOLDER   → target namespace
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: model-prefetch
+  namespace: NAMESPACE_PLACEHOLDER
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: prefetch
+          image: IMAGE_PLACEHOLDER
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -uo pipefail
+
+              MX_ENDPOINT="http://modelexpress.NAMESPACE_PLACEHOLDER.svc.cluster.local:8001"
+              CLI="/app/modelexpress-cli"
+              MODELS="$PREFETCH_MODELS"
+              MAX_PARALLEL="$PREFETCH_MAX_PARALLEL"
+              FAIL_LOG="/tmp/prefetch-failures.log"
+              touch "$FAIL_LOG"
+
+              IFS=',' read -ra MODEL_LIST <<< "$MODELS"
+              TOTAL=${#MODEL_LIST[@]}
+
+              echo "=== Model Express Prefetch Job ==="
+              echo "MX endpoint: $MX_ENDPOINT"
+              echo "Strategy: server-only (MX server handles storage)"
+              echo "Models: $TOTAL"
+              echo "Max parallel: $MAX_PARALLEL"
+              echo ""
+
+              echo "Checking MX server health..."
+              for i in $(seq 1 30); do
+                if $CLI -e "$MX_ENDPOINT" --quiet health 2>/dev/null; then
+                  echo "MX server is healthy"
+                  break
+                fi
+                if [ "$i" -eq 30 ]; then
+                  echo "ERROR: MX server not healthy after 30 attempts"
+                  exit 1
+                fi
+                echo "  Waiting for MX server... ($i/30)"
+                sleep 5
+              done
+              echo ""
+
+              download_model() {
+                local model="$1"
+                local endpoint="$2"
+                local cli="$3"
+                local fail_log="$4"
+                echo "[START] $model"
+                if $cli -e "$endpoint" -t 86400 model download "$model" --strategy server-only 2>&1; then
+                  echo "[OK] $model"
+                else
+                  echo "[FAIL] $model"
+                  echo "$model" >> "$fail_log"
+                fi
+              }
+              export -f download_model
+
+              printf '%s\n' "${MODEL_LIST[@]}" | \
+                xargs -P "$MAX_PARALLEL" -I{} bash -c 'download_model "$@"' _ {} "$MX_ENDPOINT" "$CLI" "$FAIL_LOG"
+
+              echo ""
+              echo "=== Prefetch complete ==="
+              FAIL_COUNT=$(wc -l < "$FAIL_LOG" 2>/dev/null || echo 0)
+              OK_COUNT=$((TOTAL - FAIL_COUNT))
+              echo "Results: $OK_COUNT succeeded, $FAIL_COUNT failed out of $TOTAL total"
+              if [ "$FAIL_COUNT" -gt 0 ]; then
+                echo ""
+                echo "Failed models:"
+                cat "$FAIL_LOG" | while read -r m; do echo "  - $m"; done
+              fi
+              echo ""
+              echo "Cached models on server:"
+              $CLI -e "$MX_ENDPOINT" model list 2>/dev/null || true
+          env:
+            - name: PREFETCH_MODELS
+              value: "MODELS_PLACEHOLDER"
+            - name: PREFETCH_MAX_PARALLEL
+              value: "PARALLEL_PLACEHOLDER"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"

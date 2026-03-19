@@ -1,0 +1,158 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM DGDR - GPT-OSS-20B Online Profiling with EFS Cache
+#
+# This profiles and auto-deploys OpenAI's GPT-OSS-20B reasoning model:
+# - Reasoning parser (gpt_oss) for chain-of-thought output
+# - Tool call parser (harmony) for function calling
+# - Uses vLLM backend (NOT SGLang - SGLang DGDR has upstream profiler bug)
+#
+# Expected profiling time: 1-2 hours
+#
+# Prerequisites:
+# - hf-token-secret with HuggingFace token (required for gated model)
+# - g6e.12xlarge or equivalent (2-4 GPUs with 48GB+ each)
+#
+# Why vLLM for DGDR instead of SGLang?
+# - SGLang DGDR has upstream profiler bug that causes failures
+# - vLLM DGDR is the recommended path for auto-profiling
+# - Use sglang-aggregated/disaggregated for manual deployments
+#
+# NOTE: ConfigMap must appear BEFORE the DGDR to avoid a race condition
+# where the operator tries to read the ConfigMap before it exists.
+
+# ConfigMap with full DGD base config for GPT-OSS-20B with EFS cache
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gptoss-20b-dgd-config
+  namespace: dynamo
+data:
+  disagg.yaml: |
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeployment
+    metadata:
+      name: vllm-gptoss-20b-disagg
+    spec:
+      services:
+        Frontend:
+          componentType: frontend
+          replicas: 1
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - "python3 -m dynamo.frontend --http-port 8000"
+        VllmDecodeWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: decode
+          replicas: 1
+          resources:
+            limits:
+              gpu: "2"
+          sharedMemory:
+            size: 12Gi
+          extraPodSpec:
+            nodeSelector:
+              karpenter.sh/nodepool: g7e-nvidia
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - openai/gpt-oss-20b
+                - --tensor-parallel-size
+                - "2"
+                - --max-model-len
+                - "8192"
+                - --gpu-memory-utilization
+                - "0.90"
+                - --enforce-eager
+                - --dyn-reasoning-parser
+                - gpt_oss
+                - --dyn-tool-call-parser
+                - harmony
+        VllmPrefillWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: prefill
+          replicas: 1
+          resources:
+            limits:
+              gpu: "2"
+          sharedMemory:
+            size: 12Gi
+          extraPodSpec:
+            nodeSelector:
+              karpenter.sh/nodepool: g7e-nvidia
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+              workingDir: /workspace/components/backends/vllm
+              command:
+              - python3
+              - -m
+              - dynamo.vllm
+              args:
+                - --model
+                - openai/gpt-oss-20b
+                - --is-prefill-worker
+                - --tensor-parallel-size
+                - "2"
+                - --max-model-len
+                - "8192"
+                - --gpu-memory-utilization
+                - "0.90"
+                - --enforce-eager
+                - --dyn-reasoning-parser
+                - gpt_oss
+                - --dyn-tool-call-parser
+                - harmony
+---
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-dgdr-gptoss-20b
+  namespace: dynamo
+spec:
+  model: openai/gpt-oss-20b
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1"
+    # Reference ConfigMap with EFS cache configuration
+    configMapRef:
+      name: gptoss-20b-dgd-config
+      key: disagg.yaml
+    config:
+      deployment:
+        # Model loading timeout
+        timeout: 1800 # 30 minutes
+      hardware:
+        # 20B model needs ~40GB VRAM for BF16
+        min_num_gpus_per_engine: 2
+        max_num_gpus_per_engine: 4
+        num_gpus_per_node: 4
+      sweep:
+        # Online profiling (AIPerf benchmarks) - required for L40S
+        use_ai_configurator: false
+      sla:
+        # Reasoning-optimized SLA targets
+        isl: 2048 # Input sequence length
+        osl: 256 # Output sequence length
+        ttft: 200.0 # Time To First Token (ms)
+        itl: 25.0 # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1"
+
+  autoApply: true

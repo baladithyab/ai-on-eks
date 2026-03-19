@@ -1,0 +1,177 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# LLaVA 1.5 7B Multimodal Deployment
+# Supports image understanding and visual question answering
+# Requires 3 GPUs (EncodeWorker + VLMWorker + Processor)
+#
+# IMPORTANT: Image URL Access Limitations
+# - External URLs may return 403 Forbidden (Wikipedia, some CDNs)
+# - For production: Use base64-encoded images or internal image URLs
+# - Content must be array format: [{"type": "text", ...}, {"type": "image_url", ...}]
+# - String format for content is NOT supported for multimodal
+#
+# Example request format:
+# {
+#   "model": "llava-hf/llava-1.5-7b-hf",
+#   "messages": [{
+#     "role": "user",
+#     "content": [
+#       {"type": "text", "text": "What's in this image?"},
+#       {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+#     ]
+#   }]
+# }
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: llava
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          # Uses vllm-runtime intentionally — multimodal frontend runs custom processor code from /workspace/examples/multimodal
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+
+    EncodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "16Gi"
+          gpu: "1"
+        limits:
+          cpu: "4"
+          gpu: "1"
+          memory: "16Gi"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/examples/multimodal
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - pip install --force-reinstall --no-deps opencv-python-headless &&python3 components/encode_worker.py --model llava-hf/llava-1.5-7b-hf
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VLMWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "16Gi"
+          gpu: "1"
+        limits:
+          cpu: "4"
+          gpu: "1"
+          memory: "16Gi"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/examples/multimodal
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - pip install --force-reinstall --no-deps opencv-python-headless &&python3 components/worker.py --model llava-hf/llava-1.5-7b-hf --worker-type prefill
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    Processor:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "24Gi"
+        limits:
+          gpu: "1"
+          memory: "24Gi"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 120
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - 'pip install --force-reinstall --no-deps opencv-python-headless &&python3 components/processor.py --model llava-hf/llava-1.5-7b-hf --prompt-template "USER: <image>\n<prompt> ASSISTANT:"'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

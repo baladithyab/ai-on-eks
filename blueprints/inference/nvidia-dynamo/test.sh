@@ -1,39 +1,83 @@
 #!/bin/bash
-
-#---------------------------------------------------------------
-# NVIDIA Dynamo v0.4.1 Example Testing Script
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
-# Simple testing script for deployed Dynamo examples.
-# Tests health, metrics, and API endpoints based on example type.
+# NVIDIA Dynamo v0.8.1 Modular Testing Script
+#
+# A modular test router that runs general tests by default and supports
+# targeted tests via flags for specific features.
+#
+# Enhanced Features (v0.8.1+):
+# - --check-metrics: Verify Prometheus metrics are being scraped
+# - --check-traces: Verify OTEL traces are being collected
+# - --validate: Run blueprint validation before testing
+# - --require-context: Safety check for kubectl context match
 #
 # Usage:
-#   ./test.sh [example-name]
+#   ./test.sh <example-id>                    # Runs general tests only
+#   ./test.sh <example-id> --multimodal       # Adds multimodal tests
+#   ./test.sh <example-id> --kv-routing       # Adds KV routing tests
+#   ./test.sh <example-id> --otel             # Adds OTEL tracing tests
+#   ./test.sh <example-id> --performance      # Adds performance benchmarks
+#   ./test.sh <example-id> --check-metrics    # Verify metrics scraping
+#   ./test.sh <example-id> --check-traces     # Verify trace collection
+#   ./test.sh <example-id> --validate         # Validate blueprint first
+#   ./test.sh <example-id> --full             # Runs all applicable tests
 #
 # Examples:
-#   ./test.sh hello-world   # Test hello-world example
-#   ./test.sh vllm         # Test vLLM deployment
-#   ./test.sh sglang       # Test SGLang deployment
-#   ./test.sh trtllm       # Test TensorRT-LLM deployment
-#   ./test.sh multinode-vllm # Test multi-node vLLM deployment
-#   ./test.sh              # Interactive selection
-#---------------------------------------------------------------
+#   ./test.sh vllm-aggregated-default              # Basic general tests
+#   ./test.sh qwen2.5-vl-7b --multimodal           # General + multimodal
+#   ./test.sh vllm-router --kv-routing             # General + KV routing
+#   ./test.sh vllm-otel-tracing --otel             # General + OTEL tracing
+#   ./test.sh vllm-aggregated-default --performance --parallel 10
+#   ./test.sh vllm-disaggregated-default --full    # All applicable tests
+#   ./test.sh vllm-full-observability --check-metrics --check-traces
 
 set -euo pipefail
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TESTS_DIR="${SCRIPT_DIR}/tests"
+SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
+CONFIG_DIR="${SCRIPT_DIR}/config"
+
+# Source shared library
+# shellcheck source=scripts/lib/blueprint-common.sh
+source "${SCRIPT_DIR}/scripts/lib/blueprint-common.sh"
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Default namespace
-NAMESPACE="dynamo-cloud"
+# Default configuration
+NAMESPACE="dynamo"
 
-# Utility functions
+# Test flags
+EXAMPLE=""
+RUN_GENERAL=true
+RUN_MULTIMODAL=false
+RUN_KV_ROUTING=false
+RUN_OTEL=false
+RUN_PERFORMANCE=false
+RUN_FULL=false
+
+# New observability verification flags
+CHECK_METRICS=false
+CHECK_TRACES=false
+VALIDATE_FIRST=false
+REQUIRE_CONTEXT=""
+
+# Forward options
+EXTRA_ARGS=""
+
+#---------------------------------------------------------------
+# Utility Functions
+#---------------------------------------------------------------
+
 info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
@@ -47,615 +91,827 @@ error() {
 }
 
 success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${GREEN}[PASS]${NC} $1"
 }
 
-section() {
-    echo -e "\n${BLUE}=== $1 ===${NC}"
+fail() {
+    echo -e "${RED}[FAIL]${NC} $1"
 }
 
-print_banner() {
-    local title="$1"
-    local width=80
-    local line=$(printf '%*s' "$width" | tr ' ' '=')
+show_help() {
+    cat <<'HELP'
+NVIDIA Dynamo v0.8.1 Modular Testing Script
 
-    echo -e "\n${BLUE}${line}${NC}"
-    echo -e "${BLUE}$(printf '%*s' $(( (width - ${#title}) / 2 )) '')${title}${NC}"
-    echo -e "${BLUE}${line}${NC}\n"
+A modular test router that runs general tests by default and supports
+targeted tests via flags for specific features.
+
+Usage:
+  ./test.sh <example-id> [OPTIONS]
+
+Test Selection:
+  (none)                 Run general tests only (health, models, basic inference)
+  --multimodal           Add multimodal tests (image/video for VLM models)
+  --kv-routing           Add KV cache routing tests (for router deployments)
+  --otel                 Add OpenTelemetry tracing tests (for OTEL deployments)
+  --performance          Add performance benchmarks (TTFT, throughput)
+  --full                 Run all applicable tests
+
+Observability Verification:
+  --check-metrics        Verify Prometheus metrics are being scraped
+  --check-traces         Verify OTEL traces are being collected
+  --validate             Run blueprint validation before testing
+
+General Options:
+  --skip-general         Skip general tests (run only targeted tests)
+  --port <port>          Local port for port forwarding
+  --timeout <seconds>    Request timeout (default: 60)
+  --parallel <n>         Number of parallel requests for performance tests
+  -h, --help             Show this help message
+
+Examples:
+  ./test.sh vllm-aggregated-default              # Basic general tests
+  ./test.sh qwen2.5-vl-7b --multimodal           # General + multimodal
+  ./test.sh vllm-router --kv-routing             # General + KV routing
+  ./test.sh vllm-otel-tracing --otel             # General + OTEL
+  ./test.sh vllm-aggregated-default --performance
+  ./test.sh vllm-disaggregated-default --full    # All applicable tests
+  ./test.sh vllm-full-observability --check-metrics --check-traces
+
+Test Organization:
+  tests/
+  ├── general/                 Basic tests for any deployment
+  │   └── basic-inference.sh   Health, models, chat completion
+  └── targeted/                Feature-specific tests
+      ├── multimodal-tests/    Image/video tests for VLM
+      ├── kv-routing-tests/    KV cache routing tests
+      ├── observability-tests/ OTEL and metrics tests
+      └── performance-tests/   Throughput and latency benchmarks
+
+HELP
+    exit 0
 }
-
-print_banner "DYNAMO EXAMPLE TESTING"
 
 #---------------------------------------------------------------
-# Example Selection
+# Parse Arguments
 #---------------------------------------------------------------
 
-section "Example Selection"
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                ;;
+            --multimodal)
+                RUN_MULTIMODAL=true
+                shift
+                ;;
+            --kv-routing)
+                RUN_KV_ROUTING=true
+                shift
+                ;;
+            --otel)
+                RUN_OTEL=true
+                shift
+                ;;
+            --performance)
+                RUN_PERFORMANCE=true
+                shift
+                ;;
+            --full)
+                RUN_FULL=true
+                shift
+                ;;
+            --skip-general)
+                RUN_GENERAL=false
+                shift
+                ;;
+            --check-metrics)
+                CHECK_METRICS=true
+                shift
+                ;;
+            --check-traces)
+                CHECK_TRACES=true
+                shift
+                ;;
+            --validate)
+                VALIDATE_FIRST=true
+                shift
+                ;;
+            --require-context)
+                REQUIRE_CONTEXT="$2"
+                shift 2
+                ;;
+            --port|--timeout|--parallel)
+                EXTRA_ARGS="$EXTRA_ARGS $1 $2"
+                shift 2
+                ;;
+            -*)
+                warn "Unknown option: $1 (passing to test scripts)"
+                EXTRA_ARGS="$EXTRA_ARGS $1"
+                shift
+                ;;
+            *)
+                if [ -z "$EXAMPLE" ]; then
+                    EXAMPLE="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+}
 
-# Get available examples dynamically from deploy.sh
-get_available_examples() {
-    local deploy_script="${SCRIPT_DIR}/deploy.sh"
-    if [ -f "$deploy_script" ]; then
-        # Extract examples from deploy.sh AVAILABLE_EXAMPLES array
-        grep -A 20 "AVAILABLE_EXAMPLES=(" "$deploy_script" | \
-        grep -E '^\s*"[^"]+:[^"]*"' | \
-        sed 's/.*"\([^:]*\):.*/\1/' | \
-        sort
+#---------------------------------------------------------------
+# Catalog resolution for validation
+#---------------------------------------------------------------
+
+CATALOG_FILE="${SCRIPT_DIR}/catalog/catalog.yaml"
+
+catalog_entries() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+
+    awk '
+      function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); return s }
+      BEGIN{ id=""; path=""; backend=""; tier=""; prereqs=""; notes="" }
+      /^[[:space:]]*-[[:space:]]*id:[[:space:]]*/ {
+        if (id!="") print id "|" path "|" backend "|" tier "|" prereqs "|" notes
+        id=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", id)
+        path=backend=tier=prereqs=notes=""
+        next
+      }
+      /^[[:space:]]*path:[[:space:]]*/ { path=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", path); next }
+      /^[[:space:]]*backend:[[:space:]]*/ { backend=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", backend); next }
+      /^[[:space:]]*tier:[[:space:]]*/ { tier=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", tier); next }
+      /^[[:space:]]*prereqs:[[:space:]]*/ { prereqs=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", prereqs); next }
+      /^[[:space:]]*notes:[[:space:]]*/ { notes=trim(substr($0, index($0,":")+1)); gsub(/^"|"$/, "", notes); next }
+      END{ if (id!="") print id "|" path "|" backend "|" tier "|" prereqs "|" notes }
+    ' "$file"
+}
+
+catalog_lookup() {
+    local id="$1"
+    catalog_entries "$CATALOG_FILE" 2>/dev/null | awk -F'|' -v id="$id" '$1==id{print; exit 0} END{exit 1}'
+}
+
+resolve_manifest_path() {
+    local example="$1"
+    local manifest_path=""
+
+    # Try catalog lookup first
+    if [ -f "$CATALOG_FILE" ]; then
+        local row=""
+        if row=$(catalog_lookup "$example" 2>/dev/null); then
+            local rel_path
+            rel_path=$(echo "$row" | awk -F'|' '{print $2}')
+            manifest_path="${SCRIPT_DIR}/${rel_path}"
+        fi
+    fi
+
+    # Fallback to filename search
+    if [ -z "$manifest_path" ] || [ ! -f "$manifest_path" ]; then
+        manifest_path=$(find "${SCRIPT_DIR}" -type f -name "${example}.yaml" \
+            -not -path "*/catalog/*" -not -path "*/_internal/*" -print -quit 2>/dev/null || true)
+    fi
+
+    echo "$manifest_path"
+}
+
+#---------------------------------------------------------------
+# Pre-Test Validation
+#---------------------------------------------------------------
+
+run_pre_test_validation() {
+    local example="$1"
+
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Pre-Test Blueprint Validation${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+
+    local validate_script="${SCRIPTS_DIR}/validate-blueprint.sh"
+    local manifest_path=$(resolve_manifest_path "$example")
+
+    if [ -z "$manifest_path" ] || [ ! -f "$manifest_path" ]; then
+        warn "Could not find manifest for validation: $example"
+        return 0
+    fi
+
+    if [ -f "$validate_script" ]; then
+        info "Validating blueprint: $(basename "$manifest_path")"
+        if bash "$validate_script" "$manifest_path"; then
+            success "Blueprint validation passed"
+            return 0
+        else
+            fail "Blueprint validation failed"
+            warn "Continuing with tests despite validation failures"
+            return 0  # Don't block tests on validation failures
+        fi
     else
-        # Fallback to common examples if deploy.sh not found
-        echo "hello-world vllm sglang trtllm-default trtllm-high-performance multi-replica-vllm vllm-disagg sglang-disagg trtllm-disagg-default trtllm-disagg-high-performance kv-routing"
+        warn "Validation script not found: $validate_script"
+        return 0
     fi
 }
 
-AVAILABLE_EXAMPLES=($(get_available_examples))
+#---------------------------------------------------------------
+# Deployment Auto-Detection
+#---------------------------------------------------------------
 
-EXAMPLE=""
-if [ $# -gt 0 ]; then
-    EXAMPLE="$1"
-    # Validate provided example against available examples
-    if [[ ! " ${AVAILABLE_EXAMPLES[@]} " =~ " ${EXAMPLE} " ]]; then
-        error "Invalid example: ${EXAMPLE}"
-        info "Available examples: ${AVAILABLE_EXAMPLES[*]}"
-        exit 1
-    fi
-else
-    # Check for deployed examples dynamically
-    info "Checking for deployed examples..."
-    DEPLOYED_EXAMPLES=()
+detect_deployment_features() {
+    local dgd_name="$1"
 
-    # Get all deployed DynamoGraphDeployments
-    if kubectl get dynamographdeployments -n "${NAMESPACE}" >/dev/null 2>&1; then
-        while IFS= read -r deployment_name; do
-            if [ -n "$deployment_name" ] && [ "$deployment_name" != "NAME" ]; then
-                DEPLOYED_EXAMPLES+=("$deployment_name")
-            fi
-        done < <(kubectl get dynamographdeployments -n "${NAMESPACE}" --no-headers -o custom-columns=":metadata.name" 2>/dev/null)
+    info "Auto-detecting deployment features for ${dgd_name}..."
+
+    # Get the DGD YAML
+    local dgd_spec=$(kubectl get dgd "$dgd_name" -n "${NAMESPACE}" -o yaml 2>/dev/null || echo "")
+
+    if [ -z "$dgd_spec" ]; then
+        warn "Could not retrieve DGD spec, using name-based detection"
+        dgd_spec="# fallback to name: $dgd_name"
     fi
 
-    if [ ${#DEPLOYED_EXAMPLES[@]} -eq 0 ]; then
-        error "No deployed examples found in namespace ${NAMESPACE}"
-        info "Available examples to deploy: ${AVAILABLE_EXAMPLES[*]}"
-        info "Deploy an example first: ./deploy.sh <example-name>"
-        exit 1
+    # Detect multimodal
+    # Match Dynamo VLM component types, or model names with -VL- delimiter.
+    # Does NOT match text-only Qwen3/Qwen2.5 models that lack "-VL-" in name.
+    if echo "$dgd_spec" | grep -qi "VLMWorker\|EncodeWorker\|multimodal\|llava\|-[Vv][Ll]-"; then
+        info "  [AUTO] Multimodal capability detected"
+        export HAS_MULTIMODAL=true
     fi
 
-    if [ ${#DEPLOYED_EXAMPLES[@]} -eq 1 ]; then
-        EXAMPLE="${DEPLOYED_EXAMPLES[0]}"
-        info "Found deployed example: ${EXAMPLE}"
+    # Detect router
+    if echo "$dgd_spec" | grep -qi "KvRouter\|Router" || [[ "$dgd_name" == *"router"* ]]; then
+        info "  [AUTO] Router capability detected"
+        export HAS_ROUTER=true
+    fi
+
+    # Detect OTEL
+    if echo "$dgd_spec" | grep -qi "OTEL_\|otel" || [[ "$dgd_name" == *"otel"* ]] || [[ "$dgd_name" == *"observability"* ]]; then
+        info "  [AUTO] OTEL capability detected"
+        export HAS_OTEL=true
+    fi
+
+    # Detect disaggregated
+    if echo "$dgd_spec" | grep -qi "PrefillWorker\|DecodeWorker\|disagg"; then
+        info "  [AUTO] Disaggregated serving detected"
+        export IS_DISAGGREGATED=true
+    fi
+}
+
+#---------------------------------------------------------------
+# Observability Verification
+#---------------------------------------------------------------
+
+check_metrics_scraping() {
+    local dgd_name="$1"
+
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Metrics Scraping Verification${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+
+    local all_checks_passed=true
+
+    # Check 1: PodMonitor exists
+    info "Checking PodMonitor presence..."
+    if kubectl get podmonitor -n "${NAMESPACE}" 2>/dev/null | grep -q "dynamo"; then
+        success "PodMonitor found for Dynamo pods"
     else
-        info "Multiple deployed examples found:"
-        for i in "${!DEPLOYED_EXAMPLES[@]}"; do
-            echo "  $((i+1)). ${DEPLOYED_EXAMPLES[i]}"
-        done
-        echo ""
+        fail "No PodMonitor found for Dynamo pods"
+        all_checks_passed=false
+    fi
 
-        while true; do
-            read -p "Select an example to test (1-${#DEPLOYED_EXAMPLES[@]}): " selection
-            if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le ${#DEPLOYED_EXAMPLES[@]} ]; then
-                EXAMPLE="${DEPLOYED_EXAMPLES[$((selection-1))]}"
-                break
+    # Check 2: ServiceMonitor exists for the deployment
+    info "Checking ServiceMonitor presence for ${dgd_name}..."
+    if kubectl get servicemonitor -n "${NAMESPACE}" "${dgd_name}-frontend-metrics" 2>/dev/null; then
+        success "ServiceMonitor found: ${dgd_name}-frontend-metrics"
+    else
+        warn "ServiceMonitor not found: ${dgd_name}-frontend-metrics"
+        warn "Metrics may still be collected via PodMonitor"
+    fi
+
+    # Check 3: Pods have metrics labels
+    info "Checking metrics labels on pods..."
+    local metrics_enabled_pods=$(kubectl get pods -n "${NAMESPACE}" \
+        -l "nvidia.com/dynamo-graph-deployment-name=${dgd_name}" \
+        -l "nvidia.com/metrics-enabled=true" \
+        --no-headers 2>/dev/null | wc -l)
+
+    if [ "$metrics_enabled_pods" -gt 0 ]; then
+        success "Found $metrics_enabled_pods pod(s) with metrics-enabled label"
+    else
+        fail "No pods found with nvidia.com/metrics-enabled=true label"
+        all_checks_passed=false
+    fi
+
+    # Check 4: Prometheus is scraping targets (if accessible)
+    info "Checking Prometheus scrape targets..."
+    local prometheus_svc=$(kubectl get svc -n monitoring -l app.kubernetes.io/name=prometheus --no-headers 2>/dev/null | head -1 | awk '{print $1}')
+
+    if [ -n "$prometheus_svc" ]; then
+        # Try to query Prometheus targets
+        local targets_info=$(kubectl exec -n monitoring deploy/prometheus-kube-prometheus-prometheus -- \
+            wget -qO- "http://localhost:9090/api/v1/targets?state=active" 2>/dev/null || echo "")
+
+        if echo "$targets_info" | grep -q "dynamo"; then
+            success "Prometheus is actively scraping Dynamo targets"
+        else
+            warn "Could not verify Prometheus is scraping Dynamo targets"
+        fi
+    else
+        warn "Prometheus service not found in monitoring namespace"
+        warn "Skipping Prometheus scrape target verification"
+    fi
+
+    # Check 5: Metrics endpoint is accessible on pod
+    info "Verifying metrics endpoint accessibility..."
+    local frontend_pod=$(kubectl get pods -n "${NAMESPACE}" \
+        -l "nvidia.com/dynamo-graph-deployment-name=${dgd_name},nvidia.com/dynamo-component-type=frontend" \
+        --no-headers 2>/dev/null | head -1 | awk '{print $1}')
+
+    if [ -n "$frontend_pod" ]; then
+        local metrics_response=$(kubectl exec -n "${NAMESPACE}" "$frontend_pod" -- \
+            curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/metrics 2>/dev/null || echo "000")
+
+        if [ "$metrics_response" = "200" ]; then
+            success "Metrics endpoint accessible on frontend pod"
+        else
+            fail "Metrics endpoint returned HTTP $metrics_response"
+            all_checks_passed=false
+        fi
+    else
+        warn "No frontend pod found for metrics verification"
+    fi
+
+    # Summary
+    echo ""
+    if [ "$all_checks_passed" = true ]; then
+        echo -e "${GREEN}✓ Metrics scraping is properly configured${NC}"
+    else
+        echo -e "${YELLOW}⚠ Some metrics checks failed - review configuration${NC}"
+    fi
+
+    return 0
+}
+
+check_trace_collection() {
+    local dgd_name="$1"
+
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Trace Collection Verification${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+
+    local all_checks_passed=true
+    local dgd_label="nvidia.com/dynamo-graph-deployment-name=${dgd_name}"
+
+    # Check 1: Trace export path — OTEL Collector OR direct OTLP export
+    info "Checking trace export path..."
+    local has_collector=false
+    if kubectl get deployment otel-collector -n "${NAMESPACE}" 2>/dev/null | grep -q "1/1"; then
+        success "OTEL Collector is running (collector-based export)"
+        has_collector=true
+    elif kubectl get deployment otel-collector -n "${NAMESPACE}" &>/dev/null; then
+        warn "OTEL Collector exists but may not be fully ready"
+        has_collector=true
+    fi
+
+    # Check for direct OTLP export via pod env vars
+    local otel_endpoint=$(kubectl get pods -n "${NAMESPACE}" \
+        -l "${dgd_label}" \
+        -o jsonpath='{.items[0].spec.containers[0].env[?(@.name=="OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")].value}' 2>/dev/null)
+
+    if [ -n "$otel_endpoint" ]; then
+        success "Direct OTLP export configured: ${otel_endpoint}"
+    elif [ "$has_collector" = false ]; then
+        fail "No trace export path found (no OTEL Collector and no direct OTLP endpoint)"
+        all_checks_passed=false
+    fi
+
+    # Check 2: Pods have OTEL environment variables
+    info "Checking OTEL environment variables on pods..."
+    local pod_with_otel_env=$(kubectl get pods -n "${NAMESPACE}" \
+        -l "${dgd_label}" \
+        -o jsonpath='{.items[*].spec.containers[*].env[?(@.name=="OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")].value}' 2>/dev/null)
+
+    if [ -n "$pod_with_otel_env" ]; then
+        success "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is configured"
+        info "  Endpoint: $pod_with_otel_env"
+    else
+        fail "No OTEL_EXPORTER_OTLP_TRACES_ENDPOINT found in pod env"
+        all_checks_passed=false
+    fi
+
+    # Check 3: OTEL export enabled flag
+    info "Checking OTEL export enabled flag..."
+    local otel_enabled=$(kubectl get pods -n "${NAMESPACE}" \
+        -l "${dgd_label}" \
+        -o jsonpath='{.items[0].spec.containers[0].env[?(@.name=="OTEL_EXPORT_ENABLED")].value}' 2>/dev/null)
+
+    if [ "$otel_enabled" = "1" ]; then
+        success "OTEL_EXPORT_ENABLED=1 (tracing active)"
+    elif [ -n "$otel_enabled" ]; then
+        warn "OTEL_EXPORT_ENABLED=${otel_enabled}"
+    else
+        warn "OTEL_EXPORT_ENABLED not set (may use defaults)"
+    fi
+
+    # Check 4: OTEL Collector health (if collector deployment exists)
+    if [ "$has_collector" = true ]; then
+        info "Checking OTEL Collector health..."
+        local otel_pod=$(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=otel-collector --no-headers 2>/dev/null | head -1 | awk '{print $1}')
+
+        if [ -n "$otel_pod" ]; then
+            local health_response=$(kubectl exec -n "${NAMESPACE}" "$otel_pod" -- \
+                curl -s -o /dev/null -w "%{http_code}" http://localhost:13133/health 2>/dev/null || echo "000")
+
+            if [ "$health_response" = "200" ]; then
+                success "OTEL Collector health check passed"
             else
-                error "Invalid selection. Please choose 1-${#DEPLOYED_EXAMPLES[@]}."
+                fail "OTEL Collector health check failed (HTTP $health_response)"
+                all_checks_passed=false
             fi
-        done
+        else
+            warn "OTEL Collector pod not found for health check"
+        fi
     fi
-fi
 
-info "Testing example: ${EXAMPLE}"
+    # Check 5: Generate a test trace and verify
+    info "Generating test inference request for trace..."
+    local frontend_pod=$(kubectl get pods -n "${NAMESPACE}" \
+        -l "${dgd_label},nvidia.com/dynamo-component-type=frontend" \
+        --no-headers 2>/dev/null | head -1 | awk '{print $1}')
 
-#---------------------------------------------------------------
-# Prerequisites Check
-#---------------------------------------------------------------
+    if [ -n "$frontend_pod" ]; then
+        # Send a request that should generate a trace
+        local test_response=$(kubectl exec -n "${NAMESPACE}" "$frontend_pod" -- \
+            curl -s -X POST http://localhost:8000/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -d '{"model": "test", "messages": [{"role": "user", "content": "trace test"}], "max_tokens": 5}' 2>/dev/null || echo "")
 
-section "Prerequisites Check"
+        if [ -n "$test_response" ]; then
+            success "Test request sent - trace should be generated"
+            info "  Note: Check Grafana/Tempo UI for trace visualization"
+        else
+            warn "Test request may have failed - verify manually"
+        fi
+    else
+        warn "No frontend pod found for test request"
+    fi
 
-# Check if example is deployed
-if ! kubectl get dynamographdeployment "$EXAMPLE" -n "${NAMESPACE}" >/dev/null 2>&1; then
-    error "Example '${EXAMPLE}' is not deployed in namespace '${NAMESPACE}'"
-    info "Deploy it first: ./deploy.sh ${EXAMPLE}"
-    exit 1
-fi
-success "Example '${EXAMPLE}' is deployed"
-
-# Check if service exists
-SERVICE_NAME="${EXAMPLE}-frontend"
-if ! kubectl get service "$SERVICE_NAME" -n "${NAMESPACE}" >/dev/null 2>&1; then
-    warn "Frontend service '${SERVICE_NAME}' not found, checking for alternative names..."
-    # Try some common alternatives
-    for alt in "${EXAMPLE}" "${EXAMPLE}-app" "${EXAMPLE}-svc"; do
-        if kubectl get service "$alt" -n "${NAMESPACE}" >/dev/null 2>&1; then
-            SERVICE_NAME="$alt"
-            success "Found service: ${SERVICE_NAME}"
+    # Check 6: Trace backend connectivity (check tempo, monitoring, and other namespaces)
+    info "Checking trace backend connectivity..."
+    local tempo_found=false
+    for ns in tempo monitoring observability; do
+        if kubectl get svc tempo -n "$ns" &>/dev/null; then
+            success "Tempo service found in ${ns} namespace"
+            tempo_found=true
             break
         fi
     done
 
-    if [[ "$SERVICE_NAME" == "${EXAMPLE}-frontend" ]]; then
-        error "No suitable service found for example '${EXAMPLE}'"
-        info "Available services in namespace ${NAMESPACE}:"
-        kubectl get services -n "${NAMESPACE}" | grep "$EXAMPLE" || echo "  (none found)"
-        exit 1
+    if [ "$tempo_found" = false ]; then
+        if kubectl get svc jaeger-query -n monitoring &>/dev/null; then
+            success "Jaeger service found in monitoring namespace"
+        else
+            warn "No trace backend (Tempo/Jaeger) found"
+            info "  Checked namespaces: tempo, monitoring, observability"
+            if [ -n "$otel_endpoint" ]; then
+                info "  Direct OTLP endpoint configured: ${otel_endpoint}"
+                info "  Traces are being exported - verify the target is reachable"
+            fi
+        fi
     fi
-else
-    success "Frontend service found: ${SERVICE_NAME}"
-fi
 
-#---------------------------------------------------------------
-# Service Information
-#---------------------------------------------------------------
+    # Summary
+    echo ""
+    if [ "$all_checks_passed" = true ]; then
+        echo -e "${GREEN}✓ Trace collection is properly configured${NC}"
+    else
+        echo -e "${YELLOW}⚠ Some trace checks failed - review configuration${NC}"
+    fi
 
-section "Service Information"
+    return 0
+}
 
-# Get service details
-SERVICE_PORT=$(kubectl get service "$SERVICE_NAME" -n "${NAMESPACE}" -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo "8000")
-SERVICE_TYPE=$(kubectl get service "$SERVICE_NAME" -n "${NAMESPACE}" -o jsonpath='{.spec.type}' 2>/dev/null || echo "ClusterIP")
+report_observability_status() {
+    local dgd_name="$1"
+    local dgd_label="nvidia.com/dynamo-graph-deployment-name=${dgd_name}"
 
-# Find available local port
-find_available_port() {
-    local start_port=${1:-8000}
-    local max_port=$((start_port + 100))
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  Observability Configuration Summary${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 
-    for ((port=start_port; port<=max_port; port++)); do
-        if ! ss -tuln | grep -q ":${port} "; then
-            echo "$port"
-            return 0
+    echo ""
+    echo "Deployment: ${dgd_name}"
+    echo "Namespace: ${NAMESPACE}"
+    echo ""
+
+    # Monitoring resources
+    echo "Monitoring Resources:"
+    local podmonitors=$(kubectl get podmonitor -n "${NAMESPACE}" --no-headers 2>/dev/null | wc -l)
+    local servicemonitors=$(kubectl get servicemonitor -n "${NAMESPACE}" --no-headers 2>/dev/null | wc -l)
+    echo "  PodMonitors: $podmonitors"
+    echo "  ServiceMonitors: $servicemonitors"
+
+    # Tracing resources
+    echo ""
+    echo "Tracing Resources:"
+    if kubectl get deployment otel-collector -n "${NAMESPACE}" &>/dev/null; then
+        echo "  OTEL Collector: Deployed"
+    else
+        # Check for direct OTLP export
+        local otel_endpoint=$(kubectl get pods -n "${NAMESPACE}" \
+            -l "${dgd_label}" \
+            -o jsonpath='{.items[0].spec.containers[0].env[?(@.name=="OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")].value}' 2>/dev/null)
+        if [ -n "$otel_endpoint" ]; then
+            echo "  OTEL Export: Direct OTLP → ${otel_endpoint}"
+        else
+            echo "  OTEL Export: Not configured"
+        fi
+    fi
+
+    # Tempo backend
+    local tempo_ns=""
+    for ns in tempo monitoring observability; do
+        if kubectl get svc tempo -n "$ns" &>/dev/null; then
+            tempo_ns="$ns"
+            break
         fi
     done
+    if [ -n "$tempo_ns" ]; then
+        echo "  Tempo Backend: ${tempo_ns} namespace"
+    else
+        echo "  Tempo Backend: Not found"
+    fi
 
-    # Fallback to a high port if nothing found
-    echo "9000"
-}
-
-LOCAL_PORT=$(find_available_port ${SERVICE_PORT:-8000})
-
-info "Service: ${SERVICE_NAME}"
-info "Port: ${SERVICE_PORT}"
-info "Type: ${SERVICE_TYPE}"
-info "Local port for testing: ${LOCAL_PORT}"
-
-# Check pod status
-info ""
-info "Pod status:"
-kubectl get pods -n "${NAMESPACE}" -l "app=${EXAMPLE}" 2>/dev/null || {
-    warn "No pods found with label app=${EXAMPLE}"
+    echo ""
 }
 
 #---------------------------------------------------------------
-# Port Forwarding Setup
+# Run Tests
 #---------------------------------------------------------------
 
-section "Port Forwarding Setup"
+run_general_tests() {
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Running General Tests${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 
-# Start port forwarding in background
-info "Setting up port forwarding to localhost:${LOCAL_PORT}..."
+    local test_script="${TESTS_DIR}/general/basic-inference.sh"
 
-# Clean up any existing port forwards for this service
-pkill -f "port-forward.*${SERVICE_NAME}" 2>/dev/null || true
+    if [ ! -f "$test_script" ]; then
+        error "General test script not found: $test_script"
+        return 1
+    fi
 
-kubectl port-forward service/"$SERVICE_NAME" "$LOCAL_PORT:$SERVICE_PORT" -n "$NAMESPACE" &
-PORT_FORWARD_PID=$!
+    chmod +x "$test_script"
+    "$test_script" "$DGD_NAME" $EXTRA_ARGS
+}
 
-# Verify port forwarding started successfully
-sleep 2
-if ! kill -0 $PORT_FORWARD_PID 2>/dev/null; then
-    error "Port forwarding failed to start"
-    # Try with a different port
-    LOCAL_PORT=$(find_available_port $((LOCAL_PORT + 1)))
-    warn "Retrying with port ${LOCAL_PORT}..."
-    kubectl port-forward service/"$SERVICE_NAME" "$LOCAL_PORT:$SERVICE_PORT" -n "$NAMESPACE" &
-    PORT_FORWARD_PID=$!
-    sleep 2
-fi
+run_multimodal_tests() {
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Running Multimodal Tests${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 
-# Function to cleanup port forwarding
-cleanup() {
-    if [ -n "${PORT_FORWARD_PID:-}" ]; then
-        info "Cleaning up port forwarding..."
-        kill ${PORT_FORWARD_PID} 2>/dev/null || true
-        # Also kill any lingering port-forward processes for this service
-        pkill -f "port-forward.*${SERVICE_NAME}" 2>/dev/null || true
+    local test_script="${TESTS_DIR}/targeted/multimodal-tests/test-image.sh"
+
+    if [ ! -f "$test_script" ]; then
+        error "Multimodal test script not found: $test_script"
+        return 1
+    fi
+
+    chmod +x "$test_script"
+    "$test_script" "$DGD_NAME" $EXTRA_ARGS
+
+    # Run video tests if it looks like a video model
+    if [[ "$EXAMPLE" == *"video"* ]]; then
+        local video_script="${TESTS_DIR}/targeted/multimodal-tests/test-video.sh"
+        if [ -f "$video_script" ]; then
+            chmod +x "$video_script"
+            "$video_script" "$DGD_NAME" $EXTRA_ARGS
+        fi
     fi
 }
 
-# Set trap to cleanup on exit
-trap cleanup EXIT
+run_kv_routing_tests() {
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Running KV Routing Tests${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 
-# Wait for port forwarding to be ready
-info "Waiting for port forwarding to be ready..."
-sleep 5
+    local test_script="${TESTS_DIR}/targeted/kv-routing-tests/test-kv-routing.sh"
+
+    if [ ! -f "$test_script" ]; then
+        error "KV routing test script not found: $test_script"
+        return 1
+    fi
+
+    chmod +x "$test_script"
+    "$test_script" "$DGD_NAME" $EXTRA_ARGS
+}
+
+run_otel_tests() {
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Running OTEL Tracing Tests${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+
+    local test_script="${TESTS_DIR}/targeted/observability-tests/test-otel.sh"
+
+    if [ ! -f "$test_script" ]; then
+        error "OTEL test script not found: $test_script"
+        return 1
+    fi
+
+    chmod +x "$test_script"
+    "$test_script" "$DGD_NAME" $EXTRA_ARGS
+}
+
+run_performance_tests() {
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Running Performance Tests${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+
+    local test_script="${TESTS_DIR}/targeted/performance-tests/test-performance.sh"
+
+    if [ ! -f "$test_script" ]; then
+        error "Performance test script not found: $test_script"
+        return 1
+    fi
+
+    chmod +x "$test_script"
+    "$test_script" "$DGD_NAME" $EXTRA_ARGS
+}
 
 #---------------------------------------------------------------
-# Basic Health Check
+# Main
 #---------------------------------------------------------------
 
-section "Health Check"
+main() {
+    echo ""
+    echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║        NVIDIA Dynamo v0.8.1 Modular Testing                  ║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
 
-BASE_URL="http://localhost:${LOCAL_PORT}"
+    # Parse arguments
+    parse_args "$@"
 
-# Test basic connectivity
-info "Testing basic connectivity..."
-HEALTH_URL="${BASE_URL}/health"
-
-if curl -s -f "$HEALTH_URL" >/dev/null 2>&1; then
-    success "Health endpoint is accessible"
-    HEALTH_RESPONSE=$(curl -s "$HEALTH_URL")
-    echo "Health response:"
-    echo "$HEALTH_RESPONSE" | jq . 2>/dev/null || echo "$HEALTH_RESPONSE"
-else
-    warn "Health endpoint not accessible, trying root endpoint..."
-    ROOT_URL="${BASE_URL}/"
-
-    if curl -s -f "$ROOT_URL" >/dev/null 2>&1; then
-        success "Root endpoint is accessible"
-        curl -s "$ROOT_URL" | head -10
-    else
-        error "Service is not responding on port ${LOCAL_PORT}"
-        info "Please check if the service is running:"
-        echo "  kubectl get pods -n ${NAMESPACE} -l app=${EXAMPLE}"
-        echo "  kubectl logs -n ${NAMESPACE} -l app=${EXAMPLE}"
+    # Preflight checks (using shared library)
+    section "Preflight"
+    _preflight_args=(--namespace "${NAMESPACE}")
+    if [ -n "${REQUIRE_CONTEXT}" ]; then
+        _preflight_args+=(--require-context "${REQUIRE_CONTEXT}")
+    fi
+    if ! bp_preflight_checks "${_preflight_args[@]}"; then
         exit 1
     fi
-fi
 
-#---------------------------------------------------------------
-# Example-Specific Testing
-#---------------------------------------------------------------
+    # Validate example is provided
+    if [ -z "$EXAMPLE" ]; then
+        # Check for deployed examples
+        info "No example specified, checking for deployed examples..."
+        local deployed=$(kubectl get dgd -n "${NAMESPACE}" --no-headers -o custom-columns=":metadata.name" 2>/dev/null | head -1)
 
-section "Example-Specific Tests"
-
-case "$EXAMPLE" in
-    "hello-world")
-        info "Testing hello-world specific endpoints..."
-        # Test any hello-world specific endpoints
-        ;;
-
-    "vllm-aggregated-default"|"vllm-disaggregated-default"|"sglang-aggregated-default"|"sglang-disaggregated-default"|"trtllm-aggregated-default"|"trtllm-aggregated-high-performance"|"trtllm-disaggregated-default"|"multi-replica-vllm"|"vllm-router"|"sglang-router"|"trtllm-router")
-        info "Testing LLM service endpoints..."
-
-        # Test models endpoint
-        MODELS_URL="${BASE_URL}/v1/models"
-        if curl -s -f "$MODELS_URL" >/dev/null 2>&1; then
-            success "✓ /v1/models - accessible"
-            echo "Available models:"
-            curl -s "$MODELS_URL" | jq '.data[].id' 2>/dev/null || curl -s "$MODELS_URL"
+        if [ -n "$deployed" ]; then
+            EXAMPLE="$deployed"
+            info "Using deployed example: ${EXAMPLE}"
         else
-            warn "✗ /v1/models - not accessible"
+            error "No example specified and no deployments found"
+            echo "Usage: ./test.sh <example-id> [OPTIONS]"
+            echo "Run './test.sh --help' for more information"
+            exit 1
         fi
+    fi
 
-        echo ""
+    # Pre-test validation (if enabled)
+    if [ "$VALIDATE_FIRST" = true ]; then
+        run_pre_test_validation "$EXAMPLE"
+    fi
 
-        # Test chat completions with a simple request
-        info "Testing chat completions endpoint..."
-        COMPLETIONS_URL="${BASE_URL}/v1/chat/completions"
+    # Resolve catalog ID to actual DGD metadata.name
+    DGD_NAME=$(resolve_deployment_name "$EXAMPLE")
 
-        # Dynamic model selection
-        info "Discovering available models..."
-        MODELS_RESPONSE=$(curl -s "$MODELS_URL" 2>/dev/null || echo "")
+    # Verify deployment exists
+    info "Verifying deployment: ${EXAMPLE} (DGD: ${DGD_NAME})"
+    if ! kubectl get dgd "$DGD_NAME" -n "${NAMESPACE}" >/dev/null 2>&1; then
+        error "Deployment '${DGD_NAME}' not found in namespace '${NAMESPACE}'"
+        info "Deploy it first: ./deploy.sh ${EXAMPLE}"
+        exit 1
+    fi
 
-        if [ -n "$MODELS_RESPONSE" ] && ! echo "$MODELS_RESPONSE" | grep -q -i "error"; then
-            # Extract model names from the response
-            AVAILABLE_MODELS=()
-            if command -v jq >/dev/null 2>&1; then
-                # Try to parse as JSON with .data array first (OpenAI format)
-                if echo "$MODELS_RESPONSE" | jq -e '.data' >/dev/null 2>&1; then
-                    while IFS= read -r model; do
-                        if [ -n "$model" ] && [ "$model" != "null" ]; then
-                            AVAILABLE_MODELS+=("$model")
-                        fi
-                    done < <(echo "$MODELS_RESPONSE" | jq -r '.data[]?.id // empty' 2>/dev/null)
-                # Try to parse as simple JSON array or string
-                elif echo "$MODELS_RESPONSE" | jq -e '.' >/dev/null 2>&1; then
-                    # Check if it's a simple string (quoted model name)
-                    if echo "$MODELS_RESPONSE" | jq -e '. | type == "string"' >/dev/null 2>&1; then
-                        MODEL_NAME=$(echo "$MODELS_RESPONSE" | jq -r '.')
-                        AVAILABLE_MODELS+=("$MODEL_NAME")
-                    # Check if it's an array of strings
-                    elif echo "$MODELS_RESPONSE" | jq -e '. | type == "array"' >/dev/null 2>&1; then
-                        while IFS= read -r model; do
-                            if [ -n "$model" ] && [ "$model" != "null" ]; then
-                                AVAILABLE_MODELS+=("$model")
-                            fi
-                        done < <(echo "$MODELS_RESPONSE" | jq -r '.[]' 2>/dev/null)
-                    fi
-                fi
-            fi
+    # Auto-detect deployment features
+    detect_deployment_features "$DGD_NAME"
 
-            # Fallback: extract from plain text if jq parsing failed
-            if [ ${#AVAILABLE_MODELS[@]} -eq 0 ]; then
-                # Try to extract quoted strings (model names)
-                while IFS= read -r line; do
-                    if [[ "$line" =~ \"([^\"]+)\" ]]; then
-                        model="${BASH_REMATCH[1]}"
-                        if [[ "$model" != "data" ]] && [[ "$model" != "id" ]] && [[ "$model" != "object" ]]; then
-                            AVAILABLE_MODELS+=("$model")
-                        fi
-                    fi
-                done <<< "$MODELS_RESPONSE"
-            fi
+    # Auto-enable targeted tests based on detected deployment features
+    # This ensures domain-specific tests run when their features are present,
+    # without requiring explicit --multimodal, --otel, or --kv-routing flags
+    if [ "${HAS_MULTIMODAL:-false}" = "true" ] && [ "$RUN_MULTIMODAL" = "false" ]; then
+        info "Auto-enabling multimodal tests (VLM deployment detected)"
+        RUN_MULTIMODAL=true
+    fi
+    if [ "${HAS_ROUTER:-false}" = "true" ] && [ "$RUN_KV_ROUTING" = "false" ]; then
+        info "Auto-enabling KV routing tests (router deployment detected)"
+        RUN_KV_ROUTING=true
+    fi
+    if [ "${HAS_OTEL:-false}" = "true" ] && [ "$RUN_OTEL" = "false" ]; then
+        info "Auto-enabling OTEL tests (OTEL configuration detected)"
+        RUN_OTEL=true
+        CHECK_TRACES=true
+    fi
 
-            # Model selection logic
-            if [ ${#AVAILABLE_MODELS[@]} -eq 0 ]; then
-                warn "No models found in response, falling back to generic model name"
-                MODEL_NAME="default-model"
-            elif [ ${#AVAILABLE_MODELS[@]} -eq 1 ]; then
-                MODEL_NAME="${AVAILABLE_MODELS[0]}"
-                info "Using the only available model: ${MODEL_NAME}"
-            else
-                info "Multiple models available:"
-                for i in "${!AVAILABLE_MODELS[@]}"; do
-                    echo "  $((i+1)). ${AVAILABLE_MODELS[i]}"
-                done
-                echo ""
+    # Handle --full flag
+    if [ "$RUN_FULL" = true ]; then
+        info "Full test mode: enabling all applicable tests"
+        RUN_MULTIMODAL="${HAS_MULTIMODAL:-false}"
+        RUN_KV_ROUTING="${HAS_ROUTER:-false}"
+        RUN_OTEL="${HAS_OTEL:-false}"
+        RUN_PERFORMANCE=true
+        CHECK_METRICS=true
+        CHECK_TRACES="${HAS_OTEL:-false}"
+    fi
 
-                # Interactive model selection
-                while true; do
-                    read -p "Select a model for testing (1-${#AVAILABLE_MODELS[@]}) or press Enter for first model: " model_selection
+    # Display test plan
+    echo ""
+    info "Test Plan for: ${EXAMPLE}"
+    echo "  ├── Pre-test validation: $([ "$VALIDATE_FIRST" = true ] && echo "✓" || echo "✗")"
+    echo "  ├── General tests: $([ "$RUN_GENERAL" = true ] && echo "✓" || echo "✗")"
+    echo "  ├── Multimodal tests: $([ "$RUN_MULTIMODAL" = true ] && echo "✓" || echo "✗")"
+    echo "  ├── KV routing tests: $([ "$RUN_KV_ROUTING" = true ] && echo "✓" || echo "✗")"
+    echo "  ├── OTEL tracing tests: $([ "$RUN_OTEL" = true ] && echo "✓" || echo "✗")"
+    echo "  ├── Performance tests: $([ "$RUN_PERFORMANCE" = true ] && echo "✓" || echo "✗")"
+    echo "  ├── Check metrics: $([ "$CHECK_METRICS" = true ] && echo "✓" || echo "✗")"
+    echo "  └── Check traces: $([ "$CHECK_TRACES" = true ] && echo "✓" || echo "✗")"
+    echo ""
 
-                    if [ -z "$model_selection" ]; then
-                        # Default to first model if user just presses Enter
-                        MODEL_NAME="${AVAILABLE_MODELS[0]}"
-                        info "Using default model: ${MODEL_NAME}"
-                        break
-                    elif [[ "$model_selection" =~ ^[0-9]+$ ]] && [ "$model_selection" -ge 1 ] && [ "$model_selection" -le ${#AVAILABLE_MODELS[@]} ]; then
-                        MODEL_NAME="${AVAILABLE_MODELS[$((model_selection-1))]}"
-                        info "Using selected model: ${MODEL_NAME}"
-                        break
-                    else
-                        error "Invalid selection. Please choose 1-${#AVAILABLE_MODELS[@]} or press Enter for default."
-                    fi
-                done
-            fi
-        else
-            warn "Could not retrieve models list, falling back to default model selection"
-            # Fallback to example-based model names as backup
-            case "$EXAMPLE" in
-                "vllm-aggregated-default") MODEL_NAME="Qwen/Qwen3-8B" ;;
-                "vllm-disaggregated-default"|"multi-replica-vllm"|"vllm-router") MODEL_NAME="Qwen/Qwen3-0.6B" ;;
-                "sglang-aggregated-default"|"sglang-disaggregated-default"|"sglang-router") MODEL_NAME="deepseek-ai/DeepSeek-R1-Distill-Llama-8B" ;;
-                "trtllm-aggregated-default"|"trtllm-aggregated-high-performance"|"trtllm-disaggregated-default"|"trtllm-router") MODEL_NAME="Qwen/Qwen3-0.6B" ;;
-                *) MODEL_NAME="default-model" ;;
-            esac
-            info "Using fallback model: ${MODEL_NAME}"
+    # Track overall results
+    local all_passed=true
+
+    # Run selected tests
+    if [ "$RUN_GENERAL" = true ]; then
+        if ! run_general_tests; then
+            all_passed=false
         fi
+    fi
 
-        CHAT_PAYLOAD=$(cat <<EOF
-{
-    "model": "${MODEL_NAME}",
-    "messages": [
-        {"role": "user", "content": "What is quantum computing and what are its parallels to analogue and digital computing? Explain Like I am 5 years old."}
-    ],
-    "max_tokens": 500,
-    "temperature": 0.1
+    if [ "$RUN_MULTIMODAL" = true ]; then
+        if ! run_multimodal_tests; then
+            all_passed=false
+        fi
+    fi
+
+    if [ "$RUN_KV_ROUTING" = true ]; then
+        if ! run_kv_routing_tests; then
+            all_passed=false
+        fi
+    fi
+
+    if [ "$RUN_OTEL" = true ]; then
+        if ! run_otel_tests; then
+            all_passed=false
+        fi
+    fi
+
+    if [ "$RUN_PERFORMANCE" = true ]; then
+        if ! run_performance_tests; then
+            all_passed=false
+        fi
+    fi
+
+    # Observability verification
+    if [ "$CHECK_METRICS" = true ]; then
+        check_metrics_scraping "$DGD_NAME"
+    fi
+
+    if [ "$CHECK_TRACES" = true ]; then
+        check_trace_collection "$DGD_NAME"
+    fi
+
+    # Report observability status if any checks were run
+    if [ "$CHECK_METRICS" = true ] || [ "$CHECK_TRACES" = true ]; then
+        report_observability_status "$DGD_NAME"
+    fi
+
+    # Final summary
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Testing Complete${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    if [ "$all_passed" = true ]; then
+        echo -e "${GREEN}✓ All selected tests completed successfully${NC}"
+    else
+        echo -e "${YELLOW}⚠ Some tests had issues - check output above${NC}"
+        exit 1
+    fi
+
+    echo ""
+    echo "Cleanup command:"
+    echo "  ./cleanup.sh ${EXAMPLE}"
 }
-EOF
-)
 
-        echo "Testing with model: ${MODEL_NAME}"
-        RESPONSE=$(curl -s -X POST "$COMPLETIONS_URL" \
-            -H "Content-Type: application/json" \
-            -d "$CHAT_PAYLOAD" 2>/dev/null || echo "")
-
-        if [ -n "$RESPONSE" ] && ! echo "$RESPONSE" | grep -q -i "error"; then
-            success "✓ Chat completions endpoint responded successfully"
-            echo "Response preview:"
-            echo "$RESPONSE" | jq -r '.choices[0].message.content' 2>/dev/null || echo "$RESPONSE" | head -3
-        else
-            warn "✗ Chat completions endpoint failed or returned error"
-            if [ -n "$RESPONSE" ]; then
-                echo "Error response:"
-                echo "$RESPONSE" | head -5
-
-                # Check for common instance ID routing issues
-                if echo "$RESPONSE" | grep -q "instance_id.*not found"; then
-                    warn "Detected instance ID routing issue - this may indicate:"
-                    echo "  1. Frontend has cached old instance IDs from a previous deployment"
-                    echo "  2. Workers are still starting up or failed to register properly"
-                    echo "  3. Network connectivity issues between frontend and workers"
-                    echo ""
-                    echo "To fix this issue:"
-                    echo "  1. Wait for all worker pods to be fully ready: kubectl get pods -n ${NAMESPACE} -l app=${EXAMPLE}"
-                    echo "  2. Check worker logs: kubectl logs -n ${NAMESPACE} -l app=${EXAMPLE},component=*Worker"
-                    echo "  3. Restart frontend pod to clear cache: kubectl delete pod -n ${NAMESPACE} -l app=${EXAMPLE},component=Frontend"
-                fi
-            fi
-        fi
-
-        # Advanced testing for specific examples
-        case "$EXAMPLE" in
-            "vllm-disaggregated-default"|"sglang-disaggregated-default"|"trtllm-disaggregated-default")
-                echo ""
-                info "Testing disaggregation with long context..."
-                LONG_CONTEXT=$(python3 -c "print('Long context test: ' + 'word ' * 100)")
-                LONG_PAYLOAD=$(cat <<EOF
-{
-    "model": "${MODEL_NAME}",
-    "messages": [
-        {"role": "user", "content": "${LONG_CONTEXT}. Summarize this."}
-    ],
-    "max_tokens": 50
-}
-EOF
-)
-                LONG_RESPONSE=$(curl -s -X POST "$COMPLETIONS_URL" \
-                    -H "Content-Type: application/json" \
-                    -d "$LONG_PAYLOAD" 2>/dev/null || echo "")
-
-                if [ -n "$LONG_RESPONSE" ] && ! echo "$LONG_RESPONSE" | grep -q -i "error"; then
-                    success "✓ Long context request (disaggregation test) succeeded"
-                else
-                    warn "✗ Long context request failed (check disaggregation setup)"
-                fi
-                ;;
-
-            "vllm-router"|"sglang-router"|"trtllm-router")
-                echo ""
-                info "Testing KV routing with shared prefixes..."
-                SHARED_SYSTEM="You are a helpful AI assistant."
-
-                # Clean up any existing test files
-                rm -f /tmp/kv_test_*.json 2>/dev/null
-
-                # Store background job PIDs
-                KV_PIDS=()
-
-                for i in {1..3}; do
-                    KV_PAYLOAD=$(cat <<EOF
-{
-    "model": "${MODEL_NAME}",
-    "messages": [
-        {"role": "system", "content": "${SHARED_SYSTEM}"},
-        {"role": "user", "content": "Question ${i}: What is AI?"}
-    ],
-    "max_tokens": 30
-}
-EOF
-)
-                    # Add timeout to curl command and run in background
-                    (
-                        curl -s -m 30 -X POST "$COMPLETIONS_URL" \
-                            -H "Content-Type: application/json" \
-                            -d "$KV_PAYLOAD" > /tmp/kv_test_$i.json 2>/dev/null || \
-                        echo "timeout_or_error" > /tmp/kv_test_$i.json
-                    ) &
-                    KV_PIDS+=($!)
-                done
-
-                # Wait for all requests with timeout
-                info "Waiting for KV routing test requests (max 45 seconds)..."
-                WAIT_COUNT=0
-                MAX_WAIT=45
-
-                while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
-                    # Check if all jobs are done
-                    JOBS_RUNNING=false
-                    for pid in "${KV_PIDS[@]}"; do
-                        if kill -0 "$pid" 2>/dev/null; then
-                            JOBS_RUNNING=true
-                            break
-                        fi
-                    done
-
-                    if [ "$JOBS_RUNNING" = false ]; then
-                        break
-                    fi
-
-                    sleep 1
-                    WAIT_COUNT=$((WAIT_COUNT + 1))
-                done
-
-                # Kill any remaining jobs if timeout reached
-                if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
-                    warn "KV routing test timed out, killing remaining requests..."
-                    for pid in "${KV_PIDS[@]}"; do
-                        kill "$pid" 2>/dev/null || true
-                    done
-                fi
-
-                # Count successful responses
-                success_count=0
-                error_count=0
-
-                for i in {1..3}; do
-                    if [ -f "/tmp/kv_test_$i.json" ]; then
-                        if ! grep -q "timeout_or_error" "/tmp/kv_test_$i.json" 2>/dev/null; then
-                            success_count=$((success_count + 1))
-                        else
-                            error_count=$((error_count + 1))
-                        fi
-                    else
-                        error_count=$((error_count + 1))
-                    fi
-                done
-
-                if [ $success_count -eq 3 ]; then
-                    success "✓ KV routing test: ${success_count}/3 requests completed successfully"
-                elif [ $success_count -gt 0 ]; then
-                    warn "✓ KV routing test: ${success_count}/3 requests completed (${error_count} failed/timed out)"
-                else
-                    warn "✗ KV routing test: All requests failed or timed out"
-                fi
-
-                # Clean up test files
-                rm -f /tmp/kv_test_*.json 2>/dev/null
-                ;;
-        esac
-        ;;
-
-    "sla-planner")
-        info "Testing SLA planner specific endpoints..."
-
-        # Check if Prometheus is available
-        PROMETHEUS_URL="${BASE_URL}:9090"
-        if curl -s -f "${PROMETHEUS_URL}/-/healthy" >/dev/null 2>&1; then
-            success "✓ Prometheus endpoint accessible for SLA planner"
-        else
-            warn "✗ Prometheus not accessible (may affect SLA planner metrics)"
-        fi
-
-        # Test the main LLM endpoint
-        MODELS_URL="${BASE_URL}/v1/models"
-        if curl -s -f "$MODELS_URL" >/dev/null 2>&1; then
-            success "✓ LLM service accessible for SLA monitoring"
-        else
-            warn "✗ LLM service not yet ready (check planner initialization)"
-        fi
-        ;;
-esac
-
-#---------------------------------------------------------------
-# Performance Test
-#---------------------------------------------------------------
-
-section "Performance Test"
-
-info "Running basic performance test..."
-
-# Test health endpoint response time
-info "Testing health endpoint performance (3 requests)..."
-HEALTH_TIMES=()
-for i in {1..3}; do
-    RESPONSE_TIME=$(curl -s -w "%{time_total}" -o /dev/null "$BASE_URL/health" 2>/dev/null || echo "timeout")
-    HEALTH_TIMES+=("$RESPONSE_TIME")
-    echo "Health request $i: ${RESPONSE_TIME}s"
-done
-
-# Calculate average if bc is available
-if command -v bc >/dev/null 2>&1; then
-    HEALTH_AVG=$(printf '%s\n' "${HEALTH_TIMES[@]}" | awk '{sum+=$1; count++} END {if(count>0) printf "%.3f", sum/count; else print "0"}')
-    echo "Average health response time: ${HEALTH_AVG}s"
-fi
-
-#---------------------------------------------------------------
-# Summary
-#---------------------------------------------------------------
-
-section "Test Summary"
-
-success "Testing completed for example: ${EXAMPLE}"
-
-echo ""
-echo "Service Information:"
-echo "  Example: ${EXAMPLE}"
-echo "  Service: ${SERVICE_NAME}"
-echo "  Namespace: ${NAMESPACE}"
-echo "  Port: ${SERVICE_PORT}"
-echo "  Local URL: http://localhost:${LOCAL_PORT}"
-echo ""
-
-echo "Manual Testing Commands:"
-echo "  1. Port forwarding: kubectl port-forward service/${SERVICE_NAME} ${LOCAL_PORT}:${SERVICE_PORT} -n ${NAMESPACE}"
-echo "  2. Health check: curl http://localhost:${LOCAL_PORT}/health"
-
-case "$EXAMPLE" in
-    "vllm-aggregated-default"|"vllm-disaggregated-default"|"sglang-aggregated-default"|"sglang-disaggregated-default"|"trtllm-aggregated-default"|"trtllm-aggregated-high-performance"|"trtllm-disaggregated-default"|"multi-replica-vllm"|"vllm-router"|"sglang-router"|"trtllm-router")
-        echo "  3. List models: curl http://localhost:${LOCAL_PORT}/v1/models"
-        echo "  4. Chat completion: curl -X POST http://localhost:${LOCAL_PORT}/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\": \"${MODEL_NAME}\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}], \"max_tokens\": 50}'"
-        ;;
-esac
-
-echo "  5. View logs: kubectl logs -n ${NAMESPACE} -l app=${EXAMPLE}"
-echo "  6. Monitor pods: kubectl get pods -n ${NAMESPACE} -l app=${EXAMPLE} -w"
-echo ""
-
-echo "Cleanup:"
-echo "  kubectl delete dynamographdeployment ${EXAMPLE} -n ${NAMESPACE}"
+# Run main
+main "$@"

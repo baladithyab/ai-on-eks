@@ -1,0 +1,703 @@
+# NVIDIA Dynamo example catalog (single source of truth)
+#
+# This file is intentionally simple YAML so it can be parsed reliably from bash
+# without external dependencies.
+#
+# Fields:
+# - id: stable example ID used by ./deploy.sh ./test.sh ./cleanup.sh
+# - name: DGD metadata.name (only needed when it differs from id)
+# - path: YAML path relative to ai-on-eks/blueprints/inference/nvidia-dynamo/
+# - backend: vllm | sglang | trtllm | demo | infra
+# - tier: core | standard | advanced | experimental | model-showcase
+# - prereqs: short prerequisites string
+# - notes: short notes string
+# - validation_status: validated | experimental | blocked | pending
+# - hardware: recommended instance type
+# - test_date: validation date (YYYY-MM-DD)
+#
+# Physical Layout:
+#   engines/       - Base serving engine examples (vLLM, SGLang, TRT-LLM)
+#   features/      - Cross-cutting features (autoscaling, KVBM, DGDR, multimodal, etc.)
+#   models/        - Model-specific showcases (DeepSeek, GPT-OSS, Llama)
+#   observability/ - Metrics, tracing, audit logging examples
+#   experimental/  - Bleeding-edge and unstable features
+#   config/        - Shared configuration components
+
+entries:
+  # ---------------------------------------------------------------------------
+  # CORE (small golden path)
+  # ---------------------------------------------------------------------------
+
+  - id: vllm-aggregated-default
+    path: engines/vllm/vllm-aggregated-default.yaml
+    backend: vllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Baseline aggregated serving (vLLM) - TP=1 validated on g6e"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (single GPU)"
+    test_date: "2026-01-01"
+
+  - id: sglang-aggregated-default
+    path: engines/sglang/sglang-aggregated-default.yaml
+    backend: sglang
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Backend diversity: minimal SGLang 'first success' - Works on PCIe"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (single GPU)"
+    test_date: "2026-01-01"
+
+  - id: trtllm-aggregated-default
+    path: engines/trtllm/trtllm-aggregated-default.yaml
+    backend: trtllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Backend diversity: minimal TensorRT-LLM 'first success'"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (single GPU)"
+    test_date: "2026-01-01"
+
+  - id: vllm-disaggregated-default
+    path: engines/vllm/vllm-disaggregated-default.yaml
+    backend: vllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Baseline disaggregated prefill/decode - TP=1 validated"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (2+ GPUs total)"
+    test_date: "2026-01-01"
+
+  - id: vllm-router
+    path: engines/vllm/vllm-router.yaml
+    backend: vllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "KV-aware routing (router-mode=kv)"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (2+ GPUs)"
+    test_date: "2026-01-01"
+
+  - id: sglang-disaggregated-default
+    name: sglang-disagg-default
+    path: engines/sglang/sglang-disaggregated-default.yaml
+    backend: sglang
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "SGLang disaggregated prefill/decode - Works on PCIe (TP>1)"
+    validation_status: validated
+    hardware: "g6e.12xlarge (4x GPU)"
+    test_date: "2026-01-01"
+
+  - id: trtllm-disaggregated-default
+    name: trtllm-disagg-default
+    path: engines/trtllm/trtllm-disaggregated-default.yaml
+    backend: trtllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "TensorRT-LLM disaggregated prefill/decode"
+    validation_status: validated
+    hardware: "g6e.12xlarge (4x GPU)"
+    test_date: "2026-01-01"
+
+  - id: sglang-router
+    path: engines/sglang/sglang-router.yaml
+    backend: sglang
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "KV-aware routing (SGLang)"
+    validation_status: validated
+    hardware: "g6e.12xlarge (4x GPU)"
+    test_date: "2026-01-01"
+
+  - id: trtllm-router
+    path: engines/trtllm/trtllm-router.yaml
+    backend: trtllm
+    tier: core
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "KV-aware routing (TensorRT-LLM)"
+    validation_status: validated
+    hardware: "g6e.12xlarge (4x GPU)"
+    test_date: "2026-01-01"
+
+  # NOTE: Aliases (vllm, sglang, trtllm) removed in v0.8.1 pass-2.
+  # Use the full IDs: vllm-aggregated-default, sglang-aggregated-default, trtllm-aggregated-default
+
+  # ---------------------------------------------------------------------------
+  # STANDARD (common variants)
+  # ---------------------------------------------------------------------------
+
+  - id: vllm-disaggregated-kvbm-disk
+    path: features/kvbm/vllm-disaggregated-kvbm-disk.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; enough RAM + ephemeral disk; hf-token-secret + ngc-secret"
+    notes: "KVBM multi-tier KV cache (GPU→CPU→Disk)"
+    validation_status: validated
+    hardware: "g6e.12xlarge (4x GPU, high RAM)"
+    test_date: "2026-01-01"
+
+  - id: multi-replica-vllm
+    path: features/multi-replica/multi-replica-vllm.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "Multi-replica HA pattern + KV routing"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (2+ GPUs)"
+    test_date: "2026-01-01"
+
+  # vllm-multinode DELETED: Requires LWS multi-node, not in scope for current blueprint
+
+  - id: vllm-full-observability
+    name: vllm-full-obs
+    path: observability/vllm-full-observability.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; Tempo/OTEL stack (observability namespace)"
+    notes: "All-in-one: metrics + logs + tracing + audit"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (single GPU)"
+    test_date: "2026-01-01"
+
+  - id: llava-1.5-7b
+    name: llava
+    path: features/multimodal/llava-1.5-7b.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "3 GPUs total (Encode+VLM+Processor); hf-token-secret + ngc-secret"
+    notes: "Multimodal image understanding (LLaVA 1.5)"
+    validation_status: validated
+    hardware: "g6e.12xlarge (3+ GPUs)"
+    test_date: "2026-01-01"
+
+  - id: llava-next-video-7b
+    name: llava-video
+    path: features/multimodal/llava-next-video-7b.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "3 GPUs total; large CPU+RAM; hf-token-secret + ngc-secret"
+    notes: "Video inference validated (short + 10min Big Buck Bunny). KVBM 3-tier caching active. Image inference fails — upstream VideoEncodeWorker only handles video_url; image_url causes ValueError → Dynamo 'missing field id' deserialization error. Use qwen2.5-vl-7b for image multimodal."
+    validation_status: validated
+    hardware: "g6e.12xlarge (3+ GPUs, high RAM)"
+    test_date: "2026-03-17"
+
+  # Model Management (LoRA + DynamoModel CRs)
+  - id: vllm-aggregated-lora
+    path: features/model-management/vllm-aggregated-lora.yaml
+    backend: vllm
+    tier: standard
+    category: model-management
+    prereqs: "GPU nodes; hf-token-secret; apply base-model.yaml and lora-adapter.yaml CRs after DGD is ready"
+    notes: "Aggregated vLLM with LoRA support + DynamoModel CRs. 5/5 tests pass (Qwen3-0.6B base model on g5)."
+    validation_status: validated
+    hardware: "g5.xlarge+ (single GPU)"
+    test_date: "2026-03-18"
+
+  - id: vllm-aggregated-kvbm
+    path: features/kvbm/vllm-aggregated-kvbm.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; extra CPU RAM; hf-token-secret + ngc-secret"
+    notes: "KVBM (aggregated)"
+    validation_status: validated
+    hardware: "g6e.12xlarge (high RAM)"
+    test_date: "2026-01-01"
+
+  - id: vllm-aggregated-router
+    name: vllm-aggregated-kv-router
+    path: engines/vllm/vllm-aggregated-router.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "vLLM aggregated + router variant"
+    validation_status: validated
+    hardware: "g6e.12xlarge (4x GPU)"
+    test_date: "2026-01-01"
+
+  - id: vllm-disaggregated-router
+    path: engines/vllm/vllm-disaggregated-router.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "vLLM disaggregated + router variant"
+    validation_status: validated
+    hardware: "g6e.12xlarge (4x GPU)"
+    test_date: "2026-01-01"
+
+  - id: vllm-otel-tracing
+    name: vllm-otel
+    path: observability/vllm-otel-tracing.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes; Tempo/OTEL stack"
+    notes: "Tracing-only variant"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (single GPU)"
+    test_date: "2026-01-01"
+
+  - id: vllm-audit-logging
+    name: vllm-audit
+    path: observability/vllm-audit-logging.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "GPU nodes"
+    notes: "Audit-logging-only variant"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (single GPU)"
+    test_date: "2026-01-01"
+
+  - id: qwen2.5-vl-7b
+    name: qwen25-vl-7b
+    path: features/multimodal/qwen2.5-vl-7b.yaml
+    backend: vllm
+    tier: standard
+    prereqs: "1 GPU (g5.2xlarge+); hf-token-secret"
+    notes: "Qwen2.5-VL 7B aggregated pattern (single VllmWorker) — fixes 'missing id' E/P/D bug"
+    validation_status: pending
+    hardware: "g5.2xlarge (1x A10G 24GB)"
+
+  # qwen3-vl-7b DELETED: Dynamo v0.8.1 encoder not implemented for Qwen3-VL
+
+  - id: trtllm-aggregated-high-performance
+    name: trtllm-agg-hp
+    path: engines/trtllm/trtllm-aggregated-high-performance.yaml
+    backend: trtllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret"
+    notes: "Aggressive TRT-LLM tuning"
+    validation_status: validated
+    hardware: "g6e.12xlarge (4x GPU)"
+    test_date: "2026-01-01"
+
+  - id: sglang-full-observability
+    name: sglang-full-obs
+    path: observability/sglang-full-observability.yaml
+    backend: sglang
+    tier: standard
+    prereqs: "GPU nodes; Tempo/OTEL stack (observability namespace)"
+    notes: "SGLang all-in-one: metrics + logs + tracing + audit"
+    validation_status: pending
+    hardware: "g6e.2xlarge+ (single GPU)"
+
+  - id: sglang-otel-tracing
+    name: sglang-otel
+    path: observability/sglang-otel-tracing.yaml
+    backend: sglang
+    tier: standard
+    prereqs: "GPU nodes; Tempo/OTEL stack"
+    notes: "SGLang tracing-only variant"
+    validation_status: pending
+    hardware: "g6e.2xlarge+ (single GPU)"
+
+  - id: sglang-audit-logging
+    name: sglang-audit
+    path: observability/sglang-audit-logging.yaml
+    backend: sglang
+    tier: standard
+    prereqs: "GPU nodes"
+    notes: "SGLang audit-logging-only variant"
+    validation_status: pending
+    hardware: "g6e.2xlarge+ (single GPU)"
+
+  - id: trtllm-full-observability
+    name: trtllm-full-obs
+    path: observability/trtllm-full-observability.yaml
+    backend: trtllm
+    tier: standard
+    prereqs: "GPU nodes; Tempo/OTEL stack (observability namespace)"
+    notes: "TRT-LLM all-in-one: metrics + logs + tracing + audit"
+    validation_status: pending
+    hardware: "g6e.2xlarge+ (single GPU)"
+
+  - id: trtllm-otel-tracing
+    name: trtllm-otel
+    path: observability/trtllm-otel-tracing.yaml
+    backend: trtllm
+    tier: standard
+    prereqs: "GPU nodes; Tempo/OTEL stack"
+    notes: "TRT-LLM tracing-only variant"
+    validation_status: pending
+    hardware: "g6e.2xlarge+ (single GPU)"
+
+  - id: trtllm-audit-logging
+    name: trtllm-audit
+    path: observability/trtllm-audit-logging.yaml
+    backend: trtllm
+    tier: standard
+    prereqs: "GPU nodes"
+    notes: "TRT-LLM audit-logging-only variant"
+    validation_status: pending
+    hardware: "g6e.2xlarge+ (single GPU)"
+
+  - id: multi-replica-trtllm
+    path: features/multi-replica/multi-replica-trtllm.yaml
+    backend: trtllm
+    tier: standard
+    prereqs: "GPU nodes; hf-token-secret + ngc-secret in dynamo"
+    notes: "TRT-LLM multi-replica HA pattern + KV routing"
+    validation_status: validated
+    hardware: "g6e.2xlarge+ (2+ GPUs)"
+    test_date: "2026-03-17"
+
+  # (sglang-aggregated-kvbm removed: KVBM --connector is vLLM-only, SGLang has no equivalent)
+
+  # ---------------------------------------------------------------------------
+  # ADVANCED (profiling/planner workflows)
+  # Profiling- or infra-dependent workflow examples that sit outside the default golden path.
+  # ---------------------------------------------------------------------------
+
+  - id: vllm-dgdr-online
+    name: vllm-online
+    path: features/dgdr-planner/vllm-dgdr-online.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Prometheus stack; hours of profiling; GPU nodes"
+    notes: "DGDR online profiling (AIPerf) — deploy/cleanup validated, profiling lifecycle works"
+    validation_status: validated
+    hardware: "g6e.12xlarge+ (requires profiling)"
+    test_date: "2026-03-17"
+
+  # sglang-dgdr-online DELETED (Pass 3.5): FAIL — mem_fraction_static=-1.164 upstream SGLang bug
+
+  - id: trtllm-dgdr-online
+    name: trtllm-online
+    path: features/dgdr-planner/trtllm-dgdr-online.yaml
+    backend: trtllm
+    tier: advanced
+    prereqs: "Prometheus stack; hours of profiling; GPU nodes"
+    notes: "DGDR online profiling (TensorRT-LLM) — deploy/cleanup lifecycle validated"
+    validation_status: validated
+    hardware: "g6e.12xlarge+ (requires profiling)"
+    test_date: "2026-03-18"
+
+  - id: vllm-dgdr-qwen-coder-32b
+    name: vllm-qwen-coder-32b
+    path: features/dgdr-planner/vllm-dgdr-qwen-coder-32b.yaml
+    backend: vllm
+    tier: advanced
+    prereqs: "Prometheus stack; 2-4h profiling; multi-GPU"
+    notes: "DGDR (32B class). Deploy/cleanup lifecycle validated — DGDR CRD accepted, profiling starts automatically."
+    validation_status: validated
+    hardware: "g6e.12xlarge+ (2-4 GPUs)"
+    test_date: "2026-03-18"
+
+  # trtllm-dgdr-aic DELETED (Pass 3.5): H100 SM90 only — AI Configurator requires h100_sxm/h200_sxm
+
+  # DEDUP NOTE (Pass 3): vllm-aggregated-gptoss-20b removed — same YAML as showcase-gptoss-20b-vllm
+  # DEDUP NOTE (Pass 3): vllm-disaggregated-gptoss-20b removed — same YAML as showcase-gptoss-20b-vllm (aggregated variant)
+  # DEDUP NOTE (Pass 3): vllm-disaggregated-gptoss-120b removed — same YAML as showcase-gptoss-120b-vllm
+  # DEDUP NOTE (Pass 3): vllm-disaggregated-deepseek-70b removed — same YAML as showcase-deepseek-70b-vllm
+
+  # ---------------------------------------------------------------------------
+  # EXPERIMENTAL (long-running / hardware-specific / tuning)
+  # Long-running, hardware-specific, or tuning-oriented examples outside the default validation path.
+  # ---------------------------------------------------------------------------
+
+  - id: sglang-disaggregated-2gpu
+    path: features/multi-replica/sglang-disaggregated-2gpu.yaml
+    backend: sglang
+    tier: experimental
+    prereqs: "4+ GPUs total; hf-token-secret + ngc-secret"
+    notes: "TP tuning example"
+    validation_status: validated
+    hardware: "g6e.12xlarge (4+ GPUs)"
+    test_date: "2026-03-17"
+
+  - id: vllm-dgdr-deepseek-70b
+    name: vllm-deepseek-70b
+    path: experimental/vllm-dgdr-deepseek-70b.yaml
+    backend: vllm
+    tier: experimental
+    prereqs: "Prometheus; very long profiling; 4+ GPUs"
+    notes: "DGDR 70B (experimental) - adapted for g6e"
+    validation_status: experimental
+    hardware: "g6e.24xlarge+ (4x L40S, TP=4)"
+
+  - id: vllm-dgdr-deepseek-70b-g6
+    name: vllm-deepseek-70b-g6
+    path: experimental/vllm-dgdr-deepseek-70b-g6.yaml
+    backend: vllm
+    tier: experimental
+    prereqs: "Prometheus; very long profiling; many GPUs; GPU type-specific"
+    notes: "DGDR 70B variant (g6 tuning)"
+    validation_status: experimental
+    hardware: "g6e.48xlarge (specific tuning)"
+
+  # ---------------------------------------------------------------------------
+  # MODEL SHOWCASE
+  # Curated model-family entry points for users starting from a concrete model,
+  # including model-tied advanced deployments that are outside the workflow tiers.
+  # ---------------------------------------------------------------------------
+
+  # GPT-OSS (NVIDIA) - Production-ready reasoning models
+  - id: showcase-gptoss-20b-vllm
+    name: vllm-gptoss-20b-agg
+    path: models/gpt-oss/vllm-aggregated-gptoss-20b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: GPT-OSS
+    prereqs: "2x L40S GPUs; hf-token-secret"
+    notes: "Tested on g7e (B200). 5/5 tests pass."
+    validation_status: validated
+    hardware: "g6e.12xlarge (2x L40S, TP=2)"
+    test_date: "2026-03-17"
+
+  # showcase-gptoss-20b-sglang-agg/dgd/router DELETED: FlashInfer MXFP4 + upcast_from_mxfp API mismatch
+
+  # showcase-gptoss-120b-vllm DELETED: duplicate of showcase-gptoss-120b-disagg-p6b200 (TP=8 suboptimal for MoE; p6-b200 variant is better)
+
+  - id: showcase-gptoss-120b-sglang
+    name: sglang-gptoss-120b-agg
+    path: models/gpt-oss/sglang-aggregated-gptoss-120b.yaml
+    backend: sglang
+    tier: model-showcase
+    category: GPT-OSS
+    prereqs: "8x GPUs (g7e.48xlarge Blackwell); hf-token-secret"
+    notes: "NVIDIA GPT-OSS 120B aggregated (SGLang TP=8) - g7e.48xlarge Blackwell — BLOCKED: sglang-runtime:0.8.1 lacks Blackwell (SM 12.0) support"
+    validation_status: blocked
+    hardware: "g7e.48xlarge (8x RTX PRO 6000 Blackwell, TP=8)"
+
+  # DeepSeek (Community) - Advanced reasoning capabilities
+  - id: showcase-deepseek-r1-8b
+    name: sglang-deepseek-r1-8b
+    path: models/deepseek/sglang-deepseek-r1-distill-8b.yaml
+    backend: sglang
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "1x GPU (g5.2xlarge); EFS shared cache; hf-token-secret"
+    notes: "DeepSeek R1-Distill 8B reasoning specialist (single GPU)"
+    validation_status: validated
+    hardware: "g5.2xlarge (1x A10G)"
+    test_date: "2026-03-17"
+
+  - id: showcase-deepseek-32b
+    name: vllm-deepseek-32b
+    path: models/deepseek/vllm-dgdr-deepseek-32b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "2x GPUs; Prometheus for DGDR; EFS shared cache"
+    notes: "DeepSeek R1-Distill 32B with DGDR profiling"
+    validation_status: pending
+    hardware: "g6e.12xlarge (2+ GPUs)"
+
+  # showcase-deepseek-70b-vllm DELETED: duplicate of vllm-disaggregated-70b (Llama vLLM disagg 70B, same g6e TP=4)
+  # showcase-deepseek-70b-sglang-agg DELETED: duplicate of showcase-llama-3.3-70b-sglang-agg (same SGLang aggregated 70B feature)
+  # showcase-deepseek-70b-sglang-dgd DELETED: SGLang disagg runtime bug (SamplingParams not subscriptable)
+  # showcase-deepseek-70b-sglang-router DELETED: duplicate of showcase-llama-3.3-70b-sglang-router (older 3-component pattern)
+
+  # Llama Family (Meta) - Foundation models
+  - id: showcase-llama-3.3-70b-vllm
+    name: vllm-llama33-70b
+    path: models/llama-family/vllm-llama-3.3-70b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: Llama
+    prereqs: "4x L40S GPUs (g6e.24xlarge); Meta license accepted; hf-token-secret"
+    notes: "Tested on g7e (2x B200, TP=2). 4/5 tests pass (warmup timeout on first request, all inference tests pass)."
+    validation_status: validated
+    hardware: "g6e.24xlarge (4x L40S, TP=4)"
+    test_date: "2026-03-17"
+
+  - id: showcase-llama-3.3-70b-sglang-agg
+    name: sglang-llama-33-70b-agg
+    path: models/llama-family/sglang-aggregated-llama-3.3-70b.yaml
+    backend: sglang
+    tier: model-showcase
+    category: Llama
+    prereqs: "2x B200 GPUs (g7e-nvidia); Meta license accepted; hf-token-secret"
+    notes: "Validated on g7e (2x B200, TP=2). 5/5 tests pass. Fixed TP=4→2, added --attention-backend flashinfer for SM 12.0 compat."
+    validation_status: validated
+    hardware: "g7e-nvidia (2x B200, TP=2)"
+    test_date: "2026-03-17"
+
+  - id: showcase-llama-3.3-70b-sglang-dgd
+    name: sglang-llama33-70b-dgd
+    path: models/llama-family/sglang-disaggregated-llama-3.3-70b.yaml
+    backend: sglang
+    tier: model-showcase
+    category: Llama
+    prereqs: "8x L40S GPUs; Meta license accepted; hf-token-secret"
+    notes: "Tested on g7e 2×g7e.24xlarge TP=4. Fixed --attention-backend flashinfer (trtllm_mha default fails on SM12.0). 5/5 tests pass."
+    validation_status: validated
+    hardware: "g6e.48xlarge (8x L40S, TP=4 per worker)"
+    test_date: "2026-03-18"
+
+  - id: showcase-llama-3.3-70b-sglang-router
+    name: sglang-llama-70b-router
+    path: models/llama-family/sglang-router-llama-3.3-70b.yaml
+    backend: sglang
+    tier: model-showcase
+    category: Llama
+    prereqs: "4x L40S GPUs per worker; Meta license accepted; hf-token-secret"
+    notes: "Tested on g7e. Fixed 3 bugs: attention backend, invalid --publish-events-and-metrics, removed non-existent Processor component. 8/8 tests pass."
+    validation_status: validated
+    hardware: "g6e.24xlarge+ (4x L40S per worker, TP=4)"
+    test_date: "2026-03-18"
+
+  - id: showcase-qwen3-30b-a3b-vllm
+    name: vllm-qwen3-30b-a3b
+    path: models/qwen/vllm-aggregated-qwen3-30b-a3b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: Qwen
+    prereqs: "2x L40S GPUs (g6e.12xlarge); hf-token-secret"
+    notes: "Qwen3-30B-A3B MoE (128 experts, 8 active/token, ~3B active params). 4/5 PASS on g7e TP=2."
+    validation_status: validated
+    hardware: "g6e.12xlarge (2x L40S, TP=2)"
+    test_date: "2026-03-18"
+
+  # ---------------------------------------------------------------------------
+  # BIG MODEL SHOWCASE (p-class GPU instances)
+  # Requires p6-b200-nvidia (B200) NodePools
+  # ---------------------------------------------------------------------------
+
+  # GPT-OSS 120B on B200 (aggregated, 4 replicas)
+  - id: showcase-gptoss-120b-p6b200
+    name: vllm-gptoss-120b-p6b200
+    path: models/gpt-oss/vllm-gptoss-120b-p6b200.yaml
+    backend: vllm
+    tier: model-showcase
+    category: GPT-OSS
+    prereqs: "1x p6-b200.48xlarge (8x B200); hf-token-secret"
+    notes: "GPT-OSS 120B MXFP4 on B200 — TP=2 x 4 replicas. 5/5 PASS (0.15-0.17s latency)."
+    validation_status: validated
+    hardware: "p6-b200.48xlarge (8x B200, TP=2 x 4 replicas)"
+    test_date: "2026-03-19"
+
+  # GPT-OSS 120B on B200 (disaggregated prefill/decode)
+  - id: showcase-gptoss-120b-disagg-p6b200
+    name: vllm-gpt120b-dg-p6b
+    path: models/gpt-oss/vllm-disaggregated-gptoss-120b-p6b200.yaml
+    backend: vllm
+    tier: model-showcase
+    category: GPT-OSS
+    prereqs: "1x p6-b200.48xlarge (4x B200 min); hf-token-secret"
+    notes: "GPT-OSS 120B disaggregated on B200 — separate prefill/decode workers. Name shortened for Grove 45-char limit. 5/5 PASS (0.17s latency)."
+    validation_status: validated
+    hardware: "p6-b200.48xlarge (TP=2 per worker)"
+    test_date: "2026-03-19"
+
+  # showcase-kimi-k2.5-p5 DELETED: Kimi K2.5 unsupported by current runtimes
+
+  # Kimi K2-Instruct (~1T MoE) on H100 multi-node — uses DeepseekV3ForCausalLM (supported)
+  - id: showcase-kimi-k2-instruct-p5
+    name: vllm-kimi-k2i-p5
+    path: models/kimi/vllm-kimi-k2-instruct-multinode-p5.yaml
+    backend: vllm
+    tier: model-showcase
+    category: Kimi
+    prereqs: "2x p5.48xlarge (16x H100); hf-token-secret"
+    notes: "Kimi K2-Instruct ~1T MoE (DeepSeekV3 arch) on H100 — BLOCKED: TP=16 on 8-GPU pod, requires LWS multi-node (deleted)"
+    validation_status: blocked
+    hardware: "2x p5.48xlarge (16x H100, TP=16)"
+
+  # DeepSeek R1 (671B) EP/DP on B200 — vLLM blog configuration
+  - id: showcase-deepseek-r1-p6
+    name: vllm-dsr1-ep-dp-p6
+    path: models/deepseek/vllm-deepseek-r1-ep-dp-p6.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "2x p6-b200.48xlarge (16x B200); hf-token-secret; p6-b200-nvidia NodePool"
+    notes: "DeepSeek R1 671B NVFP4 from vLLM blog — EP/DP disaggregated on B200. 5/5 PASS (0.59s latency). Reasoning model — output in <think> tags."
+    validation_status: validated
+    hardware: "2x p6-b200.48xlarge (16x B200, EP=8 per worker)"
+    test_date: "2026-03-19"
+
+  # DeepSeek R1 (671B) EP/DP on B200 — DGDR profiling-driven deployment
+  - id: dgdr-deepseek-r1-ep-dp-p6
+    name: vllm-dgdr-dsr1-ep-dp-p6
+    path: models/deepseek/vllm-dgdr-deepseek-r1-ep-dp-p6.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "2x p6-b200.48xlarge; EFA; Prometheus; hf-token-secret; 4-8h profiling"
+    notes: "DGDR for DeepSeek R1 671B EP/DP on B200 — NVFP4, EFA, profiling-driven"
+    validation_status: pending
+    hardware: "2x p6-b200.48xlarge (16x B200, EP=8)"
+
+  - id: vllm-disaggregated-70b
+    name: vllm-70b-disagg
+    path: models/llama-family/vllm-disaggregated-70b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: Llama
+    prereqs: "4x L40S GPUs (g6e.24xlarge) per worker; Meta license accepted; hf-token-secret"
+    notes: "Llama 3.3-70B disaggregated (vLLM TP=4) — right-sized for g6e.24xlarge (4x L40S = 192GB VRAM per worker)"
+    validation_status: pending
+    hardware: "g6e.24xlarge (4x L40S per worker, TP=4)"
+
+  # DeepSeek R1 671B on B200 (TP=8 single node)
+  - id: showcase-deepseek-r1-tp8-p6
+    path: models/deepseek/vllm-deepseek-r1-tp8-p6.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    notes: "DeepSeek R1 671B (TP=8 single node)"
+    validation_status: pending
+    hardware: "p6-b200 (TP=8 single node)"
+
+  # DeepSeek V3.2 685B multi-node (requires SM90 for FlashMLA)
+  - id: showcase-deepseek-v3.2-multinode
+    path: models/deepseek/vllm-deepseek-v3.2-multinode.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    notes: "DeepSeek V3.2 685B multi-node (requires SM90 for FlashMLA)"
+    validation_status: pending
+    hardware: "2x p5 multinode (requires SM90 for FlashMLA)"
+
+  # GPT-OSS 20B TensorRT-LLM
+  - id: showcase-gptoss-20b-trtllm
+    path: models/gpt-oss/trtllm-aggregated-gptoss-20b.yaml
+    backend: trtllm
+    tier: model-showcase
+    category: GPT-OSS
+    notes: "GPT-OSS 20B aggregated (TensorRT-LLM). 5/5 PASS on p6-B200 (0.14-0.19s latency)."
+    validation_status: validated
+    hardware: "p6-b200.48xlarge (B200)"
+    test_date: "2026-03-18"
+
+  # GPT-OSS 20B DGDR profiling (vLLM)
+  - id: showcase-gptoss-20b-vllm-dgdr
+    path: models/gpt-oss/vllm-dgdr-gptoss-20b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: GPT-OSS
+    notes: "GPT-OSS 20B (DGDR profiling) — deploy/cleanup lifecycle validated"
+    validation_status: validated
+    test_date: "2026-03-18"
+
+  # showcase-kimi-k2.5-g7e DELETED: Kimi K2.5 unsupported by current runtimes
+
+  # Llama 3.3-70B DGDR profiling (vLLM)
+  - id: showcase-llama-3.3-70b-vllm-dgdr
+    path: models/llama-family/vllm-dgdr-llama-3.3-70b.yaml
+    backend: vllm
+    tier: model-showcase
+    category: Llama
+    notes: "Llama 3.3-70B (DGDR profiling) — deploy/cleanup lifecycle validated"
+    validation_status: validated
+    test_date: "2026-03-18"
+
+  # Llama 4 Maverick 400B MoE on g7e Blackwell
+  - id: showcase-llama4-maverick-g7e
+    path: models/llama-family/vllm-llama4-maverick-g7e.yaml
+    backend: vllm
+    tier: model-showcase
+    category: Llama
+    notes: "Llama 4 Maverick 400B MoE on g7e Blackwell"
+    validation_status: pending
+    hardware: "g7e Blackwell"
+
+  # Qwen3-VL 235B MoE (multimodal) on g7e Blackwell
+  - id: showcase-qwen3-vl-235b-g7e
+    path: models/qwen/vllm-qwen3-vl-235b-g7e.yaml
+    backend: vllm
+    tier: model-showcase
+    category: Qwen
+    notes: "Qwen3-VL 235B MoE (multimodal) on g7e Blackwell"
+    validation_status: pending
+    hardware: "g7e Blackwell"

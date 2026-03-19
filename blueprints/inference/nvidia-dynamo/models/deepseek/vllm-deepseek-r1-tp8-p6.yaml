@@ -1,0 +1,146 @@
+# DeepSeek R1 (671B MoE) TP=8 on single B200 node
+#
+# Simpler aggregated config: tensor-parallel across 8 B200 GPUs on one node.
+# Model weights ~336 GB FP8 / 8 GPUs = ~42 GB per GPU, leaving ~136 GB for KV cache.
+#
+# Hardware: 1x p6-b200.48xlarge (8x B200, 192GB each = 1536GB VRAM)
+# Precision: FP8 weights, FP8 KV cache
+#
+# This is the conservative baseline. For blog-like EP/DP performance, see
+# vllm-deepseek-r1-ep-dp-p6.yaml (requires fixing EP auto-detection in Dynamo).
+#
+# Prerequisites: p6-b200-nvidia Karpenter NodePool, HuggingFace token
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-dsr1-tp8-p6
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 20
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: worker
+      replicas: 1
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 180
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            # Blackwell optimizations
+          - name: VLLM_ATTENTION_BACKEND
+            value: "FLASHINFER_MLA"
+          - name: VLLM_MLA_FP8_PROJ
+            value: "1"
+          - name: NCCL_CUMEM_ENABLE
+            value: "1"
+          - name: NCCL_NVLS_ENABLE
+            value: "1"
+          command:
+          - python3
+          args:
+          - "-m"
+          - "dynamo.vllm"
+          - "--model"
+          - "deepseek-ai/DeepSeek-R1-0528"
+          - "--tensor-parallel-size"
+          - "8"
+          - "--kv-cache-dtype"
+          - "fp8"
+          - "--max-model-len"
+          - "8192"
+          - "--trust-remote-code"
+          - "--gpu-memory-utilization"
+          - "0.90"
+          - "--max-num-seqs"
+          - "1024"
+          - "--dyn-reasoning-parser"
+          - "deepseek_r1"

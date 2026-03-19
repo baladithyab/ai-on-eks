@@ -1,0 +1,150 @@
+# Kimi K2-Instruct (~1T MoE, 32B active) - Multi-Node vLLM on H100
+# Model: moonshotai/Kimi-K2-Instruct
+# Architecture: DeepseekV3ForCausalLM — MoE with 384 experts (8 routed + 1 shared), MLA attention
+# Hardware: 2x p5.48xlarge (16x H100, 80GB each = 1280GB VRAM)
+# Precision: Block-FP8 (FP8_E4M3 MoE weights, ~1004 GB on disk)
+#
+# NOTE: Kimi K2.5 (KimiK25ForConditionalGeneration) is NOT supported by vLLM
+# in Dynamo 0.8.1. Use K2-Instruct instead — it registers as DeepseekV3ForCausalLM
+# which is fully supported. Same ~1T MoE architecture, text-only (no vision).
+#
+# Features:
+# - 128K token context window (truncated to 8192 for VRAM budget)
+# - Tool calling and agentic capabilities
+# - Reasoning/thinking mode via kimi parser
+# - MLA (Multi-head Latent Attention) — same family as DeepSeek V3
+# - SwiGLU activation, 160K vocabulary
+#
+# H100 advantages over g7e (RTX PRO 6000):
+# - NVSwitch/NVLink: TP=16 works without shm_broadcast deadlock
+# - FlashMLA backend: optimized for sm_90 (no TRITON_MLA fallback)
+# - Higher memory bandwidth: 3.35 TB/s vs 1.79 TB/s per GPU
+#
+# NOTE: 1004 GB model weights + KV cache requires 2x p5.48xlarge (1280 GB total)
+# With --gpu-memory-utilization 0.90, you get ~1152 GB for weights + ~128 GB for KV cache
+# Prerequisites: p5-nvidia Karpenter NodePool, HuggingFace token
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-kimi-k2i-p5
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 20
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: worker
+      replicas: 1
+      multinode:
+        nodeCount: 2
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            # 1TB model takes a long time to load even from cache
+            failureThreshold: 180
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          # NOTE: For Grove multinode, use command: ["python3"] (NOT ["/bin/sh", "-c"]).
+          # The operator wraps with: ray start --head && <command> <args> --distributed-executor-backend ray
+          command:
+          - python3
+          args:
+          - "-m"
+          - "dynamo.vllm"
+          - "--model"
+          - "moonshotai/Kimi-K2-Instruct"
+          - "--tensor-parallel-size"
+          - "16"
+          - "--trust-remote-code"
+          - "--max-model-len"
+          - "8192"
+          - "--gpu-memory-utilization"
+          - "0.90"
+          - "--dyn-reasoning-parser"
+          - "kimi"

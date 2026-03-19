@@ -1,0 +1,160 @@
+# GPT-OSS-120B (117B MoE, 5.1B active) - vLLM on H100
+# Model: openai/gpt-oss-120b
+# Architecture: Sparse MoE with 128 experts, 4 routed per token, MXFP4 quantized
+# Hardware: 1x p6-b200.48xlarge (8x B200 Blackwell)
+# Precision: MXFP4 (~63GB weights)
+#
+# Parallelism: TP=2 x 4 replicas (NOT TP=8)
+#   - Model is 63GB MXFP4 — doesn't fit on single 80GB H100 with room for KV cache
+#   - TP=2: each GPU pair holds ~33GB model, ~34GB KV cache per GPU
+#   - 4 replicas: 4 independent workers handle separate requests = 4x throughput
+#   - TP=8 wastes all 8 GPUs on a single request stream for a sparse MoE model
+#     where only 4/128 experts are active per token
+#
+# Why not TP=8:
+#   - vLLM blog (Feb 2026): TP=1 or TP=2 recommended for GPT-OSS on Blackwell/Hopper
+#   - DEP2 (Attention DP + MoE EP on 2 GPUs) is the future but not yet faster than TP1/TP2
+#   - For MoE models, TP forces AllReduce sync across all GPUs even though most
+#     experts are idle per token — EP/DP gives better throughput per GPU
+#
+# Features:
+# - Configurable reasoning effort (low/medium/high via system prompt)
+# - Harmony response format (applied automatically via chat template)
+# - Tool calling support
+# - Apache 2.0 license
+#
+# H100 advantages over g7e (RTX PRO 6000):
+# - NVSwitch/NVLink: TP=2 works without shm_broadcast deadlock
+# - Hopper Triton matmul_ogs kernel: better than Marlin fallback on sm_120
+# - FlashInfer MXFP4 kernels: optimized Cutlass backend (sm_90)
+#
+# vLLM optimization flags (from vLLM blog, Feb 2026):
+# - VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=1 for optimized MoE kernels
+#
+# Prerequisites: p6-b200-nvidia Karpenter NodePool, HuggingFace token (optional)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-gptoss-120b-p6b200
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - "python3 -m dynamo.frontend --http-port 8000"
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: worker
+      # 4 replicas x TP=2 = 8 GPUs total (full p6-b200.48xlarge)
+      # Each replica is an independent vLLM worker handling separate requests
+      # Dynamo frontend load-balances across all 4 workers
+      replicas: 4
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "24"
+          memory: 128Gi
+          gpu: "2"
+        limits:
+          cpu: "24"
+          memory: 128Gi
+          gpu: "2"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            # H100 with NVLink — model loads fast, no PCIe deadlock
+            failureThreshold: 120
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            # Enable optimized Triton matmul_ogs / FlashInfer MoE kernels for MXFP4 on Hopper
+          - name: VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8
+            value: "1"
+          command:
+          - python3
+          args:
+          - "-m"
+          - "dynamo.vllm"
+          - "--model"
+          - "openai/gpt-oss-120b"
+          - "--tensor-parallel-size"
+          - "2"
+          - "--max-model-len"
+          - "16384"
+          - "--gpu-memory-utilization"
+          - "0.90"
+          - "--dyn-reasoning-parser"
+          - "gpt_oss"
+          - "--dyn-tool-call-parser"
+          - "harmony"

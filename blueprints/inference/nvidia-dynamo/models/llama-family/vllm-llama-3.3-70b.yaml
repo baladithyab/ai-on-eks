@@ -1,0 +1,146 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Aggregated Deployment for Meta Llama 3.3-70B-Instruct
+#
+# Meta's Llama 3.3 is the latest iteration of the industry-standard open LLM family,
+# offering state-of-the-art performance across diverse benchmarks with full
+# instruction-following capabilities.
+#
+# Hardware Requirements:
+# - g7e.12xlarge (2x B200, 384GB VRAM total) or p5.48xlarge (8x H100)
+# - ~140GB VRAM for 70B model weights (TP=2 on B200, TP=8 on H100)
+# - High-bandwidth GPU interconnect (NVLink preferred)
+#
+# Features:
+# - EFS-backed model cache for fast restarts
+# - vLLM backend with tensor parallelism
+# - Aggregated single-worker architecture
+# - Production-ready health probes
+#
+# Use cases:
+# - Enterprise production inference
+# - Complex instruction following
+# - Long-context applications (up to 128K tokens)
+# - Multi-turn conversations
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-llama33-70b
+  namespace: dynamo
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - "exit 0"
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "16"
+          memory: "100Gi"
+          gpu: "2"
+        limits:
+          cpu: "16"
+          memory: "100Gi"
+          gpu: "2"
+      sharedMemory:
+        size: 24Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g7e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # 300 * 60s = 5 hours max startup time for large model loading
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model meta-llama/Llama-3.3-70B-Instruct \
+                --tensor-parallel-size 2 \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.90 \
+                --enforce-eager \
+                --connector none \
+                2>&1 | tee /tmp/vllm.log

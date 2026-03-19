@@ -1,0 +1,129 @@
+# Qwen3-VL-235B (235B MoE, 22B active) - vLLM on Blackwell
+# Model: Qwen/Qwen3-VL-235B-A22B-Instruct-FP8
+# Architecture: MoE vision-language model with DeepStack multi-level ViT fusion
+# Hardware: 1x g7e.48xlarge (8x RTX PRO 6000 Blackwell, 96GB each = 768GB VRAM)
+# Precision: FP8 (~222GB weights, comfortable fit in 768GB VRAM)
+#
+# Features:
+# - Native multimodal (text + image + video input)
+# - 256K token context, expandable to 1M
+# - Interleaved-MRoPE positional embeddings
+# - Text-Timestamp Alignment for video understanding
+#
+# Prerequisites: g7e-nvidia Karpenter NodePool, HuggingFace token
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-qwen3-vl-235b
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 20
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g7e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 120
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8"
+            - "--tensor-parallel-size"
+            - "8"
+            - "--enable-expert-parallel"
+            - "--trust-remote-code"
+            - "--max-model-len"
+            - "16384"
+            - "--gpu-memory-utilization"
+            - "0.90"

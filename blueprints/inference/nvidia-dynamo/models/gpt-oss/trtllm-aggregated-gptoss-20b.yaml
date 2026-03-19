@@ -1,0 +1,182 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# TensorRT-LLM Aggregated Deployment for GPT-OSS-20B
+#
+# ============================================================================
+# HARDWARE REQUIREMENTS - CRITICAL
+# ============================================================================
+# This blueprint requires SM90 architecture (Compute Capability 9.0).
+#
+# COMPATIBLE HARDWARE:
+#   - p5.48xlarge (8x H100 80GB) - SM90
+#   - p6.48xlarge (8x B200 80GB) - SM90 (Blackwell)
+#
+# INCOMPATIBLE HARDWARE:
+#   ❌ g6e.12xlarge (L40S) - SM89 - Will NOT work
+#   ❌ g5.12xlarge (A10G)  - SM86 - Will NOT work
+#   ❌ g4dn.12xlarge (T4)  - SM75 - Will NOT work
+#
+# The WFP4A16 MoE quantization used by GPT-OSS requires SM90.
+# See: dynamo/docs/backends/trtllm/gpt-oss.md
+# ============================================================================
+#
+# Model: openai/gpt-oss-20b (GPT-OSS 20 Billion Parameter Reasoning Model)
+#
+# Features:
+# - TensorRT-LLM backend (optimized NVIDIA inference)
+# - WFP4A16 MoE quantization (SM90 required)
+# - Reasoning parser (gpt_oss) for chain-of-thought
+# - Tool call parser (harmony) for function calling
+# - EFS-backed model cache
+#
+# Why TensorRT-LLM over vLLM/SGLang for GPT-OSS?
+# - vLLM has TP>1 deadlock on PCIe topologies (shm_broadcast)
+# - SGLang DGDR has upstream profiler bug
+# - TensorRT-LLM works with TP>1 on PCIe via different coordination
+# - Best performance with CUDA graphs and CUTLASS kernels
+#
+# Deployment Architecture: AGGREGATED
+# - Single worker handles both prefill and decode
+# - TP=2 for 20B model (requires 2 GPUs with NVLink/High-bandwidth)
+#
+# Expected: WILL FAIL on g6e.12xlarge (SM89)
+# To test successfully, provision p6-b200-nvidia nodepool (Blackwell GPUs)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: trtllm-gptoss-20b-agg
+  namespace: dynamo
+  annotations:
+    description: "TensorRT-LLM GPT-OSS-20B aggregated deployment"
+    hardware-requirements: "SM90 (H100/B200) required for WFP4A16 MoE"
+    supported-instances: "p5.48xlarge, p6.48xlarge"
+    unsupported-instances: "g6e.*, g5.*, g4dn.*"
+spec:
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - "exit 0"
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          workingDir: /workspace/components/backends/trtllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - "python3 -m dynamo.frontend --http-port 8000"
+
+    TrtllmWorker:
+      # AGGREGATED: Single worker handles both prefill and decode
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "16"
+          memory: "64Gi"
+          gpu: "2"
+        limits:
+          cpu: "16"
+          memory: "64Gi"
+          gpu: "2"
+      sharedMemory:
+        size: 16Gi
+      extraPodSpec:
+        # REQUIRES p5.48xlarge (H100) or p6.48xlarge (B200) for SM90
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            # 300 * 60s = 5 hours max startup time for engine build + model loading
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/trtllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+            # TensorRT-LLM AGGREGATED MODE with reasoning and tool calling support
+            # WFP4A16 MoE quantization requires SM90 architecture
+          - |
+            python3 -m dynamo.trtllm \
+              --model-path openai/gpt-oss-20b \
+              --served-model-name openai/gpt-oss-20b \
+              --tensor-parallel-size 2 \
+              --max-num-tokens 8192 \
+              --max-batch-size 32 \
+              --free-gpu-memory-fraction 0.90 \
+              --dyn-reasoning-parser gpt_oss \
+              --dyn-tool-call-parser harmony \
+              2>&1 | tee /tmp/trtllm.log
+          # Environment variables for TRT-LLM optimizations
+          env:
+          - name: TRTLLM_ENABLE_PDL
+            value: "1"
+          - name: TRT_LLM_DISABLE_LOAD_WEIGHTS_IN_PARALLEL
+            value: "True"

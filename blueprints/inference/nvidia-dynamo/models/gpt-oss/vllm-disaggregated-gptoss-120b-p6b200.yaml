@@ -1,0 +1,223 @@
+# GPT-OSS-120B (117B MoE, 5.1B active) - Disaggregated vLLM on H100
+# Model: openai/gpt-oss-120b
+# Architecture: Sparse MoE with 128 experts, 4 routed per token, MXFP4 quantized
+# Hardware: 1x p6-b200.48xlarge (8x B200 Blackwell)
+# Precision: MXFP4 (~63GB weights)
+#
+# Parallelism: TP=2 per worker
+#   - Prefill worker: 2 GPUs (TP=2), optimized for throughput
+#   - Decode worker: 2 GPUs (TP=2), optimized for latency
+#   - 4 GPUs total (half the node) — scale with more replicas
+#
+# Disaggregated architecture separates prefill (compute-intensive) from
+# decode (memory-bandwidth-intensive) to avoid head-of-line blocking.
+# The Dynamo frontend routes new requests to prefill workers and
+# in-progress generation to decode workers automatically.
+#
+# H100 advantages over g7e (RTX PRO 6000):
+# - NVSwitch/NVLink: TP=2 works without shm_broadcast deadlock
+# - Hopper Triton matmul_ogs kernel: better than Marlin fallback on sm_120
+# - FlashInfer MXFP4 kernels: optimized Cutlass backend (sm_90)
+#
+# Features:
+# - Configurable reasoning effort (low/medium/high via system prompt)
+# - Harmony response format (applied automatically via chat template)
+# - Tool calling support
+# - Apache 2.0 license
+#
+# Prerequisites: p6-b200-nvidia Karpenter NodePool
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-gpt120b-dg-p6b
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "24"
+          memory: 128Gi
+          gpu: "2"
+        limits:
+          cpu: "24"
+          memory: 128Gi
+          gpu: "2"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 120
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            # Enable optimized FlashInfer MoE kernels for MXFP4 on Hopper
+            - name: VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8
+              value: "1"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "openai/gpt-oss-120b"
+            - "--tensor-parallel-size"
+            - "2"
+            - "--max-model-len"
+            - "16384"
+            - "--gpu-memory-utilization"
+            - "0.90"
+            - "--dyn-reasoning-parser"
+            - "gpt_oss"
+            - "--dyn-tool-call-parser"
+            - "harmony"
+
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "24"
+          memory: 128Gi
+          gpu: "2"
+        limits:
+          cpu: "24"
+          memory: 128Gi
+          gpu: "2"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 120
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            - name: VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8
+              value: "1"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "openai/gpt-oss-120b"
+            - "--is-prefill-worker"
+            - "--tensor-parallel-size"
+            - "2"
+            - "--max-model-len"
+            - "16384"
+            - "--gpu-memory-utilization"
+            - "0.85"
+            - "--max-num-batched-tokens"
+            - "32768"
+            - "--dyn-reasoning-parser"
+            - "gpt_oss"
+            - "--dyn-tool-call-parser"
+            - "harmony"

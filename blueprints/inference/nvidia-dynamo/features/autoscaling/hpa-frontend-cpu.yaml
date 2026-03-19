@@ -1,0 +1,102 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# =============================================================================
+# NVIDIA Dynamo - HPA for Frontend (CPU-Based)
+# =============================================================================
+#
+# This HPA scales the Frontend service of a DynamoGraphDeployment based on
+# CPU utilization. It targets the DynamoGraphDeploymentScalingAdapter (DGDSA)
+# rather than the DGD directly.
+#
+# Dynamo v0.8.1+ Note:
+#   Embedded autoscaling is deprecated. Use this HPA approach instead.
+#   The DGDSA is automatically created when you deploy a DGD.
+#
+# Prerequisites:
+#   1. Dynamo v0.8.1+ operator deployed
+#   2. Metrics Server installed (standard in EKS)
+#   3. A DynamoGraphDeployment deployed (creates DGDSA automatically)
+#
+# Usage:
+#   # First deploy a DGD
+#   kubectl apply -f ../vllm/vllm-aggregated-default.yaml -n dynamo
+#
+#   # Wait for DGDSA creation
+#   kubectl get dgdsa -n dynamo
+#
+#   # Apply this HPA (adjust name to match your DGD's Frontend DGDSA)
+#   kubectl apply -f hpa-frontend-cpu.yaml -n dynamo
+#
+# IMPORTANT:
+#   Update `scaleTargetRef.name` to match your actual DGDSA name.
+#   Format is typically: <dgd-name>-<service-name> (e.g., vllm-aggregated-default-frontend)
+#
+# =============================================================================
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: dynamo-frontend-hpa
+  namespace: dynamo
+  labels:
+    app.kubernetes.io/name: dynamo-frontend-hpa
+    app.kubernetes.io/component: autoscaling
+    app.kubernetes.io/part-of: nvidia-dynamo
+    dynamo.nvidia.com/backend: vllm
+    dynamo.nvidia.com/tier: advanced
+  annotations:
+    description: HPA for Dynamo Frontend based on CPU utilization
+    dynamo.nvidia.com/config-version: 0.8.1
+    dynamo.nvidia.com/scaling-type: hpa-cpu
+spec:
+  # Target the DynamoGraphDeploymentScalingAdapter (DGDSA)
+  # The DGDSA is automatically created by the Dynamo operator
+  scaleTargetRef:
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeploymentScalingAdapter
+    # IMPORTANT: Change this to match your DGDSA name
+    # Find with: kubectl get dgdsa -n dynamo
+    name: vllm-aggregated-default-frontend
+
+  # Replica bounds - adjust based on your capacity and SLA requirements
+  minReplicas: 1
+  maxReplicas: 10
+
+  # Metrics used for scaling decisions
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Scale up when average CPU exceeds 70%
+          # Consider your Frontend pod's CPU request when tuning this
+          averageUtilization: 70
+
+  # Scaling behavior - controls how fast HPA scales up/down
+  behavior:
+    # Scale up behavior - relatively aggressive for responsiveness
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        # Allow doubling replicas every 60 seconds
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        # Or add up to 4 pods every 60 seconds
+        - type: Pods
+          value: 4
+          periodSeconds: 60
+      selectPolicy: Max
+
+    # Scale down behavior - conservative to avoid thrashing
+    scaleDown:
+      # Wait 5 minutes before scaling down to avoid fluctuations
+      stabilizationWindowSeconds: 300
+      policies:
+        # Remove at most 1 pod every 60 seconds
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+      selectPolicy: Min

@@ -1,0 +1,380 @@
+# DeepSeek R1 (671B MoE) EP/DP on B200 — NVFP4 with EFA
+#
+# Based on: "Driving vLLM WideEP and Large-Scale Serving Toward Maturity on Blackwell (Part I)"
+# Source: https://blog.vllm.ai/2026/02/03/dsr1-gb200-part1.html
+# Reproduction: https://github.com/vllm-project/vllm/issues/33583
+#
+# Model: nvidia/DeepSeek-R1-0528-NVFP4-v2 (MIT license)
+#   NVFP4 quantized checkpoint: 4-bit MoE weights with FP8/FP16 scales, ~350GB.
+#   Uses FlashInfer-CUTLASS NVFP4 GEMM kernels on B200 tensor cores.
+#
+# Architecture: Prefill/Decode disaggregation via NVIDIA Dynamo
+#   - Prefill: 8 GPUs (1 node), TP=8 with EP=8, enforce_eager
+#   - Decode:  8 GPUs (1 node), TP=8 with EP=8, CUDA graphs (FULL_AND_PIECEWISE)
+#   - KV cache transfer: NIXL over EFA RDMA (UCX SRD transport)
+#
+# Key blog techniques applied:
+#   - NVFP4 GEMM via FlashInfer-CUTLASS for MoE expert weights
+#   - FP8 KV cache + FP8 MLA projection (VLLM_MLA_FP8_PROJ)
+#   - FlashInfer MLA attention backend
+#   - allgather_reducescatter for EP all-to-all communication
+#   - NVFP4 dispatch for 4x reduced all-to-all volume
+#   - Async scheduling for compute-communication overlap
+#   - NCCL CUMEM + NVLS for optimized collectives
+#
+# Parallelism note — blog vs this deployment:
+#   Blog:  Decode DP=4 × TP=2 (EP=2 per rank, 2-way all-to-all)
+#   Ours:  Decode DP=1 × TP=8 (EP=8, 8-way all-to-all)
+#   Reason: vLLM's NVFP4 checkpoint + TP=2 causes tensor size mismatch in
+#   Dynamo runtime 0.8.1. The blog's custom fork (pd_gb200_0114) has patches
+#   for this. Once vLLM supports independent TP/DP per worker role, decode
+#   should use DP=4 × TP=2 for lower EP communication overhead and higher
+#   throughput. See --data-parallel-size / --data-parallel-size-local flags.
+#
+# Benchmark results (ISL=2048, OSL=2048, p6-b200.48xlarge, EFA enabled):
+#
+#   | Concurrency | TTFT (ms) | ITL (ms) | Output TPS | Decode TPGS |
+#   |-------------|-----------|----------|------------|-------------|
+#   | 1           | 441       | 8.94     | 74.32      | 9.3         |
+#   | 2           | 774       | 9.44     | 114.50     | 14.3        |
+#   | 4           | 1,386     | 10.40    | 160.70     | 20.1        |
+#   | 8           | 2,609     | 11.87    | 203.58     | 25.4        |
+#   | 16          | 4,786     | 16.05    | 241.22     | 30.2        |
+#   | 32          | 7,850     | 18.90    | 316.49     | 39.6        |
+#   | 64          | 9,931     | 20.39    | 505.90     | 63.2        |
+#
+#   Blog target: 10,100 decode TPGS on GB200 NVL72 with DP=4 × TP=2.
+#   Our 63.2 TPGS reflects: TP=8 (vs TP=2), standalone B200 (vs GB200 NVL72),
+#   Dynamo runtime 0.8.1 (vs custom vLLM fork with ~10 optimization PRs).
+#
+# Hardware: 2x p6-b200.48xlarge (16x B200, 192GB HBM3e each)
+#   - NVLink Switch: 1.8 TB/s bisection bandwidth within node
+#   - EFA: 8 interfaces × 200 Gbps = 1.6 Tbps aggregate inter-node
+#   - B200 sm_100: native FP4/FP8 tensor cores, FlashMLA support
+#
+# EFA (Elastic Fabric Adapter) for NIXL KV cache RDMA transfer:
+#   Requesting vpc.amazonaws.com/efa via resources.requests.custom triggers
+#   Karpenter to launch instances with EFA network interfaces attached.
+#   The EFA device plugin exposes /dev/infiniband/ uverbs devices to pods.
+#   NIXL uses UCX with SRD (Scalable Reliable Datagram) transport over EFA.
+#
+# Prerequisites:
+#   - p6-b200-nvidia Karpenter NodePool + EC2NodeClass
+#   - Security group with self-referencing all-traffic rule (for EFA SRD)
+#   - aws-efa-k8s-device-plugin DaemonSet (v0.5.6+ with p6-b200 in nodeAffinity)
+#   - HuggingFace token secret (hf-token-secret)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-dsr1-ep-dp-p6
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 20
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "8"
+      sharedMemory:
+        size: 64Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 240
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          # Decode env vars — aligned with vLLM blog (pd_gb200_0114 branch)
+          # Blog: DP=4 × TP=2 with EP, FlashInfer FP4, CUDA graphs, DeepEP
+          env:
+            # --- GPU/NCCL system ---
+          - name: NVIDIA_GDRCOPY
+            value: "1"
+          - name: NVSHMEM_IB_ENABLE_IBGDA
+            value: "1"
+          - name: VLLM_SKIP_P2P_CHECK
+            value: "1"
+          - name: NCCL_CUMEM_ENABLE
+            value: "1"
+          - name: NCCL_NVLS_ENABLE
+            value: "1"
+            # --- vLLM MoE / EP ---
+          - name: VLLM_USE_FLASHINFER_MOE_FP4
+            value: "1"
+          - name: VLLM_FLASHINFER_MOE_BACKEND
+            value: "latency"
+          - name: VLLM_RANDOMIZE_DP_DUMMY_INPUTS
+            value: "1"
+          - name: VLLM_USE_NCCL_SYMM_MEM
+            value: "1"
+            # --- Decode-specific from blog ---
+          - name: VLLM_MLA_FP8_PROJ
+            value: "1"
+          - name: VLLM_DEEPEP_LOW_LATENCY_ALLOW_NVLINK
+            value: "1"
+          - name: VLLM_DEEPEP_BUFFER_SIZE_MB
+            value: "0"
+          - name: VLLM_EP_USE_SBO
+            value: "0"
+          - name: VLLM_DEEPEPLL_NVFP4_DISPATCH
+            value: "1"
+          - name: VLLM_MOE_DP_CHUNK_SIZE
+            value: "1024"
+          - name: VLLM_ENABLE_FUSED_MOE_ACTIVATION_CHUNKING
+            value: "0"
+          - name: VLLM_V1_OUTPUT_PROC_CHUNK_SIZE
+            value: "2048"
+          - name: VLLM_LOG_STATS_INTERVAL
+            value: "1"
+            # --- Attention ---
+          - name: VLLM_ATTENTION_BACKEND
+            value: "FLASHINFER_MLA"
+            # --- EFA/RDMA for NIXL KV cache transfer ---
+          - name: FI_PROVIDER
+            value: "efa"
+          - name: FI_EFA_USE_DEVICE_RDMA
+            value: "1"
+          - name: FI_EFA_FORK_SAFE
+            value: "1"
+          command:
+          - python3
+          args:
+          - "-m"
+          - "dynamo.vllm"
+          - "--model"
+          - "nvidia/DeepSeek-R1-0528-NVFP4-v2"
+            # Blog uses DP=4 × TP=2 but NVFP4 checkpoint + TP=2 causes tensor
+            # size mismatch in Dynamo runtime 0.8.1. Use TP=8 with EP instead.
+          - "--tensor-parallel-size"
+          - "8"
+          - "--enable-expert-parallel"
+          - "--all2all-backend"
+          - "allgather_reducescatter"
+          - "--kv-cache-dtype"
+          - "fp8"
+          - "--max-model-len"
+          - "2148"
+          - "--trust-remote-code"
+          - "--gpu-memory-utilization"
+          - "0.90"
+          - "--max-num-seqs"
+          - "1024"
+          - "--max-num-batched-tokens"
+          - "1024"
+          - "--async-scheduling"
+          - "--dyn-reasoning-parser"
+          - "deepseek_r1"
+          - "--safetensors-load-strategy"
+          - "eager"
+
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "8"
+      sharedMemory:
+        size: 64Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 240
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          # Prefill env vars — aligned with vLLM blog (pd_gb200_0114 branch)
+          env:
+            # --- GPU/NCCL system ---
+          - name: NVIDIA_GDRCOPY
+            value: "1"
+          - name: NVSHMEM_IB_ENABLE_IBGDA
+            value: "1"
+          - name: VLLM_SKIP_P2P_CHECK
+            value: "1"
+          - name: NCCL_CUMEM_ENABLE
+            value: "1"
+          - name: NCCL_NVLS_ENABLE
+            value: "1"
+            # --- vLLM MoE / EP ---
+          - name: VLLM_USE_FLASHINFER_MOE_FP4
+            value: "1"
+          - name: VLLM_FLASHINFER_MOE_BACKEND
+            value: "latency"
+          - name: VLLM_RANDOMIZE_DP_DUMMY_INPUTS
+            value: "1"
+          - name: VLLM_USE_NCCL_SYMM_MEM
+            value: "1"
+          - name: VLLM_ENABLE_MOE_DP_CHUNK
+            value: "0"
+          - name: VLLM_ENABLE_FUSED_MOE_ACTIVATION_CHUNKING
+            value: "0"
+            # --- Attention ---
+          - name: VLLM_ATTENTION_BACKEND
+            value: "FLASHINFER_MLA"
+            # --- EFA/RDMA for NIXL KV cache transfer ---
+          - name: FI_PROVIDER
+            value: "efa"
+          - name: FI_EFA_USE_DEVICE_RDMA
+            value: "1"
+          - name: FI_EFA_FORK_SAFE
+            value: "1"
+          command:
+          - python3
+          args:
+          - "-m"
+          - "dynamo.vllm"
+          - "--model"
+          - "nvidia/DeepSeek-R1-0528-NVFP4-v2"
+          - "--is-prefill-worker"
+          - "--tensor-parallel-size"
+          - "8"
+          - "--enable-expert-parallel"
+          - "--all2all-backend"
+          - "allgather_reducescatter"
+          - "--kv-cache-dtype"
+          - "fp8"
+          - "--max-model-len"
+          - "2148"
+          - "--trust-remote-code"
+          - "--gpu-memory-utilization"
+          - "0.85"
+          - "--max-num-batched-tokens"
+          - "65536"
+          - "--max-num-seqs"
+          - "1024"
+          - "--enforce-eager"
+          - "--disable-custom-all-reduce"
+          - "--no-enable-prefix-caching"
+          - "--swap-space"
+          - "16"
+          - "--async-scheduling"
+          - "--dyn-reasoning-parser"
+          - "deepseek_r1"
+          - "--safetensors-load-strategy"
+          - "eager"

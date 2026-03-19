@@ -1,0 +1,348 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM DGDR - DeepSeek R1 671B EP/DP on B200 — Profiling-Driven Deployment
+#
+# This profiles and auto-deploys DeepSeek R1 (671B MoE) with EP/DP on B200:
+# - NVFP4 quantized checkpoint (nvidia/DeepSeek-R1-0528-NVFP4-v2)
+# - EFA RDMA for NIXL KV cache transfer between prefill/decode
+# - Expert Parallel (EP=8) with allgather_reducescatter
+# - Uses vLLM backend
+#
+# Expected profiling time: 4-8 hours (671B model, complex EP/DP config)
+#
+# Prerequisites:
+# - 2x p6-b200.48xlarge (16x B200, 192GB HBM3e each)
+# - hf-token-secret with HuggingFace token
+# - p6-b200-nvidia Karpenter NodePool + EC2NodeClass
+# - Security group with self-referencing all-traffic rule (for EFA SRD)
+# - aws-efa-k8s-device-plugin DaemonSet
+# - Prometheus stack for profiling metrics
+#
+# Why vLLM for DGDR instead of SGLang?
+# - SGLang DGDR has upstream profiler bug that causes failures
+# - vLLM DGDR is the recommended path for auto-profiling
+# - Use sglang-aggregated/disaggregated for manual deployments
+#
+# NOTE: ConfigMap must appear BEFORE the DGDR to avoid a race condition
+# where the operator tries to read the ConfigMap before it exists.
+
+# ConfigMap with full DGD base config for DeepSeek R1 EP/DP on B200
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dsr1-ep-dp-p6-dgd-config
+  namespace: dynamo
+data:
+  disagg.yaml: |
+    apiVersion: nvidia.com/v1alpha1
+    kind: DynamoGraphDeployment
+    metadata:
+      name: vllm-dsr1-ep-dp-p6
+      namespace: dynamo
+    spec:
+      backendFramework: vllm
+      services:
+        Frontend:
+          componentType: frontend
+          replicas: 1
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 30
+            failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 30
+            failureThreshold: 20
+          resources:
+            requests:
+              cpu: "4"
+              memory: 8Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          extraPodSpec:
+            mainContainer:
+              image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - "python3 -m dynamo.frontend --http-port 8000"
+
+        VllmDecodeWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: decode
+          replicas: 1
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 120
+          resources:
+            requests:
+              cpu: "96"
+              memory: 1024Gi
+              gpu: "8"
+              custom:
+                vpc.amazonaws.com/efa: "8"
+            limits:
+              cpu: "96"
+              memory: 1024Gi
+              gpu: "8"
+              custom:
+                vpc.amazonaws.com/efa: "8"
+          sharedMemory:
+            size: 64Gi
+          extraPodSpec:
+            nodeSelector:
+              karpenter.sh/nodepool: p6-b200-nvidia
+            mainContainer:
+              startupProbe:
+                httpGet:
+                  path: /health
+                  port: 9090
+                periodSeconds: 30
+                failureThreshold: 240
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+              env:
+                - name: NVIDIA_GDRCOPY
+                  value: "1"
+                - name: NVSHMEM_IB_ENABLE_IBGDA
+                  value: "1"
+                - name: VLLM_SKIP_P2P_CHECK
+                  value: "1"
+                - name: NCCL_CUMEM_ENABLE
+                  value: "1"
+                - name: NCCL_NVLS_ENABLE
+                  value: "1"
+                - name: VLLM_USE_FLASHINFER_MOE_FP4
+                  value: "1"
+                - name: VLLM_FLASHINFER_MOE_BACKEND
+                  value: "latency"
+                - name: VLLM_RANDOMIZE_DP_DUMMY_INPUTS
+                  value: "1"
+                - name: VLLM_USE_NCCL_SYMM_MEM
+                  value: "1"
+                - name: VLLM_MLA_FP8_PROJ
+                  value: "1"
+                - name: VLLM_DEEPEP_LOW_LATENCY_ALLOW_NVLINK
+                  value: "1"
+                - name: VLLM_DEEPEP_BUFFER_SIZE_MB
+                  value: "0"
+                - name: VLLM_EP_USE_SBO
+                  value: "0"
+                - name: VLLM_DEEPEPLL_NVFP4_DISPATCH
+                  value: "1"
+                - name: VLLM_MOE_DP_CHUNK_SIZE
+                  value: "1024"
+                - name: VLLM_ENABLE_FUSED_MOE_ACTIVATION_CHUNKING
+                  value: "0"
+                - name: VLLM_V1_OUTPUT_PROC_CHUNK_SIZE
+                  value: "2048"
+                - name: VLLM_LOG_STATS_INTERVAL
+                  value: "1"
+                - name: VLLM_ATTENTION_BACKEND
+                  value: "FLASHINFER_MLA"
+                - name: FI_PROVIDER
+                  value: "efa"
+                - name: FI_EFA_USE_DEVICE_RDMA
+                  value: "1"
+                - name: FI_EFA_FORK_SAFE
+                  value: "1"
+              command:
+                - python3
+              args:
+                - "-m"
+                - "dynamo.vllm"
+                - "--model"
+                - "nvidia/DeepSeek-R1-0528-NVFP4-v2"
+                - "--tensor-parallel-size"
+                - "8"
+                - "--enable-expert-parallel"
+                - "--all2all-backend"
+                - "allgather_reducescatter"
+                - "--kv-cache-dtype"
+                - "fp8"
+                - "--max-model-len"
+                - "2148"
+                - "--trust-remote-code"
+                - "--gpu-memory-utilization"
+                - "0.90"
+                - "--max-num-seqs"
+                - "1024"
+                - "--max-num-batched-tokens"
+                - "1024"
+                - "--async-scheduling"
+                - "--dyn-reasoning-parser"
+                - "deepseek_r1"
+                - "--safetensors-load-strategy"
+                - "eager"
+
+        VllmPrefillWorker:
+          envFromSecret: hf-token-secret
+          componentType: worker
+          subComponentType: prefill
+          replicas: 1
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 120
+          resources:
+            requests:
+              cpu: "96"
+              memory: 1024Gi
+              gpu: "8"
+              custom:
+                vpc.amazonaws.com/efa: "8"
+            limits:
+              cpu: "96"
+              memory: 1024Gi
+              gpu: "8"
+              custom:
+                vpc.amazonaws.com/efa: "8"
+          sharedMemory:
+            size: 64Gi
+          extraPodSpec:
+            nodeSelector:
+              karpenter.sh/nodepool: p6-b200-nvidia
+            mainContainer:
+              startupProbe:
+                httpGet:
+                  path: /health
+                  port: 9090
+                periodSeconds: 30
+                failureThreshold: 240
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+              env:
+                - name: NVIDIA_GDRCOPY
+                  value: "1"
+                - name: NVSHMEM_IB_ENABLE_IBGDA
+                  value: "1"
+                - name: VLLM_SKIP_P2P_CHECK
+                  value: "1"
+                - name: NCCL_CUMEM_ENABLE
+                  value: "1"
+                - name: NCCL_NVLS_ENABLE
+                  value: "1"
+                - name: VLLM_USE_FLASHINFER_MOE_FP4
+                  value: "1"
+                - name: VLLM_FLASHINFER_MOE_BACKEND
+                  value: "latency"
+                - name: VLLM_RANDOMIZE_DP_DUMMY_INPUTS
+                  value: "1"
+                - name: VLLM_USE_NCCL_SYMM_MEM
+                  value: "1"
+                - name: VLLM_ENABLE_MOE_DP_CHUNK
+                  value: "0"
+                - name: VLLM_ENABLE_FUSED_MOE_ACTIVATION_CHUNKING
+                  value: "0"
+                - name: VLLM_ATTENTION_BACKEND
+                  value: "FLASHINFER_MLA"
+                - name: FI_PROVIDER
+                  value: "efa"
+                - name: FI_EFA_USE_DEVICE_RDMA
+                  value: "1"
+                - name: FI_EFA_FORK_SAFE
+                  value: "1"
+              command:
+                - python3
+              args:
+                - "-m"
+                - "dynamo.vllm"
+                - "--model"
+                - "nvidia/DeepSeek-R1-0528-NVFP4-v2"
+                - "--is-prefill-worker"
+                - "--tensor-parallel-size"
+                - "8"
+                - "--enable-expert-parallel"
+                - "--all2all-backend"
+                - "allgather_reducescatter"
+                - "--kv-cache-dtype"
+                - "fp8"
+                - "--max-model-len"
+                - "2148"
+                - "--trust-remote-code"
+                - "--gpu-memory-utilization"
+                - "0.85"
+                - "--max-num-batched-tokens"
+                - "65536"
+                - "--max-num-seqs"
+                - "1024"
+                - "--enforce-eager"
+                - "--disable-custom-all-reduce"
+                - "--no-enable-prefix-caching"
+                - "--swap-space"
+                - "16"
+                - "--async-scheduling"
+                - "--dyn-reasoning-parser"
+                - "deepseek_r1"
+                - "--safetensors-load-strategy"
+                - "eager"
+---
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-dgdr-dsr1-ep-dp-p6
+  namespace: dynamo
+spec:
+  model: nvidia/DeepSeek-R1-0528-NVFP4-v2
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1"
+    # Reference ConfigMap with full DGD template (EP/DP on B200)
+    configMapRef:
+      name: dsr1-ep-dp-p6-dgd-config
+      key: disagg.yaml
+    config:
+      deployment:
+        # Model loading timeout for 671B MoE model
+        timeout: 7200 # 120 minutes
+      hardware:
+        # 671B MoE needs full B200 node (8 GPUs) per worker
+        min_num_gpus_per_engine: 8
+        max_num_gpus_per_engine: 8
+        num_gpus_per_node: 8
+      sweep:
+        # Online profiling (AIPerf benchmarks)
+        use_ai_configurator: false
+      sla:
+        # SLA targets for 671B MoE reasoning model
+        isl: 2048 # Input sequence length
+        osl: 2048 # Output sequence length
+        ttft: 5000.0 # Time To First Token (ms) - high for 671B
+        itl: 20.0 # Inter-Token Latency (ms)
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1"
+
+  autoApply: true
