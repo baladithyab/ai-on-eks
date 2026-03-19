@@ -12,6 +12,10 @@ module "efs" {
   creation_token = local.name
   name           = local.name
 
+  # Throughput configuration
+  throughput_mode                 = var.efs_throughput_mode
+  provisioned_throughput_in_mibps = var.efs_throughput_mode == "provisioned" ? var.efs_provisioned_throughput_in_mibps : null
+
   # Mount targets / security group
   mount_targets = {
     for k, v in zipmap(local.azs, slice(module.vpc.private_subnets, length(module.vpc.private_subnets) - var.availability_zones_count, length(module.vpc.private_subnets))) : k => { subnet_id = v }

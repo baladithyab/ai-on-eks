@@ -36,7 +36,7 @@ variable "solution_id" {
 
 # VPC with configurable AZs - CIDR size should match AZ count
 variable "vpc_cidr" {
-  description = "VPC CIDR. This should be a valid private (RFC 1918) CIDR range. Recommended: /21 for 2 AZs, /20 for 3 AZs, /19 for 4 AZs. If the network prefix is not provided, it will be computed"
+  description = "VPC CIDR. This should be a valid private (RFC 1918) CIDR range. Recommended: /21 for 2AZs, /20 for 3AZs, /19 for 4AZs. If the network prefix is not provided, it will be computed"
   default     = "10.1.0.0"
   type        = string
 }
@@ -116,6 +116,24 @@ variable "enable_aws_efs_csi_driver" {
   type        = bool
   default     = false
 }
+
+variable "efs_throughput_mode" {
+  description = "EFS throughput mode. 'bursting' scales with storage size (~50 MiB/s per TiB). 'elastic' auto-scales to 10+ GiB/s (pay-per-use, ~$0.04/GiB read, $0.08/GiB write). 'provisioned' sets a fixed throughput."
+  type        = string
+  default     = "bursting"
+
+  validation {
+    condition     = contains(["bursting", "elastic", "provisioned"], var.efs_throughput_mode)
+    error_message = "efs_throughput_mode must be one of: bursting, elastic, provisioned"
+  }
+}
+
+variable "efs_provisioned_throughput_in_mibps" {
+  description = "Provisioned throughput in MiB/s. Only used when efs_throughput_mode is 'provisioned'."
+  type        = number
+  default     = null
+}
+
 variable "enable_aws_efa_k8s_device_plugin" {
   description = "Enable AWS EFA K8s Device Plugin"
   type        = bool
@@ -188,6 +206,38 @@ variable "enable_external_dns" {
   type        = bool
   default     = false
 }
+
+#---------------------------------------------------------------
+# Grafana Tempo Stack — Independent Component
+# OpenTelemetry distributed tracing backend.
+# Deployed independently via enable_tempo_stack.
+# Dynamo auto-detects Tempo at runtime; no Dynamo-specific toggle needed.
+#---------------------------------------------------------------
+
+variable "enable_tempo_stack" {
+  description = "Enable Grafana Tempo for OpenTelemetry distributed tracing"
+  type        = bool
+  default     = false
+}
+
+variable "tempo_namespace" {
+  description = "Kubernetes namespace for Tempo deployment"
+  type        = string
+  default     = "tempo"
+}
+
+variable "tempo_storage_class" {
+  description = "Storage class for Tempo persistent volume. Use a block storage class (e.g., gp3) for RWO access."
+  type        = string
+  default     = "gp3"
+}
+
+variable "tempo_storage_size" {
+  description = "Storage size for Tempo persistent volume"
+  type        = string
+  default     = "50Gi"
+}
+
 variable "enable_argo_workflows" {
   description = "Enable Argo Workflows addon"
   type        = bool
@@ -243,12 +293,7 @@ variable "kuberay_operator_version" {
   type        = string
   default     = "1.5.1"
 }
-variable "huggingface_token" {
-  description = "Hugging Face Secret Token"
-  type        = string
-  default     = "DUMMY_TOKEN_REPLACE_ME"
-  sensitive   = true
-}
+
 variable "enable_rayserve_ha_elastic_cache_redis" {
   description = "Flag to enable Ray Head High Availability with Elastic Cache for Redis"
   type        = bool
@@ -301,6 +346,13 @@ variable "aibrix_stack_version" {
   default     = "v0.4.1"
 }
 
+#---------------------------------------------------------------
+# LeaderWorkerSet (LWS) — Independent Component
+# Multi-replica workload coordination controller.
+# Deployed independently via enable_leader_worker_set.
+# Dynamo auto-detects LWS at runtime; no Dynamo-specific toggle needed.
+#---------------------------------------------------------------
+
 variable "enable_leader_worker_set" {
   description = "Flag to enable the LeaderWorkerSet"
   type        = bool
@@ -333,6 +385,9 @@ variable "enable_nvidia_gpu_operator" {
   type        = bool
   default     = false
 }
+
+# NOTE: enable_nvidia_gpu_operator_crds_only variable has been removed.
+# GPU Operator CRD-only installation is no longer supported as Grove/KAI integration is disabled.
 
 variable "enable_nvidia_device_plugin" {
   description = <<-EOF
@@ -484,19 +539,6 @@ variable "kms_key_admin_roles" {
   default     = []
 }
 
-# NVIDIA Dynamo Stack Variables
-variable "enable_dynamo_stack" {
-  description = "Enable NVIDIA Dynamo Stack addon"
-  type        = bool
-  default     = false
-}
-
-variable "dynamo_stack_version" {
-  description = "NVIDIA Dynamo Stack version"
-  type        = string
-  default     = "v0.4.0"
-}
-
 # Enable SOCI snapshotter parallel pull/unpack mode
 variable "enable_soci_snapshotter" {
   description = "Enable SOCI snapshotter parallel pull/unpack mode"
@@ -592,4 +634,297 @@ variable "s3_models_additional_buckets" {
   description = "List of additional S3 bucket names that both service accounts should have access to"
   type        = list(string)
   default     = []
+}
+
+#---------------------------------------------------------------
+# Grove Operator (Standalone) - Multi-node AI Inference Orchestration
+#
+# Independent component — can be deployed with or without Dynamo.
+# The Dynamo operator auto-detects Grove CRDs at runtime via API
+# group discovery (grove.io). No changes to dynamo-platform are needed.
+#
+# DEPLOYMENT MODE: Standalone ArgoCD application from Grove Git repository.
+# This is INDEPENDENT from the dynamo-platform Helm chart's internal
+# grove.enabled subchart (which remains disabled).
+#
+# DO NOT enable both this AND dynamo-platform's grove.enabled — that would
+# create duplicate CRDs and controllers.
+#
+# WHY STANDALONE: The dynamo-platform chart pins Grove v0.1.0-alpha.3 which
+# has a cert-controller crash loop with ArgoCD. alpha.6 fixes this via
+# certProvisionMode=manual, but is not published to OCI. Standalone
+# deployment from Git is the only way to use the fix.
+#
+# IMPACT ON LWS: When Grove is enabled, the Dynamo operator automatically
+# uses Grove PodCliqueSets for ALL workloads (including single-node).
+# LWS becomes the fallback only when Grove CRDs are absent or when a
+# deployment explicitly opts out via annotation:
+#   nvidia.com/enable-grove: "false"
+#---------------------------------------------------------------
+variable "enable_grove_standalone" {
+  description = <<-EOF
+    Enable Grove operator as a standalone ArgoCD application.
+
+    Grove provides PodCliqueSet/PodClique CRDs for coordinating multi-node
+    GPU workloads (e.g., tensor parallelism, expert parallelism).
+
+    IMPORTANT: When Grove is enabled, the Dynamo operator uses Grove for ALL
+    workloads by default (replacing LWS). To keep a specific workload on LWS,
+    annotate its DynamoGraphDeployment with nvidia.com/enable-grove: "false".
+
+    Prerequisites:
+    - cert-manager (auto-enabled when this is true)
+    - NOT compatible with dynamo-platform's internal grove.enabled subchart
+
+    The Dynamo operator auto-detects Grove CRDs at runtime via API group
+    discovery (grove.io). No changes to dynamo-platform chart are needed.
+  EOF
+  type        = bool
+  default     = false
+}
+
+variable "grove_version" {
+  description = "Grove operator version (Git tag). v0.1.0-alpha.6 includes certProvisionMode=manual fix."
+  type        = string
+  default     = "v0.1.0-alpha.6"
+}
+
+variable "grove_namespace" {
+  description = "Namespace for standalone Grove operator deployment"
+  type        = string
+  default     = "grove-system"
+}
+
+variable "grove_topology_aware_scheduling_enabled" {
+  description = "Enable topology-aware scheduling in Grove (requires KAI Scheduler)"
+  type        = bool
+  default     = false
+}
+
+variable "grove_auto_mnnvl_enabled" {
+  description = "Enable automatic Multi-Node NVLink (MNNVL) detection in Grove"
+  type        = bool
+  default     = false
+}
+
+#---------------------------------------------------------------
+# KAI Scheduler (Standalone) - GPU-Optimized Kubernetes Scheduler
+#
+# Independent component — can be deployed with or without Dynamo.
+# The Dynamo operator auto-detects KAI via API group discovery
+# (scheduling.run.ai). No changes to dynamo-platform are needed.
+#
+# DEPLOYMENT MODE: Standalone ArgoCD application from GHCR OCI registry.
+# This is INDEPENDENT from the dynamo-platform Helm chart's internal
+# kai-scheduler.enabled subchart (which remains disabled).
+#
+# DO NOT enable both this AND dynamo-platform's kai-scheduler.enabled.
+#
+# WHY STANDALONE: Allows deploying a newer KAI version (v0.12.10) than
+# what dynamo-platform pins (v0.9.4), with independent lifecycle management.
+#---------------------------------------------------------------
+variable "enable_kai_scheduler_standalone" {
+  description = <<-EOF
+    Enable KAI Scheduler as a standalone ArgoCD application.
+
+    KAI provides gang scheduling, topology-aware placement, fractional GPU,
+    and queue-based resource management for GPU workloads.
+
+    CRDs: Queue, PodGroup, BindRequest, Config, SchedulingShard
+
+    When both Grove and KAI are enabled, the Dynamo operator automatically
+    injects KAI scheduler queue annotations into Grove PodCliqueSets.
+
+    NOT compatible with dynamo-platform's internal kai-scheduler.enabled subchart.
+    The Dynamo operator auto-detects KAI via API group discovery (scheduling.run.ai).
+  EOF
+  type        = bool
+  default     = false
+}
+
+variable "kai_scheduler_version" {
+  description = "KAI Scheduler chart version from GHCR OCI registry"
+  type        = string
+  default     = "v0.12.10"
+}
+
+#---------------------------------------------------------------
+# NVIDIA Dynamo Stack
+#---------------------------------------------------------------
+
+# --- Core toggles ---
+
+variable "enable_dynamo_stack" {
+  description = "Enable NVIDIA Dynamo Stack addon"
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_stack_version" {
+  description = <<-EOF
+    NVIDIA Dynamo Stack version for platform Helm charts.
+
+    v0.8.0 BREAKING CHANGES from v0.7.1:
+    - Request plane: TCP is now DEFAULT (was NATS). NATS still available for control signals.
+    - Discovery: Kubernetes-native service discovery is now DEFAULT (was etcd).
+    - Backend updates: vLLM 0.12.0, SGLang 0.5.6.post2, TensorRT-LLM 1.2.0rc4
+    - Enhanced multimodal support (audio/video inputs)
+
+    Container images use the same version tag (e.g., 0.8.0).
+  EOF
+  type        = string
+  default     = "v0.8.0"
+}
+
+variable "dynamo_namespace" {
+  description = "Kubernetes namespace for NVIDIA Dynamo platform deployment"
+  type        = string
+  default     = "dynamo"
+}
+
+# --- Credentials ---
+
+variable "ngc_api_key" {
+  description = <<-EOF
+    NVIDIA NGC API Key for container image pulls and Helm chart access.
+
+    REQUIRED for NVIDIA Dynamo deployments (enable_dynamo_stack = true).
+    Get an API key from: https://ngc.nvidia.com/setup/api-key
+
+    Key is used for:
+    - Pulling Dynamo runtime containers from nvcr.io
+    - Accessing Dynamo Helm charts from NGC
+
+    Set via environment variable: export TF_VAR_ngc_api_key="nvapi-..."
+    Or in a secrets.auto.tfvars file (add to .gitignore)
+
+    NOTE: Terraform will fail fast with a clear error if this is empty
+    when enable_dynamo_stack = true.
+  EOF
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "huggingface_token" {
+  description = <<-EOF
+    HuggingFace API Token for model downloads.
+
+    OPTIONAL for NVIDIA Dynamo deployments (enable_dynamo_stack = true).
+    Get a token from: https://huggingface.co/settings/tokens
+
+    Token must have read access to gated models like Llama-3, DeepSeek, etc.
+    When empty, the HF token Kubernetes secret will not be created.
+
+    Set via environment variable: export TF_VAR_huggingface_token="hf_..."
+    Or in a secrets.auto.tfvars file (add to .gitignore)
+  EOF
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+# --- Platform config ---
+
+# NVIDIA Dynamo Platform-Level Features
+# Note: These are platform-wide settings configured in the dynamo-platform Helm chart.
+# Per-workload features (KV Router, SLA Planner, KVBM, OTEL tracing, audit logging, gRPC)
+# are configured in individual DynamoGraphDeployment CRs when deploying inference workloads.
+
+variable "dynamo_enable_nats_etcd" {
+  description = <<-EOF
+    Enable NATS and etcd for Dynamo platform (legacy mode).
+
+    v0.8.0 DEFAULTS (when false):
+    - Request plane: Uses TCP (lower latency, simpler architecture)
+    - Service discovery: Uses Kubernetes-native mechanisms (Services, Endpoints)
+
+    LEGACY MODE (when true):
+    - Request plane: NATS message queue (useful for complex routing scenarios)
+    - Service discovery: etcd-based (useful for advanced distributed state management)
+    - Storage: Uses EFS dynamic provisioning via efs-sc-dynamic StorageClass
+
+    RECOMMENDATION: Keep disabled (false) for new deployments using v0.8.0+ to align
+    with upstream defaults. Only enable if you have specific requirements for:
+    - Message-queue-based request routing
+    - etcd-based service discovery (external to Kubernetes)
+    - Distributed KV state management outside of Kubernetes
+  EOF
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_operator_namespace_restriction_enabled" {
+  description = "Whether to restrict Dynamo operator to specific namespaces. By default, the operator runs with cluster-wide permissions. Set to true to restrict to the dynamo namespace only."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_storage_class" {
+  description = "Storage class for Dynamo components (NATS JetStream, etcd, global storage). Must support ReadWriteMany for shared storage."
+  type        = string
+  default     = "efs-sc-dynamic"
+}
+
+# --- PVC config ---
+
+#---------------------------------------------------------------
+# Shared Model Cache PVC (fallback when Model Express is disabled)
+# Provides a ReadWriteMany volume for model weights/artifacts cache
+#---------------------------------------------------------------
+variable "dynamo_shared_cache_pvc_name" {
+  description = "Name of the shared PVC for model weights cache (used when Model Express is disabled)"
+  type        = string
+  default     = "dynamo-pvc"
+}
+
+variable "dynamo_shared_cache_size" {
+  description = "Size of the shared model cache PVC"
+  type        = string
+  default     = "500Gi"
+}
+
+variable "dynamo_shared_cache_storage_class" {
+  description = "Storage class for the shared model cache PVC. Must support ReadWriteMany (e.g., efs-sc-dynamic)."
+  type        = string
+  default     = "efs-sc-dynamic"
+}
+
+variable "dynamo_shared_cache_access_modes" {
+  description = "Access modes for the shared model cache PVC"
+  type        = list(string)
+  default     = ["ReadWriteMany"]
+}
+
+# --- Model Express ---
+
+variable "enable_dynamo_model_express" {
+  description = <<-EOF
+    Enable Model Express for managed model caching and distribution.
+    Independently deployable — does NOT require enable_dynamo_stack.
+
+    Deployment modes:
+    - Standalone: Model Express runs on its own (no Dynamo operator needed).
+    - With Dynamo: The operator is auto-configured with the Model Express URL.
+
+    Model Express is the ONLY built-in model caching mechanism for NVIDIA Dynamo:
+    - Faster pod startup (models pre-fetched to nodes)
+    - Better for large models (>50GB)
+    - Handles high pod churn efficiently
+    - Centralized model management
+    - Deploys into dynamo_namespace (namespace + NGC secret auto-created)
+
+    Prerequisites: ngc_api_key (required for image pulls from nvcr.io).
+    Optional: huggingface_token (for gated model downloads).
+
+    Users requiring custom caching solutions can bring their own implementations.
+  EOF
+  type        = bool
+  default     = true
+}
+
+variable "dynamo_model_express_url" {
+  description = "URL for an existing Model Express server (optional). Leave empty to not use Model Express. Format: http://hostname:port"
+  type        = string
+  default     = ""
 }

@@ -39,7 +39,7 @@ if [ ${#targets[@]} -gt 0 ]; then
     target_args="$target_args -target=$target"
   done
 
-  destroy_output=$($TERRAFORM_COMMAND $target_args 2>&1 | tee /dev/tty)
+  destroy_output=$($TERRAFORM_COMMAND $target_args 2>&1 | tee /dev/stderr)
   if [[ ${PIPESTATUS[0]} -eq 0 && $destroy_output == *"Destroy complete"* ]]; then
     echo "SUCCESS: Terraform destroy of kubectl_manifest resources completed successfully"
   else
@@ -48,9 +48,31 @@ if [ ${#targets[@]} -gt 0 ]; then
   fi
 fi
 
+# Clean up stale API services that can block namespace deletion.
+# When ArgoCD apps are deleted above, services like metrics-server may lose their
+# endpoints while their APIService registration persists. This causes namespace
+# deletion to hang because the namespace controller can't complete API discovery.
+echo "Cleaning up stale API services..."
+for apiservice in $(kubectl get apiservices -o jsonpath='{range .items[?(@.status.conditions[0].status=="False")]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+  echo "  Deleting unavailable APIService: $apiservice"
+  kubectl delete apiservice "$apiservice" --wait=false 2>/dev/null || true
+done
+
+# Force-remove finalizers from any namespaces stuck in Terminating state
+echo "Checking for stuck namespaces..."
+for ns in $(kubectl get namespaces --field-selector status.phase=Terminating -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+  echo "  Removing finalizers from stuck namespace: $ns"
+  kubectl get namespace "$ns" -o json | python3 -c "
+import sys, json
+ns = json.loads(sys.stdin.read())
+ns['spec']['finalizers'] = []
+json.dump(ns, sys.stdout)
+" | kubectl replace --raw "/api/v1/namespaces/$ns/finalize" -f - 2>/dev/null || true
+done
+
 ## Final destroy to catch any remaining resources
 echo "Destroying remaining resources..."
-destroy_output=$($TERRAFORM_COMMAND -var="region=$REGION" 2>&1 | tee /dev/tty)
+destroy_output=$($TERRAFORM_COMMAND -var="region=$REGION" 2>&1 | tee /dev/stderr)
 if [[ ${PIPESTATUS[0]} -eq 0 && $destroy_output == *"Destroy complete"* ]]; then
   echo "SUCCESS: Terraform destroy of all modules completed successfully"
 else
