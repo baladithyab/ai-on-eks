@@ -1,0 +1,111 @@
+# Model Express - NVIDIA Dynamo Model Caching Service
+# Provides pre-fetching and centralized model distribution for Dynamo workloads
+#
+# Source: https://github.com/ai-dynamo/modelexpress (official Helm chart)
+# Service: http://modelexpress.${dynamo_namespace}.svc.cluster.local:8001
+#
+# This is the ONLY built-in model caching option for Dynamo deployments.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: model-express
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2" # Deploy after base infrastructure
+spec:
+  project: default
+  source:
+    # Official Model Express Helm chart from ai-dynamo repo
+    repoURL: https://github.com/ai-dynamo/modelexpress.git
+    # Pin to specific tag for reproducibility
+    # v0.2.2: latest stable release; upgrade to v0.3.0 when tagged
+    targetRevision: v0.2.2
+    path: helm
+    helm:
+      releaseName: modelexpress
+      values: |
+        # Model Express configuration for ai-on-eks
+        replicaCount: 1
+
+        image:
+          repository: nvcr.io/nvidia/ai-dynamo/modelexpress-server
+          pullPolicy: IfNotPresent
+          tag: "0.2.2"
+
+        # Disable OpenTelemetry auto-instrumentation injection
+        # (AWS CloudWatch Observability / OTEL webhook can cause CreateContainerConfigError)
+        podAnnotations:
+          instrumentation.opentelemetry.io/inject-java: "false"
+          instrumentation.opentelemetry.io/inject-nodejs: "false"
+          instrumentation.opentelemetry.io/inject-python: "false"
+          instrumentation.opentelemetry.io/inject-dotnet: "false"
+          sidecar.opentelemetry.io/inject: "false"
+
+        # Use NGC registry secret (must exist in target namespace)
+        imagePullSecrets:
+          - name: ngc-secret
+
+        # Service configuration - deterministic name and port
+        service:
+          type: ClusterIP
+          port: 8001
+          name: modelexpress
+
+        # HuggingFace token from secret (chart supports extraEnv, not envFrom)
+        extraEnv:
+          - name: HF_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: hf-token-secret
+                key: HF_TOKEN
+                optional: true
+
+        # EFS storage for model cache (ReadWriteMany for shared access)
+        persistence:
+          enabled: true
+          storageClass: efs-sc-dynamic
+          accessMode: ReadWriteMany
+          size: 200Gi
+
+        # Resource limits for model express server
+        # Increased to 4 CPU / 8Gi to speed up model downloads
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+
+        # Security context - image runs as root, so must allow it
+        podSecurityContext:
+          runAsNonRoot: false
+        securityContext:
+          runAsNonRoot: false
+          runAsUser: 0
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${dynamo_namespace}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+  # Health check for Model Express service
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP
+        - /spec/clusterIPs

@@ -1,0 +1,75 @@
+# Grove Operator - Multi-node AI inference orchestration
+# Deployed from GHCR OCI registry (includes CRDs, operator image references)
+# Uses cert-manager for webhook TLS certificates (certProvisionMode=manual)
+# Prerequisites: cert-manager must be deployed and running
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grove-operator
+  namespace: argocd
+  annotations:
+    # Deploy after cert-manager (wave -5) and KAI Scheduler (wave 0)
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/ai-dynamo/grove
+    chart: grove-charts
+    targetRevision: ${grove_version}
+    helm:
+      values: |
+        config:
+          server:
+            webhooks:
+              # Manual mode: cert-manager manages TLS certificates externally.
+              # This avoids the cert-controller os.Exit(0) crash loop with ArgoCD.
+              certProvisionMode: manual
+              secretName: grove-webhook-server-cert
+          topologyAwareScheduling:
+            enabled: ${grove_topology_aware_scheduling_enabled}
+          network:
+            autoMNNVLEnabled: ${grove_auto_mnnvl_enabled}
+        # cert-manager ca-injector annotations: automatically injects the CA bundle
+        # from the grove-ca Certificate into webhook configurations
+        webhooks:
+          podCliqueSetValidationWebhook:
+            annotations:
+              cert-manager.io/inject-ca-from: ${grove_namespace}/grove-ca
+          podCliqueSetDefaultingWebhook:
+            annotations:
+              cert-manager.io/inject-ca-from: ${grove_namespace}/grove-ca
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${grove_namespace}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true
+  # Prevent ArgoCD from fighting with cert-manager over caBundle
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle
+    # cert-manager manages the webhook cert Secret contents
+    - group: ""
+      kind: Secret
+      name: grove-webhook-server-cert
+      jqPathExpressions:
+        - .data

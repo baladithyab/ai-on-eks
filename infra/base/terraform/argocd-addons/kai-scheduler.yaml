@@ -1,0 +1,39 @@
+# KAI Scheduler - GPU-optimized Kubernetes scheduler with gang scheduling
+# Provides topology-aware scheduling, fractional GPU, and queue management
+# CRDs: Queue, PodGroup, BindRequest, Config, SchedulingShard
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kai-scheduler
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/nvidia/kai-scheduler
+    chart: kai-scheduler
+    targetRevision: ${kai_scheduler_version}
+    helm:
+      values: |
+        global:
+          tolerations: []
+          affinity: {}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kai-scheduler
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

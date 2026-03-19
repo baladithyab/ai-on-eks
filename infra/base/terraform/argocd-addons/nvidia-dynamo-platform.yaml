@@ -1,8 +1,17 @@
+# NVIDIA Dynamo Platform - Deploys operator, dependencies, and optional components
+# v0.8.0 IMPORTANT CHANGES:
+# - Request plane: TCP is now DEFAULT (NATS remains for control signals if needed)
+# - Discovery: Kubernetes-native is now DEFAULT (etcd available for advanced use cases)
+# - Backends: vLLM 0.12.0, SGLang 0.5.6.post2, TensorRT-LLM 1.2.0rc4
+# CRDs must be installed first via nvidia-dynamo-crds.yaml (sync-wave: -10)
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: dynamo-platform
   namespace: argocd
+  annotations:
+    # Sync-wave 0 ensures platform deploys after CRDs (wave -10)
+    argocd.argoproj.io/sync-wave: "0"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -14,36 +23,100 @@ spec:
     helm:
       values: |
         # NVIDIA Dynamo Platform Configuration for ai-on-eks using NGC
-        # Using minimal config - NGC chart defaults should work
+        # v0.8.0 uses minimal config - chart defaults align with K8s-native approach
 
         # NGC authentication (required)
         dynamo-operator:
           imagePullSecrets:
-            - name: docker-imagepullsecret
+            - name: ngc-secret
+          # Fix kube-rbac-proxy image: gcr.io/kubebuilder is deprecated, migrated to registry.k8s.io
+          controllerManager:
+            kubeRbacProxy:
+              image:
+                repository: registry.k8s.io/kubebuilder/kube-rbac-proxy
+                tag: v0.15.0
+          %{~ if dynamo_operator_namespace_restriction_enabled ~}
+          namespaceRestriction:
+            enabled: true
+            targetNamespace: ${dynamo_namespace}
+          %{~ endif ~}
+          %{~ if enable_model_express && dynamo_model_express_url != "" ~}
+          modelExpressURL: ${dynamo_model_express_url}
+          %{~ endif ~}
+          %{~ if enable_prometheus_endpoint ~}
 
-        # NATS configuration - use EFS for JetStream persistence
-        # Note: etcd inherits from global.storageClass, but NATS needs explicit setting
+          # Metrics configuration - auto-inject PROMETHEUS_ENDPOINT env var
+          # into all Dynamo services managed by the operator
+          # Enabled when enable_ai_ml_observability_stack = true
+          dynamo:
+            metrics:
+              prometheusEndpoint: "http://kube-prometheus-stack-prometheus.kube-prometheus-stack.svc.cluster.local:9090"
+          %{~ endif ~}
+
+        # IMPORTANT: Grove and KAI Scheduler are DISABLED here (chart defaults).
+        # They are deployed as STANDALONE ArgoCD applications when enabled via:
+        #   enable_grove_standalone = true        → grove-operator.yaml
+        #   enable_kai_scheduler_standalone = true → kai-scheduler.yaml
+        # DO NOT add grove.enabled=true or kai-scheduler.enabled=true here —
+        # that would conflict with the standalone deployments.
+
+        # NATS/etcd Configuration - v0.8.0 DEFAULT: DISABLED
+        #
+        # v0.8.0 uses TCP request plane + Kubernetes-native discovery by default.
+        # NATS and etcd are only needed for legacy compatibility or advanced use cases.
+        #
+        # To enable legacy mode, set dynamo_enable_nats_etcd = true in blueprint.tfvars
+        %{~ if dynamo_enable_nats_etcd ~}
+
+        # LEGACY MODE: NATS enabled for message-queue-based request routing
+        # Required for: legacy workloads, complex routing scenarios, JetStream persistence
         nats:
+          enabled: true
           config:
             jetstream:
+              enabled: true
               fileStore:
                 pvc:
-                  storageClassName: efs-sc-dynamic
+                  storageClassName: ${dynamo_storage_class}
+                  size: 10Gi
+          # Pod Disruption Budget for NATS cluster stability
+          podDisruptionBudget:
+            enabled: true
+            minAvailable: 1
 
-        # etcd configuration - disable JWT auth and pre-upgrade hook
+        # LEGACY MODE: etcd enabled for distributed service discovery
+        # Required for: legacy workloads, KV cache routing, external discovery
         etcd:
+          enabled: true
           auth:
             token:
               enabled: false
           preUpgradeJob:
             enabled: false
+          persistence:
+            storageClass: ${dynamo_storage_class}
+            size: 8Gi
+          # Pod Disruption Budget for etcd cluster stability
+          pdb:
+            create: true
+            minAvailable: 1
+        %{~ else ~}
 
-        # Use EFS for shared storage (etcd inherits this, other components may too)
+        # v0.8.0 DEFAULT: NATS disabled - using TCP request plane
+        nats:
+          enabled: false
+
+        # v0.8.0 DEFAULT: etcd disabled - using Kubernetes-native discovery
+        etcd:
+          enabled: false
+        %{~ endif ~}
+
+        # Use EFS for shared storage (global setting for any component that needs it)
         global:
-          storageClass: efs-sc-dynamic
+          storageClass: ${dynamo_storage_class}
   destination:
     server: https://kubernetes.default.svc
-    namespace: dynamo-cloud
+    namespace: ${dynamo_namespace}
   syncPolicy:
     automated:
       prune: true
@@ -58,13 +131,16 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - ApplyOutOfSyncOnly=true
+  # ignoreDifferences: Prevents ArgoCD from detecting drift on controller-managed fields
+  # Critical for webhook caBundle which is populated by cert-manager/controller
   ignoreDifferences:
-    # Ignore differences in webhook configurations during upgrades
+    # Webhook caBundle is managed by the cluster (injected by cert-manager or controller)
+    # ArgoCD should not try to reconcile this as it will drift from Helm template state
     - group: admissionregistration.k8s.io
-      kind: ValidatingAdmissionWebhook
+      kind: ValidatingWebhookConfiguration
       jqPathExpressions:
         - .webhooks[]?.clientConfig.caBundle
     - group: admissionregistration.k8s.io
-      kind: MutatingAdmissionWebhook
+      kind: MutatingWebhookConfiguration
       jqPathExpressions:
         - .webhooks[]?.clientConfig.caBundle

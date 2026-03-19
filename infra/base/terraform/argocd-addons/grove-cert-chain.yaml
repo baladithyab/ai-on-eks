@@ -1,0 +1,65 @@
+# Grove Operator - cert-manager TLS certificate chain
+# Creates a self-signed CA chain for Grove webhook TLS:
+#   SelfSigned Issuer -> CA Certificate -> CA Issuer -> Webhook Certificate
+# The cert-manager ca-injector automatically injects the CA bundle
+# into webhook configurations via annotations on the Grove ArgoCD Application.
+#
+# Applied as a batch via kubectl_file_documents + for_each in argocd_addons.tf.
+# cert-manager handles reconciliation ordering internally (retries until
+# dependencies are satisfied), so parallel creation is safe.
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: grove-selfsigned-issuer
+  namespace: ${grove_namespace}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grove-ca
+  namespace: ${grove_namespace}
+spec:
+  isCA: true
+  commonName: grove-ca
+  secretName: grove-ca-secret
+  duration: 87600h
+  renewBefore: 2160h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: grove-selfsigned-issuer
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: grove-ca-issuer
+  namespace: ${grove_namespace}
+spec:
+  ca:
+    secretName: grove-ca-secret
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grove-webhook-cert
+  namespace: ${grove_namespace}
+spec:
+  secretName: grove-webhook-server-cert
+  duration: 8760h
+  renewBefore: 720h
+  dnsNames:
+    - grove-operator
+    - grove-operator.${grove_namespace}
+    - grove-operator.${grove_namespace}.svc
+    - grove-operator.${grove_namespace}.svc.cluster.local
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: grove-ca-issuer
+    kind: Issuer

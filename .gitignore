@@ -18,6 +18,9 @@ website/package-lock.json
 *.tfstate.*
 *.tfplan
 
+# Terraform auto-generated variable files (may contain secrets)
+*.auto.tfvars
+
 terraform-apply.log
 
 # Crash log files
@@ -58,6 +61,9 @@ node_modules
 gen-ai/inference/stable-diffusion-rayserve-gpu/locust/__pycache__/*
 website/package-lock.json
 website/package.json
+
+# Blueprint test results (generated output)
+**/test-results/
 
 # Dynamo-specific ignores
 blueprints/inference/nvidia-dynamo/dynamo/

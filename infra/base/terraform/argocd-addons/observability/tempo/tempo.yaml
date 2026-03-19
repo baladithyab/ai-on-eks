@@ -1,0 +1,87 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tempo
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: tempo
+    targetRevision: 1.10.3  # Stable version compatible with Grafana
+    helm:
+      values: |
+        # Grafana Tempo for OpenTelemetry distributed tracing
+        # Receives OTLP traces from Dynamo services and stores them for Grafana visualization
+
+        # Enable OTLP receivers
+        tempo:
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 0.0.0.0:4317  # Standard OTLP gRPC port
+                http:
+                  endpoint: 0.0.0.0:4318  # Standard OTLP HTTP port
+
+          # Storage backend configuration
+          storage:
+            trace:
+              backend: local  # Use local filesystem for simplicity
+              local:
+                path: /var/tempo/traces
+              wal:
+                path: /var/tempo/wal
+
+        # Persistence for trace storage
+        persistence:
+          enabled: true
+          storageClassName: ${tempo_storage_class}
+          size: ${tempo_storage_size}
+          accessModes:
+            - ReadWriteOnce
+
+        # Service configuration
+        service:
+          type: ClusterIP
+          annotations: {}
+
+        # Resource requests/limits
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2
+            memory: 4Gi
+
+        # ServiceMonitor for Prometheus scraping (optional)
+        serviceMonitor:
+          enabled: false
+
+        # Global overrides for trace retention - inline configuration
+        global_overrides:
+          per_tenant_override_config: |
+            overrides:
+              "*":
+                # Retain traces for 7 days
+                max_traces_per_user: 100000000
+                ingestion_rate_limit_bytes: 15000000
+                ingestion_burst_size_bytes: 20000000
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${tempo_namespace}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,236 +1,379 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# =============================================================================
+# NVIDIA Dynamo Stack Cleanup
+# =============================================================================
+#
+# Wraps the base Terraform cleanup template (terraform/_LOCAL/cleanup.sh) with
+# Dynamo-specific pre-destroy steps and strict _LOCAL preservation logic.
+#
+# FLOW
+#   1.  Delete Dynamo operator CRs (DGD, DGDR, DynamoModel) so the operator
+#       doesn't block namespace/CRD teardown during terraform destroy.
+#   1b. Unblock stuck namespace deletion: remove stale APIServices, patch
+#       stuck ArgoCD finalizers, and force-finalize the dynamo namespace if
+#       it is stuck in Terminating.
+#   2.  Delegate to the base cleanup template in terraform/_LOCAL/ for:
+#      - kubectl_manifest targeted destroy
+#      - full terraform destroy
+#      - EBS volume cleanup
+#   3. Gate success/failure on the base template's exit code AND output
+#      analysis (Terraform error markers).
+#   4. Delete terraform/_LOCAL by default on conclusive success (exit 0 +
+#      empty state + no Terraform error markers in output).
+#      Use --keep-local to preserve _LOCAL on success for debugging.
+#
+# CONTRACT
+#   - Any non-zero exit from the base template → exit non-zero, preserve
+#     _LOCAL, NO success banner.
+#   - Terraform error markers in output (even with exit 0) → treated as
+#     failure: exit non-zero, preserve _LOCAL, NO success banner.
+#   - _LOCAL is deleted by default when conclusive success is confirmed.
+#   - --keep-local preserves _LOCAL even on success (debugging escape hatch).
+#   - --force/--yes only skips the confirmation prompt.
+#
+# FLAGS
+#   --force | --yes   Skip interactive confirmation
+#   --keep-local      Preserve _LOCAL even on success (debugging)
+#   -h | --help       Show usage
+#
+# See: docs/cleanup-guardrails.md
+# =============================================================================
+set -uo pipefail
 
-# NVIDIA Dynamo cleanup script - removes all deployments and infrastructure
-set -euo pipefail
-
-# Ensure we're in the right directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR" || exit 1
 
-# Configuration
+readonly TERRAFORM_DIR="terraform/_LOCAL"
+
+# Defaults — may be overridden by tfvars via base template
 CLUSTER_NAME="dynamo-on-eks"
 REGION="us-west-2"
-NAMESPACE="dynamo-cloud"
 
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+# Flags
+OPT_FORCE=false
+OPT_KEEP_LOCAL=false
 
-info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+# Colour (disabled when stdout is not a tty)
+if [[ -t 1 ]]; then
+    _G='\033[0;32m' _Y='\033[0;33m' _R='\033[0;31m' _N='\033[0m'
+else
+    _G='' _Y='' _R='' _N=''
+fi
+info()  { printf '%b[INFO]%b %s\n'  "$_G" "$_N" "$*"; }
+warn()  { printf '%b[WARN]%b %s\n'  "$_Y" "$_N" "$*"; }
+error() { printf '%b[ERROR]%b %s\n' "$_R" "$_N" "$*" >&2; }
+
+# =============================================================================
+# Recovery message — printed when the base cleanup template fails
+# =============================================================================
+print_recovery() {
+    local rc="$1"
+    cat >&2 <<EOF
+
+$(error "==============================================================================")
+$(error " CLEANUP FAILED  (exit code: ${rc})")
+$(error "==============================================================================")
+
+terraform/_LOCAL has been PRESERVED so you can retry or inspect state.
+
+  1. Inspect state:   cd ${SCRIPT_DIR}/${TERRAFORM_DIR} && terraform state list
+  2. Show details:    terraform show
+  3. Retry:           cd ${SCRIPT_DIR} && ./cleanup.sh
+  4. Remove orphans:  cd ${SCRIPT_DIR}/${TERRAFORM_DIR} && terraform state rm <addr>
+  5. Manual removal:  rm -rf ${SCRIPT_DIR}/${TERRAFORM_DIR}  # only when verified clean
+
+$(error "==============================================================================")
+EOF
 }
 
-warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
+# Trap: preserve _LOCAL on interrupt
+trap 'echo ""; error "INTERRUPTED — terraform/_LOCAL PRESERVED."; exit 130' INT TERM
 
-error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+# =============================================================================
+# Argument parsing
+# =============================================================================
+while (( $# > 0 )); do
+    case "$1" in
+        --force|--yes)  OPT_FORCE=true;       shift ;;
+        --keep-local)   OPT_KEEP_LOCAL=true;   shift ;;
+        -h|--help)
+            cat <<'USAGE'
+Usage: cleanup.sh [OPTIONS]
 
-# Confirmation prompt (skip if --force flag is provided)
-if [[ "${1:-}" != "--force" ]]; then
+  --force, --yes     Skip confirmation prompt
+  --keep-local       Preserve terraform/_LOCAL even on success (debugging)
+  -h, --help         Show this message
+
+By default, terraform/_LOCAL is deleted automatically on conclusive success
+(base cleanup exits 0, state is empty, no Terraform error markers in output).
+Pass --keep-local to preserve it for debugging.
+
+See: docs/cleanup-guardrails.md
+USAGE
+            exit 0
+            ;;
+        *) warn "Unknown option: $1 (ignored)"; shift ;;
+    esac
+done
+
+# =============================================================================
+# Banner + confirmation
+# =============================================================================
+info "NVIDIA Dynamo Stack Cleanup"
+info "  Cluster:       ${CLUSTER_NAME}"
+info "  Region:        ${REGION}"
+info "  --force/--yes: ${OPT_FORCE}"
+info "  --keep-local:  ${OPT_KEEP_LOCAL}"
+
+if [[ "$OPT_FORCE" != "true" ]]; then
     echo ""
-    warn "⚠️  This will completely remove all NVIDIA Dynamo infrastructure and deployments!"
-    echo "   Cluster: ${CLUSTER_NAME}"
-    echo "   Region: ${REGION}"
-    echo "   This action cannot be undone."
-    echo ""
-    read -p "Are you sure you want to proceed? (yes/no): " -r
-    if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
-        info "Cleanup cancelled by user"
+    warn "This will DESTROY all NVIDIA Dynamo infrastructure in ${CLUSTER_NAME} / ${REGION}."
+    read -rp "Proceed? (yes/no): "
+    if [[ ! ${REPLY} =~ ^[Yy][Ee][Ss]$ ]]; then
+        info "Cancelled."
         exit 0
     fi
 fi
 
-info "Starting NVIDIA Dynamo cleanup for ${CLUSTER_NAME}..."
+# =============================================================================
+# Phase 1 — Delete Dynamo operator custom resources (best-effort)
+# =============================================================================
+# These are the CRs that users create and the Dynamo operator watches.
+# Removing them (with finalizer patches) prevents the operator from blocking
+# namespace deletion during terraform destroy.
+#
+# The Dynamo CRDs themselves and the platform components are managed by
+# ArgoCD / Terraform and will be torn down by the base cleanup template.
+# =============================================================================
+info "=== Phase 1: Dynamo CR pre-cleanup ==="
 
-# Check if cluster exists and is accessible
-info "Checking cluster accessibility..."
 CLUSTER_ACCESSIBLE=false
-
-# Try to update kubeconfig
-if aws eks update-kubeconfig --region ${REGION} --name ${CLUSTER_NAME} 2>/dev/null; then
-    info "Successfully updated kubeconfig"
-    # Test if we can actually connect to the cluster
-    if kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
-        info "Cluster is accessible"
-        CLUSTER_ACCESSIBLE=true
-    else
-        warn "Cluster exists but is not accessible (may be in deletion process)"
-        CLUSTER_ACCESSIBLE=false
-    fi
+if aws eks update-kubeconfig --region "$REGION" --name "$CLUSTER_NAME" 2>/dev/null \
+        && kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
+    CLUSTER_ACCESSIBLE=true
+    info "Cluster is accessible"
 else
-    warn "Failed to update kubeconfig - cluster may not exist or be inaccessible"
-    CLUSTER_ACCESSIBLE=false
+    warn "Cluster not reachable — skipping Dynamo CR cleanup"
 fi
 
-# Phase 1: Clean up Dynamo graphs manually (only if cluster is accessible)
-if [ "$CLUSTER_ACCESSIBLE" = true ]; then
-    info "Phase 1: Cleaning up Dynamo custom resources..."
-else
-    info "Phase 1: Skipping Kubernetes resource cleanup (cluster not accessible)"
-fi
-
-if [ "$CLUSTER_ACCESSIBLE" = true ]; then
-    # Delete DynamoGraphDeployments first
-    info "Deleting DynamoGraphDeployments..."
-    if kubectl get dynamographdeployment -A --no-headers -o custom-columns=":metadata.name,:metadata.namespace" 2>/dev/null | grep -q .; then
-        kubectl get dynamographdeployment -A --no-headers -o custom-columns=":metadata.name,:metadata.namespace" 2>/dev/null | while read name namespace; do
-            if [ -n "$name" ] && [ -n "$namespace" ]; then
-                info "Removing finalizers and deleting DynamoGraphDeployment: $name in namespace $namespace"
-                kubectl patch dynamographdeployment $name -n $namespace --type='merge' -p='{"metadata":{"finalizers":null}}' 2>/dev/null || warn "Failed to patch finalizers"
-                kubectl delete dynamographdeployment $name -n $namespace --ignore-not-found=true || warn "Failed to delete DynamoGraphDeployment: $name"
-            fi
-        done
-
-        # Wait for DynamoGraphDeployments to be fully deleted
-        info "Waiting for DynamoGraphDeployments to be fully deleted..."
-        while kubectl get dynamographdeployment -A --no-headers 2>/dev/null | grep -q .; do
-            info "Still waiting for DynamoGraphDeployments to complete deletion..."
-            sleep 5
-        done
-        info "All DynamoGraphDeployments deleted"
-    else
-        info "No DynamoGraphDeployments found"
-    fi
-
-    # Delete DynamoComponentDeployments
-    info "Deleting DynamoComponentDeployments..."
-    if kubectl get dynamocomponentdeployment -A --no-headers -o custom-columns=":metadata.name,:metadata.namespace" 2>/dev/null | grep -q .; then
-        kubectl get dynamocomponentdeployment -A --no-headers -o custom-columns=":metadata.name,:metadata.namespace" 2>/dev/null | while read name namespace; do
-            if [ -n "$name" ] && [ -n "$namespace" ]; then
-                info "Removing finalizers and deleting DynamoComponentDeployment: $name in namespace $namespace"
-                kubectl patch dynamocomponentdeployment $name -n $namespace --type='merge' -p='{"metadata":{"finalizers":null}}' 2>/dev/null || warn "Failed to patch finalizers"
-                kubectl delete dynamocomponentdeployment $name -n $namespace --ignore-not-found=true || warn "Failed to delete DynamoComponentDeployment: $name"
-            fi
-        done
-
-        # Wait for DynamoComponentDeployments to be fully deleted
-        info "Waiting for DynamoComponentDeployments to be fully deleted..."
-        while kubectl get dynamocomponentdeployment -A --no-headers 2>/dev/null | grep -q .; do
-            info "Still waiting for DynamoComponentDeployments to complete deletion..."
-            sleep 5
-        done
-        info "All DynamoComponentDeployments deleted"
-    else
-        info "No DynamoComponentDeployments found"
-    fi
-else
-    info "Skipping Dynamo custom resource cleanup (cluster not accessible)"
-fi
-
-# Phase 2: Clean up other conflicting resources
-info "Phase 2: Cleaning up other conflicting resources..."
-
-# Remove the existing CloudWatch log group
-info "Removing existing CloudWatch log group..."
-aws logs delete-log-group --log-group-name "/aws/eks/${CLUSTER_NAME}/cluster" --region ${REGION} 2>/dev/null || info "Log group not found or already deleted"
-
-
-# Phase 3: Run base cleanup and remove _LOCAL directory
-info "Phase 3: Running Terraform cleanup..."
-
-TERRAFORM_SUCCESS=false
-
-if [ -d "terraform/_LOCAL" ]; then
-    info "Found terraform/_LOCAL directory, running cleanup..."
-
-    # Save current directory
-    ORIGINAL_DIR=$(pwd)
-    cd terraform/_LOCAL
-
-    if [ -f "./cleanup.sh" ]; then
-        info "Running base cleanup script..."
-        if ./cleanup.sh; then
-            info "Base cleanup script completed successfully"
-            TERRAFORM_SUCCESS=true
-        else
-            error "Base cleanup script failed!"
-            TERRAFORM_SUCCESS=false
+if [[ "$CLUSTER_ACCESSIBLE" == "true" ]]; then
+    for kind in dynamographdeployment dynamographdeploymentrequest dynamomodel; do
+        if ! kubectl get "$kind" -A --no-headers 2>/dev/null | grep -q .; then
+            info "  No ${kind}(s) found"
+            continue
         fi
+        info "  Cleaning up ${kind}(s)…"
+        kubectl get "$kind" -A --no-headers \
+            -o custom-columns=":metadata.name,:metadata.namespace" 2>/dev/null \
+        | while IFS= read -r line; do
+            read -r name ns <<<"$line"
+            [[ -z "$name" || -z "$ns" ]] && continue
+            kubectl patch "$kind" "$name" -n "$ns" \
+                --type='merge' -p='{"metadata":{"finalizers":null}}' 2>/dev/null || true
+            kubectl delete "$kind" "$name" -n "$ns" \
+                --ignore-not-found=true --timeout=30s 2>/dev/null || true
+        done
+        # Brief wait for deletion
+        for _ in $(seq 1 12); do
+            kubectl get "$kind" -A --no-headers 2>/dev/null | grep -q . || break
+            sleep 5
+        done
+    done
+
+    # -----------------------------------------------------------------
+    # Safety net: remove blueprint-managed Karpenter NodePools to prevent
+    # orphaned expensive GPU nodes from lingering after infra teardown.
+    # -----------------------------------------------------------------
+    info "  Checking for blueprint-managed Karpenter NodePools..."
+    _bp_pools=$(kubectl get nodepool -l app.kubernetes.io/managed-by=dynamo-blueprints \
+        --no-headers -o custom-columns=":metadata.name" 2>/dev/null || echo "")
+    if [[ -n "$_bp_pools" ]]; then
+        info "  Found blueprint-managed NodePools — removing to prevent orphaned nodes"
+        while IFS= read -r np; do
+            [[ -z "$np" ]] && continue
+            info "    Deleting NodePool: ${np}"
+            kubectl delete nodepool "$np" --ignore-not-found --timeout=30s 2>/dev/null || true
+            kubectl delete ec2nodeclass "$np" --ignore-not-found --timeout=30s 2>/dev/null || true
+        done <<< "$_bp_pools"
+        info "  Blueprint-managed NodePools cleaned up"
     else
-        warn "Base cleanup script not found, attempting manual cleanup..."
-        if [ -f "terraform.tfstate" ]; then
-            info "Running terraform destroy..."
-            if terraform destroy -auto-approve -var-file=../blueprint.tfvars; then
-                info "Terraform destroy completed successfully"
-                TERRAFORM_SUCCESS=true
+        info "  No blueprint-managed NodePools found"
+    fi
+fi
+
+# =============================================================================
+# Phase 1b — Unblock stuck namespace deletion (best-effort)
+# =============================================================================
+# During teardown, the dynamo namespace can get stuck in Terminating when:
+#   a) Aggregated APIServices (e.g. metrics-server) become stale because their
+#      backing pods are gone (no nodes).  The namespace controller can't
+#      complete API discovery, so the built-in "kubernetes" spec.finalizer
+#      never clears.
+#   b) ArgoCD Application finalizers can't reconcile because the ArgoCD
+#      controller pods are gone (no nodes).
+#
+# This phase proactively clears these blockers BEFORE terraform destroy runs,
+# preventing the "context deadline exceeded" timeout.
+# =============================================================================
+if [[ "$CLUSTER_ACCESSIBLE" == "true" ]]; then
+    info "=== Phase 1b: Unblock stuck namespace deletion ==="
+
+    # --- (a) Delete stale aggregated APIServices ---
+    # When metrics-server (or other aggregated APIs) pods are gone, the
+    # APIService stays registered but returns MissingEndpoints / False.
+    # This prevents namespace GC from completing its discovery sweep.
+    _stale_apis=$(kubectl get apiservices -o json 2>/dev/null \
+        | jq -r '.items[] | select(.status.conditions[]? | select(.type=="Available" and .status=="False")) | .metadata.name' 2>/dev/null || echo "")
+    if [[ -n "$_stale_apis" ]]; then
+        info "  Found stale APIServices — removing to unblock namespace GC"
+        while IFS= read -r api; do
+            [[ -z "$api" ]] && continue
+            info "    Deleting stale APIService: ${api}"
+            kubectl delete apiservice "$api" --ignore-not-found 2>/dev/null || true
+        done <<< "$_stale_apis"
+    else
+        info "  No stale APIServices found"
+    fi
+
+    # --- (b) Remove finalizers from stuck ArgoCD Applications ---
+    # During teardown, ArgoCD apps may have deletionTimestamp set but their
+    # finalizers can't reconcile (controller pods gone).  Patch them out.
+    _stuck_apps=$(kubectl get applications -n argocd -o json 2>/dev/null \
+        | jq -r '.items[] | select(.metadata.deletionTimestamp != null) | .metadata.name' 2>/dev/null || echo "")
+    if [[ -n "$_stuck_apps" ]]; then
+        info "  Found stuck ArgoCD Applications — removing finalizers"
+        while IFS= read -r app; do
+            [[ -z "$app" ]] && continue
+            info "    Patching Application: ${app}"
+            kubectl patch application "$app" -n argocd \
+                --type=merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+        done <<< "$_stuck_apps"
+    else
+        info "  No stuck ArgoCD Applications found"
+    fi
+
+    # --- (c) Force-finalize dynamo namespace if still stuck ---
+    _ns_phase=$(kubectl get ns dynamo -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+    if [[ "$_ns_phase" == "Terminating" ]]; then
+        info "  dynamo namespace is Terminating — waiting 15s for GC to catch up..."
+        sleep 15
+        _ns_phase=$(kubectl get ns dynamo -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+        if [[ "$_ns_phase" == "Terminating" ]]; then
+            warn "  dynamo namespace still stuck — force-removing spec.finalizers"
+            kubectl get ns dynamo -o json 2>/dev/null \
+                | jq '.spec.finalizers = []' \
+                | kubectl replace --raw "/api/v1/namespaces/dynamo/finalize" -f - 2>/dev/null || true
+            info "  Waiting 10s for namespace to terminate..."
+            sleep 10
+            if kubectl get ns dynamo >/dev/null 2>&1; then
+                warn "  dynamo namespace persists — terraform destroy may need manual state cleanup"
             else
-                error "Terraform destroy failed!"
-                TERRAFORM_SUCCESS=false
+                info "  dynamo namespace successfully removed"
             fi
         else
-            warn "No terraform.tfstate found, assuming infrastructure was already destroyed"
-            TERRAFORM_SUCCESS=true
+            info "  dynamo namespace resolved on its own"
         fi
-    fi
-
-    # Return to original directory
-    cd "$ORIGINAL_DIR"
-
-    # Only remove the directory if terraform cleanup was successful
-    if [ "$TERRAFORM_SUCCESS" = true ]; then
-        info "Removing terraform/_LOCAL directory..."
-        rm -rf terraform/_LOCAL
-        info "Terraform working directory cleaned up"
+    elif [[ -z "$_ns_phase" ]]; then
+        info "  dynamo namespace does not exist (already clean)"
     else
-        error "Terraform cleanup failed - preserving terraform/_LOCAL directory for troubleshooting"
-        error "Please check the terraform state and resolve any issues, then re-run cleanup.sh"
+        info "  dynamo namespace is in phase: ${_ns_phase}"
     fi
-else
-    warn "terraform/_LOCAL directory not found, skipping Terraform cleanup"
-    TERRAFORM_SUCCESS=true  # No terraform to clean up
 fi
 
-# Final status report
+# =============================================================================
+# Phase 2 — Terraform destroy (delegate to base cleanup template)
+# =============================================================================
+# The base template (staged into _LOCAL by install.sh) handles:
+#   - kubectl_manifest targeted destroy
+#   - full terraform destroy (-auto-approve, -var-file, region)
+#   - EBS volume cleanup
+#
+# We capture stdout/stderr to a log file so we can scan for Terraform error
+# markers even if the base template exits 0 (which can happen when Terraform
+# returns 0 despite outputting errors).  Output is also tee'd to the terminal
+# so the operator sees real-time progress.
+# =============================================================================
+info "=== Phase 2: Terraform destroy (via base template) ==="
+
+if [[ ! -d "$TERRAFORM_DIR" ]]; then
+    warn "terraform/_LOCAL not found — nothing to destroy"
+    info "If infrastructure was previously destroyed, this is expected."
+else
+    if [[ ! -f "${TERRAFORM_DIR}/cleanup.sh" ]]; then
+        error "Base cleanup template not found at ${TERRAFORM_DIR}/cleanup.sh"
+        error "Re-stage it:  cp -r ../base/terraform/* ${TERRAFORM_DIR}/"
+        exit 1
+    fi
+
+    CLEANUP_LOG="${TERRAFORM_DIR}/cleanup-wrapper.log"
+
+    tf_rc=0
+    ( cd "$TERRAFORM_DIR" && bash ./cleanup.sh ) > >(tee "$CLEANUP_LOG") 2>&1 || tf_rc=$?
+
+    if (( tf_rc != 0 )); then
+        error "Base cleanup template exited with code ${tf_rc}"
+        print_recovery "$tf_rc"
+        exit "$tf_rc"
+    fi
+
+    # -------------------------------------------------------------------------
+    # Scan captured output for Terraform error markers.
+    # Terraform sometimes exits 0 despite emitting error blocks.  We detect
+    # lines matching the standard Terraform error box format:
+    #   │ Error: <message>
+    # or bare error lines:
+    #   Error: <message>
+    # -------------------------------------------------------------------------
+    if grep -qE '^(│ Error:|Error:)' "$CLEANUP_LOG" 2>/dev/null; then
+        error "Terraform error markers detected in cleanup output (despite exit code 0)"
+        error "See log: ${CLEANUP_LOG}"
+        print_recovery 1
+        exit 1
+    fi
+
+    info "Base cleanup template completed successfully"
+fi
+
+# =============================================================================
+# Phase 3 — _LOCAL disposition
+# =============================================================================
+# Conclusive success requires ALL of:
+#   1. Base cleanup template ran and exited 0
+#   2. No Terraform error markers in captured output
+#   3. terraform state list is empty
+#
+# Default: delete _LOCAL on conclusive success.
+# --keep-local: preserve _LOCAL even on success (debugging escape hatch).
+# =============================================================================
+info "=== Phase 3: _LOCAL disposition ==="
+
+if [[ -d "$TERRAFORM_DIR" ]]; then
+    # Check state emptiness — a non-empty state means resources may still exist
+    state_list=""
+    state_list=$(cd "$TERRAFORM_DIR" && terraform state list 2>/dev/null) || state_list=""
+
+    if [[ -n "$state_list" ]]; then
+        # State not empty — refuse to delete regardless of flags
+        warn "State is NOT empty — preserving ${TERRAFORM_DIR}"
+        warn "Remaining:"
+        echo "$state_list"
+    elif [[ "$OPT_KEEP_LOCAL" == "true" ]]; then
+        # Explicitly asked to keep
+        info "${TERRAFORM_DIR} preserved (--keep-local was set)."
+    else
+        # Conclusive success: delete _LOCAL
+        info "State empty + no error markers → removing ${TERRAFORM_DIR}"
+        rm -rf "$TERRAFORM_DIR"
+        info "${TERRAFORM_DIR} removed"
+    fi
+else
+    info "${TERRAFORM_DIR} already absent"
+fi
+
+# =============================================================================
+# Success
+# =============================================================================
 echo ""
-if [ "$TERRAFORM_SUCCESS" = true ]; then
-    info "✅ NVIDIA Dynamo cleanup completed successfully!"
-    echo ""
-    echo "Cleaned up:"
-    if [ "$CLUSTER_ACCESSIBLE" = true ]; then
-        echo "  ✓ DynamoGraphDeployments and DynamoComponentDeployments"
-    else
-        echo "  ⚠ Kubernetes resources (skipped - cluster not accessible)"
-    fi
-    echo "  ✓ Conflicting CloudWatch log groups"
-    echo "  ✓ Terraform infrastructure and working directory"
-    echo ""
-    if [ "$CLUSTER_ACCESSIBLE" = true ]; then
-        echo "Note: The dynamo-cloud namespace and ArgoCD applications will be"
-        echo "      automatically cleaned up by Terraform when it destroys the"
-        echo "      ArgoCD applications (CreateNamespace=true handles this)."
-    else
-        echo "Note: Kubernetes resources were skipped because the cluster was not accessible."
-        echo "      This is normal if the infrastructure was already destroyed."
-    fi
-else
-    error "❌ NVIDIA Dynamo cleanup completed with errors!"
-    echo ""
-    echo "Cleaned up:"
-    if [ "$CLUSTER_ACCESSIBLE" = true ]; then
-        echo "  ✓ DynamoGraphDeployments and DynamoComponentDeployments"
-    else
-        echo "  ⚠ Kubernetes resources (skipped - cluster not accessible)"
-    fi
-    echo "  ✓ Conflicting CloudWatch log groups"
-    echo "  ❌ Terraform infrastructure cleanup failed"
-    echo ""
-    echo "⚠️  IMPORTANT: Terraform destroy failed!"
-    echo "   The terraform/_LOCAL directory has been preserved for troubleshooting."
-    echo "   Please:"
-    echo "   1. Check the terraform state in terraform/_LOCAL/"
-    echo "   2. Resolve any resource conflicts or dependencies"
-    echo "   3. Re-run this cleanup script: ./cleanup.sh"
-    echo ""
-    echo "   Common issues:"
-    echo "   - Resources still in use by other services"
-    echo "   - Network dependencies (VPC, subnets, security groups)"
-    echo "   - IAM roles or policies still attached"
-    echo "   - Load balancers or other AWS resources not properly cleaned up"
-    echo ""
-    exit 1
-fi
+info "=============================================================================="
+info " NVIDIA Dynamo cleanup completed successfully"
+info "=============================================================================="
