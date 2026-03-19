@@ -39,12 +39,14 @@ Detailed guides for deploying models with deep dive into specific frameworks on 
 
 Step-by-step guides for deploying models on NVIDIA GPUs:
 
-- **[AIBrix DeepSeek Distill](/docs/blueprints/inference/framework-guides/GPUs/aibrix-deepseek-distill)** - Deploy DeepSeek R1 Distill Llama 8B with AIBrix optimization
-- **[NVIDIA Dynamo](/docs/blueprints/inference/framework-guides/GPUs/nvidia-dynamo)** - Deploy models with NVIDIA's Dynamo framework
-- **[NVIDIA NIM Llama 3](/docs/blueprints/inference/framework-guides/GPUs/nvidia-nim-llama3)** - Deploy Llama 3 using NVIDIA NIM
-- **[NVIDIA NIM Operator](/docs/blueprints/inference/framework-guides/GPUs/nvidia-nim-operator)** - Kubernetes operator for NVIDIA NIM deployments
-- **[vLLM with NVIDIA Triton Server](/docs/blueprints/inference/framework-guides/GPUs/vLLM-NVIDIATritonServer)** - Inference with Triton and vLLM
-- **[vLLM with Ray Serve](/docs/blueprints/inference/framework-guides/GPUs/vLLM-rayserve)** - Scalable inference with Ray Serve and vLLM
+- **[NVIDIA Dynamo Inference Blueprints](./framework-guides/GPUs/nvidia-dynamo.md)** — Deploy models with NVIDIA's Dynamo framework
+- **[DeepSeek-R1 with Ray and vLLM](./framework-guides/GPUs/ray-vllm-deepseek.md)** — Deploy DeepSeek R1 with Ray Serve and vLLM
+- **[NVIDIA NIM with Llama3](./framework-guides/GPUs/nvidia-nim-llama3.md)** — Deploy Llama 3 using NVIDIA NIM
+- **[NVIDIA NIM Operator](./framework-guides/GPUs/nvidia-nim-operator.md)** — Kubernetes operator for NVIDIA NIM deployments
+- **[vLLM with NVIDIA Triton Server](./framework-guides/GPUs/vLLM-NVIDIATritonServer.md)** — Inference with Triton and vLLM
+- **[vLLM with Ray Serve](./framework-guides/GPUs/vLLM-rayserve.md)** — Scalable inference with Ray Serve and vLLM
+- **[Stable Diffusion on GPUs](./framework-guides/GPUs/stablediffusion-gpus.md)** — Stable Diffusion image generation
+- **[AIBrix with DeepSeek](./framework-guides/GPUs/aibrix-deepseek-distill.md)** — Deploy DeepSeek R1 Distill Llama 8B with AIBrix optimization
 
 ### Neuron Deployments
 

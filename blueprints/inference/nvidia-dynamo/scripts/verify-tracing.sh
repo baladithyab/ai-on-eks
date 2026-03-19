@@ -6,6 +6,15 @@
 # NVIDIA Dynamo - Tracing Verification Script
 # =============================================================================
 #
+# This is the single consolidated observability verification entry point.
+# It subsumes the functionality of the following deleted scripts:
+#   - test-integration.sh       (config→deploy→monitor→trace→cleanup workflow)
+#   - test-blueprint-with-observability.sh  (deploy with --enable-monitoring/tracing)
+#   - test-observability-infra.sh           (OTEL Collector, PodMonitor, ServiceMonitor,
+#                                            Prometheus integration, network connectivity)
+#   - verify-metrics-collection.sh          (Prometheus scraping, PodMonitor/ServiceMonitor,
+#                                            metrics on ports 8000/9090/6880, KVBM metrics)
+#
 # This script verifies that OpenTelemetry (OTEL) tracing is properly configured
 # and working for NVIDIA Dynamo deployments:
 #   - OTEL Collector deployment and health

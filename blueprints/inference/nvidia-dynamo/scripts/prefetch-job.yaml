@@ -111,3 +111,120 @@ spec:
             limits:
               cpu: "1"
               memory: "512Mi"
+# =============================================================================
+# --- Direct PVC Mount Variant ---
+# =============================================================================
+# Use this variant when Model Express is NOT installed. It downloads model
+# weights directly from HuggingFace using huggingface-cli and writes them
+# to the shared model cache PVC at /models/hub (matching HF_HUB_CACHE).
+# The script prefetch-models.sh auto-detects the mode and selects this
+# template when the modelexpress deployment is absent.
+#
+# To use: replace the entire Job spec above with the spec below (uncommented).
+#
+# apiVersion: batch/v1
+# kind: Job
+# metadata:
+#   name: model-prefetch
+#   namespace: NAMESPACE_PLACEHOLDER
+# spec:
+#   backoffLimit: 3
+#   ttlSecondsAfterFinished: 3600
+#   template:
+#     spec:
+#       restartPolicy: OnFailure
+#       containers:
+#         - name: prefetch
+#           image: python:3.11-slim
+#           command: ["/bin/bash", "-c"]
+#           args:
+#             - |
+#               set -uo pipefail
+#
+#               MODELS="$PREFETCH_MODELS"
+#               MAX_PARALLEL="$PREFETCH_MAX_PARALLEL"
+#               FAIL_LOG="/tmp/prefetch-failures.log"
+#               touch "$FAIL_LOG"
+#
+#               echo "=== Direct HuggingFace Prefetch Job ==="
+#               echo "Cache dir: $HF_HUB_CACHE"
+#               echo "Models: $MODELS"
+#               echo "Max parallel: $MAX_PARALLEL"
+#               echo ""
+#
+#               # Install huggingface_hub CLI at runtime
+#               echo "Installing huggingface_hub[cli]..."
+#               pip install --quiet --no-cache-dir 'huggingface_hub[cli]' || {
+#                 echo "ERROR: Failed to install huggingface_hub[cli]"
+#                 exit 1
+#               }
+#               echo "huggingface-cli version: $(huggingface-cli version 2>/dev/null || echo unknown)"
+#               echo ""
+#
+#               # Verify HF token is available (needed for gated models)
+#               if [[ -n "${HF_TOKEN:-}" ]]; then
+#                 echo "HuggingFace token: configured"
+#               else
+#                 echo "WARNING: HF_TOKEN not set — gated models (Llama, etc.) will fail"
+#               fi
+#               echo ""
+#
+#               IFS=',' read -ra MODEL_LIST <<< "$MODELS"
+#               TOTAL=${#MODEL_LIST[@]}
+#
+#               download_model() {
+#                 local model="$1"
+#                 local fail_log="$2"
+#                 echo "[START] $model"
+#                 if huggingface-cli download "$model" 2>&1; then
+#                   echo "[OK] $model"
+#                 else
+#                   echo "[FAIL] $model"
+#                   echo "$model" >> "$fail_log"
+#                 fi
+#               }
+#               export -f download_model
+#
+#               printf '%s\n' "${MODEL_LIST[@]}" | \
+#                 xargs -P "$MAX_PARALLEL" -I{} bash -c 'download_model "$@"' _ {} "$FAIL_LOG"
+#
+#               echo ""
+#               echo "=== Prefetch complete ==="
+#               FAIL_COUNT=$(wc -l < "$FAIL_LOG" 2>/dev/null || echo 0)
+#               OK_COUNT=$((TOTAL - FAIL_COUNT))
+#               echo "Results: $OK_COUNT succeeded, $FAIL_COUNT failed out of $TOTAL total"
+#               if [ "$FAIL_COUNT" -gt 0 ]; then
+#                 echo ""
+#                 echo "Failed models:"
+#                 cat "$FAIL_LOG" | while read -r m; do echo "  - $m"; done
+#               fi
+#               echo ""
+#               echo "Cached models on disk:"
+#               ls -d "$HF_HUB_CACHE"/models--* 2>/dev/null || echo "  (none)"
+#           env:
+#             - name: PREFETCH_MODELS
+#               value: "MODELS_PLACEHOLDER"
+#             - name: PREFETCH_MAX_PARALLEL
+#               value: "PARALLEL_PLACEHOLDER"
+#             - name: HF_HUB_CACHE
+#               value: "/models/hub"
+#             - name: HF_TOKEN
+#               valueFrom:
+#                 secretKeyRef:
+#                   name: hf-token-secret
+#                   key: HF_TOKEN
+#                   optional: true
+#           resources:
+#             requests:
+#               cpu: "500m"
+#               memory: "1Gi"
+#             limits:
+#               cpu: "2"
+#               memory: "2Gi"
+#           volumeMounts:
+#             - name: model-cache
+#               mountPath: /models
+#       volumes:
+#         - name: model-cache
+#           persistentVolumeClaim:
+#             claimName: PVC_PLACEHOLDER

@@ -2,16 +2,22 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Multimodal Image Tests
-# Tests image understanding capabilities for vision-language models (LLaVA, Qwen-VL)
+# Multimodal Tests (Image + Video)
+# Tests image and video understanding capabilities for vision-language models
+# (LLaVA, Qwen-VL, LLaVA-NeXT-Video, etc.)
+#
+# Consolidated from test-image.sh and test-video.sh
 #
 # Usage:
-#   ./test-image.sh <deployment-name> [OPTIONS]
+#   ./test-multimodal.sh <deployment-name> [OPTIONS]
 #
 # Examples:
-#   ./test-image.sh llava-1.5-7b
-#   ./test-image.sh qwen2.5-vl-7b --image-url "https://example.com/image.jpg"
-#   ./test-image.sh llava-1.5-7b --image-base64 /path/to/image.jpg
+#   ./test-multimodal.sh llava-1.5-7b
+#   ./test-multimodal.sh qwen2.5-vl-7b --image-url "https://example.com/image.jpg"
+#   ./test-multimodal.sh llava-1.5-7b --image-base64 /path/to/image.jpg
+#   ./test-multimodal.sh llava-next-video-7b --video-url "https://example.com/video.mp4"
+#   ./test-multimodal.sh llava-next-video-7b --skip-image   # video tests only
+#   ./test-multimodal.sh qwen2.5-vl-7b --skip-video         # image tests only
 
 set -euo pipefail
 
@@ -29,6 +35,9 @@ PORT_FORWARD_PID=""
 IMAGE_URL="https://picsum.photos/id/237/200/300"
 IMAGE_PATH=""
 USE_BASE64=false
+VIDEO_URL="https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4"
+SKIP_IMAGE=false
+SKIP_VIDEO=false
 
 #---------------------------------------------------------------
 # Parse Arguments
@@ -49,6 +58,18 @@ parse_args() {
                 IMAGE_PATH="$2"
                 USE_BASE64=true
                 shift 2
+                ;;
+            --video-url)
+                VIDEO_URL="$2"
+                shift 2
+                ;;
+            --skip-image)
+                SKIP_IMAGE=true
+                shift
+                ;;
+            --skip-video)
+                SKIP_VIDEO=true
+                shift
                 ;;
             -h|--help)
                 show_help
@@ -77,28 +98,45 @@ parse_args() {
 
 show_help() {
     cat <<'HELP'
-Multimodal Image Tests
-Tests image understanding for vision-language models.
+Multimodal Tests (Image + Video)
+Tests image and video understanding for vision-language models.
 
 Usage:
-  ./test-image.sh <deployment-name> [OPTIONS]
+  ./test-multimodal.sh <deployment-name> [OPTIONS]
 
 Options:
   --port <port>           Local port for port forwarding
-  --image-url <url>       URL of image to test (default: Wikipedia nature image)
+  --image-url <url>       URL of image to test (default: picsum.photos sample)
   --image-base64 <path>   Path to local image to test via base64 encoding
+  --video-url <url>       URL of video to test (default: Big Buck Bunny clip)
+  --skip-image            Skip image tests (run video tests only)
+  --skip-video            Skip video tests (run image tests only)
   -h, --help              Show this help message
 
 Examples:
-  ./test-image.sh llava-1.5-7b
-  ./test-image.sh qwen2.5-vl-7b --image-url "https://example.com/image.jpg"
-  ./test-image.sh llava-1.5-7b --image-base64 /path/to/image.jpg
+  ./test-multimodal.sh llava-1.5-7b
+  ./test-multimodal.sh qwen2.5-vl-7b --image-url "https://example.com/image.jpg"
+  ./test-multimodal.sh llava-1.5-7b --image-base64 /path/to/image.jpg
+  ./test-multimodal.sh llava-next-video-7b --video-url "https://example.com/video.mp4"
+  ./test-multimodal.sh llava-next-video-7b --skip-image
+  ./test-multimodal.sh qwen2.5-vl-7b --skip-video
 
-What's Tested:
+Image Tests:
   1. Image description (what's in the image)
   2. Color detection (colors in the image)
-  3. Object counting (items visible)
+  3. Base64 image encoding (if --image-base64 specified)
   4. Multi-turn conversation with image context
+
+Video Tests:
+  1. Video description (what happens in the video)
+  2. Object/character counting
+  3. Temporal understanding (beginning, middle, end)
+  4. Parallel video requests (concurrent inference stress test)
+
+Notes:
+  - LLaVA-NeXT-Video samples 8 frames from the video
+  - Frames are transferred via NIXL RDMA to VLMWorker
+  - Model context: 8192 tokens max
 
 HELP
 }
@@ -134,6 +172,10 @@ setup_port_forward() {
     success "Port forwarding ready: localhost:${LOCAL_PORT}"
     export LOCAL_PORT
 }
+
+#===============================================================
+# IMAGE TESTS
+#===============================================================
 
 #---------------------------------------------------------------
 # Image Description Test (URL)
@@ -318,11 +360,203 @@ EOF
     fi
 }
 
+#===============================================================
+# VIDEO TESTS
+#===============================================================
+
+#---------------------------------------------------------------
+# Video Description Test
+#---------------------------------------------------------------
+run_video_description_test() {
+    section "Video Description Test"
+
+    local model=$(discover_model "http://localhost:${LOCAL_PORT}" "llava-hf/LLaVA-NeXT-Video-7B-hf")
+
+    info "Testing video understanding..."
+    info "Video: ${VIDEO_URL:0:60}..."
+
+    local payload=$(cat <<EOF
+{
+    "model": "${model}",
+    "messages": [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Describe what happens in this video."},
+            {"type": "video_url", "video_url": {"url": "${VIDEO_URL}"}}
+        ]
+    }],
+    "max_tokens": 300
+}
+EOF
+)
+
+    local response=$(api_call POST "/v1/chat/completions" "$payload")
+
+    if [ -n "$response" ] && echo "$response" | jq -e '.choices[0].message.content' > /dev/null 2>&1; then
+        success "✓ Video description test passed"
+        echo "Response: $(echo "$response" | jq -r '.choices[0].message.content' 2>/dev/null | head -c 250)..."
+        record_test_result "video_description" "passed"
+        return 0
+    else
+        warn "✗ Video description test failed"
+        echo "Response: $response" | head -5
+        record_test_result "video_description" "failed"
+        return 1
+    fi
+}
+
+#---------------------------------------------------------------
+# Object Counting Test
+#---------------------------------------------------------------
+run_object_counting_test() {
+    section "Video Object Counting Test"
+
+    local model=$(discover_model "http://localhost:${LOCAL_PORT}" "llava-hf/LLaVA-NeXT-Video-7B-hf")
+
+    info "Testing object counting in video..."
+
+    local payload=$(cat <<EOF
+{
+    "model": "${model}",
+    "messages": [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "How many animated characters appear in this video? List them."},
+            {"type": "video_url", "video_url": {"url": "${VIDEO_URL}"}}
+        ]
+    }],
+    "max_tokens": 200
+}
+EOF
+)
+
+    local response=$(api_call POST "/v1/chat/completions" "$payload")
+
+    if [ -n "$response" ] && echo "$response" | jq -e '.choices[0].message.content' > /dev/null 2>&1; then
+        success "✓ Object counting test passed"
+        echo "Response: $(echo "$response" | jq -r '.choices[0].message.content' 2>/dev/null | head -c 200)..."
+        record_test_result "video_object_counting" "passed"
+        return 0
+    else
+        warn "✗ Object counting test failed"
+        record_test_result "video_object_counting" "failed"
+        return 1
+    fi
+}
+
+#---------------------------------------------------------------
+# Temporal Understanding Test
+#---------------------------------------------------------------
+run_temporal_test() {
+    section "Video Temporal Understanding Test"
+
+    local model=$(discover_model "http://localhost:${LOCAL_PORT}" "llava-hf/LLaVA-NeXT-Video-7B-hf")
+
+    info "Testing temporal understanding (sequence of events)..."
+
+    local payload=$(cat <<EOF
+{
+    "model": "${model}",
+    "messages": [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What happens at the beginning, middle, and end of this video? Describe the sequence of events."},
+            {"type": "video_url", "video_url": {"url": "${VIDEO_URL}"}}
+        ]
+    }],
+    "max_tokens": 400
+}
+EOF
+)
+
+    local response=$(api_call POST "/v1/chat/completions" "$payload")
+
+    if [ -n "$response" ] && echo "$response" | jq -e '.choices[0].message.content' > /dev/null 2>&1; then
+        success "✓ Temporal understanding test passed"
+        echo "Response: $(echo "$response" | jq -r '.choices[0].message.content' 2>/dev/null | head -c 300)..."
+        record_test_result "video_temporal" "passed"
+        return 0
+    else
+        warn "✗ Temporal understanding test failed"
+        record_test_result "video_temporal" "failed"
+        return 1
+    fi
+}
+
+#---------------------------------------------------------------
+# Parallel Video Requests Test
+#---------------------------------------------------------------
+run_parallel_video_test() {
+    section "Parallel Video Requests Test"
+
+    local model=$(discover_model "http://localhost:${LOCAL_PORT}" "llava-hf/LLaVA-NeXT-Video-7B-hf")
+    local PARALLEL_COUNT=3
+
+    info "Sending ${PARALLEL_COUNT} concurrent video requests..."
+
+    local prompts=(
+        "Describe what happens in this video."
+        "How many characters appear in this video?"
+        "What is the setting or background of this video?"
+    )
+
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    local pids=()
+
+    for i in $(seq 0 $((PARALLEL_COUNT - 1))); do
+        local prompt="${prompts[$i]}"
+        local payload=$(cat <<EOF
+{
+    "model": "${model}",
+    "messages": [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "${prompt}"},
+            {"type": "video_url", "video_url": {"url": "${VIDEO_URL}"}}
+        ]
+    }],
+    "max_tokens": 200
+}
+EOF
+)
+        (
+            api_call POST "/v1/chat/completions" "$payload" > "${tmpdir}/response_${i}.json" 2>&1
+        ) &
+        pids+=($!)
+    done
+
+    local all_passed=true
+    for i in $(seq 0 $((PARALLEL_COUNT - 1))); do
+        wait "${pids[$i]}" 2>/dev/null || true
+        local resp
+        resp=$(cat "${tmpdir}/response_${i}.json" 2>/dev/null)
+        if [ -n "$resp" ] && echo "$resp" | jq -e '.choices[0].message.content' > /dev/null 2>&1; then
+            info "  Request $((i+1)): ✓ ($(echo "$resp" | jq -r '.choices[0].message.content' 2>/dev/null | wc -c) chars)"
+        else
+            warn "  Request $((i+1)): ✗ failed"
+            all_passed=false
+        fi
+    done
+
+    rm -rf "$tmpdir"
+
+    if [ "$all_passed" = true ]; then
+        success "✓ Parallel video test passed (${PARALLEL_COUNT}/${PARALLEL_COUNT} succeeded)"
+        record_test_result "video_parallel" "passed"
+        return 0
+    else
+        warn "✗ Parallel video test had failures"
+        record_test_result "video_parallel" "failed"
+        return 1
+    fi
+}
+
 #---------------------------------------------------------------
 # Main
 #---------------------------------------------------------------
 main() {
-    print_banner "MULTIMODAL IMAGE TESTS"
+    print_banner "MULTIMODAL TESTS (IMAGE + VIDEO)"
 
     if ! check_dependencies; then
         exit 1
@@ -347,11 +581,27 @@ main() {
 
     trap cleanup EXIT
 
-    # Run tests
-    run_image_url_test || true
-    run_image_color_test || true
-    run_image_base64_test || true
-    run_multi_turn_test || true
+    # Run image tests
+    if [ "$SKIP_IMAGE" != true ]; then
+        section "=== IMAGE TESTS ==="
+        run_image_url_test || true
+        run_image_color_test || true
+        run_image_base64_test || true
+        run_multi_turn_test || true
+    else
+        info "Skipping image tests (--skip-image)"
+    fi
+
+    # Run video tests
+    if [ "$SKIP_VIDEO" != true ]; then
+        section "=== VIDEO TESTS ==="
+        run_video_description_test || true
+        run_object_counting_test || true
+        run_temporal_test || true
+        run_parallel_video_test || true
+    else
+        info "Skipping video tests (--skip-video)"
+    fi
 
     print_test_summary
 }

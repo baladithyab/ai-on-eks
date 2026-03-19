@@ -13,15 +13,15 @@ tests/
 │   └── basic-inference.sh            # General tests for any deployment
 └── targeted/
     ├── multimodal-tests/
-    │   ├── test-image.sh             # Image understanding tests
-    │   └── test-video.sh             # Video understanding tests
+    │   └── test-multimodal.sh        # Image + video understanding tests (consolidated)
     ├── kv-routing-tests/
     │   └── test-kv-routing.sh        # KV cache routing tests
-    ├── observability-tests/
-    │   └── test-otel.sh              # OTEL tracing tests
-    └── performance-tests/
-        └── test-performance.sh       # Throughput and latency benchmarks
+    └── observability-tests/
+        └── test-otel.sh              # OTEL tracing tests
 ```
+
+> **Note:** Performance benchmarking has been consolidated into [`scripts/benchmark.sh`](../scripts/benchmark.sh).
+> The previous `test-performance.sh` was removed to avoid overlap.
 
 ## Test Categories
 
@@ -49,8 +49,7 @@ For vision-language models (VLM) like LLaVA, Qwen2.5-VL, etc.
 
 | Test | Description | When to Use |
 |------|-------------|-------------|
-| `test-image.sh` | Image URL and base64 encoding tests | VLM deployments with image support |
-| `test-video.sh` | Video understanding tests | VLM deployments with video support |
+| `test-multimodal.sh` | Image + video understanding tests (URL, base64, parallel) | VLM deployments with image and/or video support |
 
 **Prerequisites:**
 - Model must support vision capabilities
@@ -81,19 +80,18 @@ For deployments with OpenTelemetry tracing enabled.
 - Tempo service must be accessible
 - Examples: `vllm-otel-tracing`, `vllm-observability`
 
-#### Performance Tests (`performance-tests/`)
+#### Performance Benchmarks
 
-Benchmark tests for measuring throughput and latency.
+Performance testing is handled by [`scripts/benchmark.sh`](../scripts/benchmark.sh), which provides comprehensive benchmarking capabilities.
 
-| Test | Description | When to Use |
-|------|-------------|-------------|
-| `test-performance.sh` | TTFT, sequential/parallel throughput | Performance validation |
-
-**Metrics collected:**
+**Metrics collected by `benchmark.sh`:**
 - Time to First Token (TTFT)
 - Sequential requests per second
 - Parallel requests per second
 - Tokens per second
+
+> **Migration note:** The previous `performance-tests/test-performance.sh` has been removed
+> because it overlapped with `scripts/benchmark.sh`. Use `benchmark.sh` for all performance testing.
 
 ## Usage
 
@@ -130,8 +128,9 @@ Each test script can also be run directly:
 ./tests/general/basic-inference.sh <deployment-name>
 
 # Multimodal tests
-./tests/targeted/multimodal-tests/test-image.sh <deployment-name>
-./tests/targeted/multimodal-tests/test-video.sh <deployment-name>
+./tests/targeted/multimodal-tests/test-multimodal.sh <deployment-name>
+./tests/targeted/multimodal-tests/test-multimodal.sh <deployment-name> --skip-video  # image only
+./tests/targeted/multimodal-tests/test-multimodal.sh <deployment-name> --skip-image  # video only
 
 # KV routing tests
 ./tests/targeted/kv-routing-tests/test-kv-routing.sh <deployment-name>
@@ -139,9 +138,8 @@ Each test script can also be run directly:
 # Observability tests
 ./tests/targeted/observability-tests/test-otel.sh <deployment-name>
 
-# Performance tests
-./tests/targeted/performance-tests/test-performance.sh <deployment-name>
-./tests/targeted/performance-tests/test-performance.sh <deployment-name> --parallel 10
+# Performance benchmarks (use scripts/benchmark.sh instead)
+./scripts/benchmark.sh <deployment-name>
 ```
 
 ### Common Options

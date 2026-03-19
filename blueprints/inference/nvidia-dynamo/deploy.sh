@@ -11,7 +11,6 @@
 #   (and warn) to preserve backwards compatibility.
 #
 # Enhanced Features (v0.8.1+):
-# - --apply-configs: Apply centralized ConfigMaps before deployment
 # - --enable-monitoring: Deploy PodMonitor/ServiceMonitor for metrics
 # - --enable-tracing: Deploy OTEL Collector for distributed tracing
 # - --validate: Run blueprint validation before deployment
@@ -59,7 +58,6 @@ DEFAULT_VERSION="v0.8.1"  # Fallback if tfvars file not found
 VERSION_SOURCE=""  # Track where version came from
 
 # New feature flags (opt-in, preserve backwards compatibility)
-APPLY_CONFIGS=false
 ENABLE_MONITORING=false
 ENABLE_TRACING=false
 VALIDATE_FIRST=false
@@ -199,7 +197,6 @@ Usage:
   ./deploy.sh            # interactive selection
 
 Options:
-  --apply-configs       Apply centralized ConfigMaps before deployment
   --enable-monitoring   Deploy PodMonitor for Prometheus metrics collection
   --enable-tracing      Deploy OTEL Collector for distributed tracing
   --validate            Run blueprint validation before deployment
@@ -213,7 +210,7 @@ Behavior:
     (e.g., finds <id>.yaml under this directory) and prints a warning.
 
 Enhanced Deployment (with observability):
-  ./deploy.sh vllm-aggregated-default --apply-configs --enable-monitoring
+  ./deploy.sh vllm-aggregated-default --enable-monitoring
   ./deploy.sh vllm-aggregated-default --enable-tracing
   ./deploy.sh vllm-aggregated-default --validate --enable-monitoring --enable-tracing
 
@@ -225,13 +222,6 @@ Examples:
   ./deploy.sh vllm-full-observability --enable-monitoring --enable-tracing
   ./deploy.sh llava-1.5-7b
   ./deploy.sh trtllm-dgdr-online
-
-Configuration Management:
-  # Apply centralized configs (one-time setup)
-  ./scripts/apply-config.sh dynamo
-
-  # Then deploy with monitoring
-  ./deploy.sh vllm-aggregated-default --enable-monitoring
 
 Observability Infrastructure:
   # Deploy OTEL Collector (one-time setup)
@@ -322,7 +312,6 @@ list_catalog() {
     echo "Tip: deploy with ./deploy.sh <id>"
     echo ""
     echo "Enhanced deployment options:"
-    echo "  ./deploy.sh <id> --apply-configs      # Apply centralized ConfigMaps first"
     echo "  ./deploy.sh <id> --enable-monitoring  # Deploy PodMonitor for metrics"
     echo "  ./deploy.sh <id> --enable-tracing     # Deploy OTEL Collector"
     echo "  ./deploy.sh <id> --validate           # Validate blueprint before deployment"
@@ -387,39 +376,8 @@ manifest_detect_primary_kind() {
 }
 
 #---------------------------------------------------------------
-# New Feature Functions: Config, Monitoring, Tracing
+# New Feature Functions: Monitoring, Tracing
 #---------------------------------------------------------------
-
-apply_centralized_configs() {
-    local namespace="$1"
-
-    section "Applying Centralized Configurations"
-
-    local apply_config_script="${SCRIPTS_DIR}/apply-config.sh"
-
-    if [ -f "$apply_config_script" ]; then
-        info "Running apply-config.sh for namespace: $namespace"
-        if bash "$apply_config_script" "$namespace"; then
-            success "Centralized configurations applied successfully"
-        else
-            warn "Failed to apply some configurations - check output above"
-        fi
-    else
-        warn "apply-config.sh not found, applying individual configs..."
-
-        # Fallback: Apply individual config files
-        local configs=(
-            "${CONFIG_DIR}/common-env.yaml"
-        )
-
-        for config in "${configs[@]}"; do
-            if [ -f "$config" ]; then
-                info "Applying: $(basename "$config")"
-                kubectl apply -f "$config" -n "$namespace" || warn "Failed to apply $(basename "$config")"
-            fi
-        done
-    fi
-}
 
 deploy_monitoring_infrastructure() {
     local namespace="$1"
@@ -500,11 +458,11 @@ run_blueprint_validation() {
 
     section "Blueprint Validation"
 
-    local validate_script="${SCRIPTS_DIR}/validate-blueprint.sh"
+    local validate_script="${SCRIPTS_DIR}/validate.sh"
 
     if [ -f "$validate_script" ]; then
         info "Running validation on: $(basename "$manifest_file")"
-        if bash "$validate_script" "$manifest_file"; then
+        if bash "$validate_script" file "$manifest_file"; then
             success "Blueprint validation passed"
             return 0
         else
@@ -571,10 +529,6 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             usage
             exit 0
-            ;;
-        --apply-configs)
-            APPLY_CONFIGS=true
-            shift
             ;;
         --enable-monitoring)
             ENABLE_MONITORING=true
@@ -725,9 +679,8 @@ info "Primary name: ${RESOURCE_NAME}"
 info "Namespace: ${TARGET_NAMESPACE}"
 
 # Show enabled features
-if [ "$APPLY_CONFIGS" = true ] || [ "$ENABLE_MONITORING" = true ] || [ "$ENABLE_TRACING" = true ] || [ "$VALIDATE_FIRST" = true ]; then
+if [ "$ENABLE_MONITORING" = true ] || [ "$ENABLE_TRACING" = true ] || [ "$VALIDATE_FIRST" = true ]; then
     section "Enhanced Features Enabled"
-    [ "$APPLY_CONFIGS" = true ] && info "✓ Centralized ConfigMaps will be applied"
     [ "$ENABLE_MONITORING" = true ] && info "✓ PodMonitor/ServiceMonitor will be deployed"
     [ "$ENABLE_TRACING" = true ] && info "✓ OTEL Collector will be deployed"
     [ "$VALIDATE_FIRST" = true ] && info "✓ Blueprint validation will run before deployment"
@@ -742,14 +695,6 @@ if [ "$VALIDATE_FIRST" = true ] && [ "$SKIP_VALIDATION" = false ]; then
         error "Deployment aborted due to validation failure"
         exit 1
     fi
-fi
-
-#---------------------------------------------------------------
-# Apply Centralized Configs (if enabled)
-#---------------------------------------------------------------
-
-if [ "$APPLY_CONFIGS" = true ]; then
-    apply_centralized_configs "${TARGET_NAMESPACE}"
 fi
 
 #---------------------------------------------------------------
@@ -899,126 +844,38 @@ if [ "$ENABLE_TRACING" = true ]; then
 fi
 
 #---------------------------------------------------------------
-# Auto-detect and Configure Model Caching (DGD only)
+# Model Cache PVC Validation (DGD only)
 #
-# Two cache modes:
-#   1. Model Express (modelexpress-pvc): MX downloads models to a shared EFS PVC.
-#      Workers need the PVC mounted + HF_HUB_CACHE pointing directly to the PVC
-#      root (MX stores HF hub cache entries at MODEL_EXPRESS_CACHE_DIRECTORY).
-#   2. Shared PVC (dynamo-pvc): Workers download models themselves to a shared PVC.
-#      Uses HF_HOME=/models so hub cache ends up at /models/hub.
-#
-# BUG FIX: Previously, when modelexpress-pvc was detected, the script skipped
-# ALL cache patching. This left worker pods with no volume mount and no
-# HF_HUB_CACHE override, so workers couldn't find MX-downloaded models
-# at the default /home/dynamo/.cache/huggingface/hub, fell back to direct
-# HuggingFace download, got 429 rate-limited, and crashed.
+# Manifests already have all PVC config baked in (PVC name, volumeMounts,
+# HF env vars). This check simply validates the PVC exists on the cluster
+# and warns if it doesn't — it never patches the manifest.
 #---------------------------------------------------------------
 
-CACHE_MANIFEST=""
+validate_model_cache_pvc() {
+    local ns="${NAMESPACE:-dynamo}"
+    local pvc_name="${MODEL_CACHE_PVC:-dynamo-model-cache}"
+
+    if kubectl get pvc "$pvc_name" -n "$ns" &>/dev/null; then
+        info "Model cache PVC '$pvc_name' found in namespace '$ns'"
+        return 0
+    fi
+
+    # Check legacy alternative names (pre-standardization)
+    for alt in "dynamo-pvc" "modelexpress-pvc"; do
+        if kubectl get pvc "$alt" -n "$ns" &>/dev/null; then
+            warn "Canonical PVC '$pvc_name' not found, but legacy '$alt' exists."
+            warn "Rename to '$pvc_name' or update Terraform default (dynamo_shared_cache_pvc_name)."
+            return 0
+        fi
+    done
+
+    warn "No model cache PVC found in namespace '$ns'. Model caching may not work."
+    return 0  # Non-fatal - manifests may use emptyDir or other storage
+}
+
 if [ "${RESOURCE_KIND}" = "DynamoGraphDeployment" ]; then
-    section "Model Caching Configuration"
-
-    USE_SHARED_CACHE=false
-    SHARED_CACHE_PVC=""
-    CACHE_MODE=""
-
-    if kubectl get pvc "modelexpress-pvc" -n "${TARGET_NAMESPACE}" &>/dev/null; then
-        # Model Express PVC detected — mount it into worker pods so they can
-        # read MX-downloaded models directly from the shared EFS volume.
-        info "Model Express PVC detected: modelexpress-pvc"
-        SHARED_CACHE_PVC="modelexpress-pvc"
-        CACHE_MODE="modelexpress"
-        USE_SHARED_CACHE=true
-
-        PVC_SIZE=$(kubectl get pvc "${SHARED_CACHE_PVC}" -n "${TARGET_NAMESPACE}" -o jsonpath='{.spec.resources.requests.storage}')
-        PVC_CLASS=$(kubectl get pvc "${SHARED_CACHE_PVC}" -n "${TARGET_NAMESPACE}" -o jsonpath='{.spec.storageClassName}')
-        info "  Size: ${PVC_SIZE}, StorageClass: ${PVC_CLASS}"
-        info "Workers will mount modelexpress-pvc to read MX-cached models"
-    elif kubectl get pvc "dynamo-pvc" -n "${TARGET_NAMESPACE}" &>/dev/null; then
-        # No Model Express — use dynamo-pvc as shared model cache
-        SHARED_CACHE_PVC="dynamo-pvc"
-        CACHE_MODE="shared"
-        USE_SHARED_CACHE=true
-
-        PVC_SIZE=$(kubectl get pvc "${SHARED_CACHE_PVC}" -n "${TARGET_NAMESPACE}" -o jsonpath='{.spec.resources.requests.storage}')
-        PVC_CLASS=$(kubectl get pvc "${SHARED_CACHE_PVC}" -n "${TARGET_NAMESPACE}" -o jsonpath='{.spec.storageClassName}')
-        info "Shared model cache PVC detected: ${SHARED_CACHE_PVC}"
-        info "  Size: ${PVC_SIZE}, StorageClass: ${PVC_CLASS}"
-    else
-        info "No shared cache PVC found - deploying with ephemeral storage"
-        warn "Consider creating dynamo-pvc for persistent model caching"
-    fi
-
-    # ---------------------------------------------------------------
-    # Replace PVC placeholder with detected cache PVC
-    #
-    # All DGD manifests use "dynamo-model-cache" as a placeholder PVC name
-    # in their modelCache spec. Replace it with the actual detected PVC name
-    # (modelexpress-pvc or dynamo-pvc) so the operator creates volumeMounts
-    # pointing to the correct PVC on the cluster.
-    #
-    # This runs BEFORE patchers (patch-cache.sh/patch-cache.py) so that
-    # the patcher sees the real PVC name already present and skips adding
-    # a duplicate volume/volumeMount entry.
-    # ---------------------------------------------------------------
-    if [[ -n "${SHARED_CACHE_PVC:-}" ]]; then
-        _pvc_patched="$(mktemp)"
-        bp_register_temp "${_pvc_patched}"
-        sed "s/dynamo-model-cache/${SHARED_CACHE_PVC}/g" "${MANIFEST_FILE}" > "${_pvc_patched}"
-        if ! cmp -s "${MANIFEST_FILE}" "${_pvc_patched}"; then
-            MANIFEST_FILE="${_pvc_patched}"
-            info "Replaced dynamo-model-cache placeholder with detected PVC: ${SHARED_CACHE_PVC}"
-        else
-            rm -f "${_pvc_patched}"
-            info "No dynamo-model-cache placeholder found in manifest (already correct or using inline PVC name)"
-        fi
-    fi
-
-    if [ "${USE_SHARED_CACHE}" = true ]; then
-        info "Configuring deployment to use ${CACHE_MODE} model cache (${SHARED_CACHE_PVC})..."
-
-        # Use home directory for temp files (snap yq can't access /tmp or hidden dirs)
-        CACHE_MANIFEST_DIR="${HOME}/dynamo-cache"
-        mkdir -p "${CACHE_MANIFEST_DIR}"
-        CACHE_MANIFEST="${CACHE_MANIFEST_DIR}/${EXAMPLE_ID}-cache-$(date +%s).yaml"
-        bp_register_temp "${CACHE_MANIFEST}"
-
-        BASH_PATCHER="${SCRIPT_DIR}/scripts/patch-cache.sh"
-        PYTHON_PATCHER="${SCRIPT_DIR}/patch-cache.py"
-
-        # Export CACHE_MODE so patchers can adjust HF env vars accordingly
-        export CACHE_MODE
-
-        if [ -f "${BASH_PATCHER}" ] && command -v yq &>/dev/null; then
-            info "Using Bash/yq patcher for cache configuration..."
-            if bash "${BASH_PATCHER}" "${MANIFEST_FILE}" "${CACHE_MANIFEST}" "${SHARED_CACHE_PVC}"; then
-                MANIFEST_FILE="${CACHE_MANIFEST}"
-                success "Manifest patched with ${CACHE_MODE} cache configuration"
-            else
-                warn "Bash patcher failed, trying Python fallback..."
-                CACHE_MANIFEST=""
-            fi
-        fi
-
-        if [ -z "${CACHE_MANIFEST}" ] && [ -f "${PYTHON_PATCHER}" ] && command -v python3 &>/dev/null; then
-            CACHE_MANIFEST="${CACHE_MANIFEST_DIR}/${EXAMPLE_ID}-cache-$(date +%s).yaml"
-            bp_register_temp "${CACHE_MANIFEST}"
-            info "Using Python patcher for cache configuration..."
-            if python3 "${PYTHON_PATCHER}" "${MANIFEST_FILE}" "${CACHE_MANIFEST}" "${SHARED_CACHE_PVC}"; then
-                MANIFEST_FILE="${CACHE_MANIFEST}"
-                success "Manifest patched with ${CACHE_MODE} cache configuration"
-            else
-                warn "Python patcher failed, deploying without cache"
-                CACHE_MANIFEST=""
-            fi
-        fi
-
-        if [ -z "${CACHE_MANIFEST}" ]; then
-            warn "No patcher available or patching failed (install yq or Python3)"
-            warn "Deploying without cache optimization"
-        fi
-    fi
+    section "Model Cache PVC Validation"
+    validate_model_cache_pvc
 fi
 
 #---------------------------------------------------------------

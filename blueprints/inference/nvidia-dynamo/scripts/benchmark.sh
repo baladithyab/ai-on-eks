@@ -5,7 +5,7 @@
 # Generic AIPerf Benchmark for NVIDIA Dynamo Deployments
 #
 # Launches AIPerf 0.5.0 as K8s Jobs to benchmark any Dynamo deployment.
-# Results are written to dynamo-pvc (EFS) for reuse by DGDR planners.
+# Results are written to dynamo-model-cache PVC (EFS) for reuse by DGDR planners.
 #
 # Usage:
 #   ./scripts/benchmark.sh <deployment-name> [OPTIONS]
@@ -15,6 +15,25 @@
 #   ./scripts/benchmark.sh vllm-aggregated-default --profile full
 #   ./scripts/benchmark.sh showcase-deepseek-r1-p6 --profile full --num-gpus 16
 #   ./scripts/benchmark.sh vllm-aggregated-default --isl 512 --osl 256 --concurrency 1,4,8
+#
+# DeepSeek R1 Benchmarking
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+# To benchmark DeepSeek R1 (e.g., deepseek-ai/DeepSeek-R1-0528) matching
+# the blog methodology (2K input, 2K output, streaming chat endpoint):
+#
+#   ./scripts/benchmark.sh showcase-deepseek-r1-p6 \
+#       --profile full --num-gpus 16
+#
+# The 'full' profile uses ISL=2048, OSL=2048 and sweeps concurrency
+# 1,2,4,8,16,32,64 — which mirrors the blog's configuration.
+# Use --num-gpus to enable TPGS (Tokens Per GPU Second) calculation:
+#   Prefill TPGS = (input_tokens / TTFT_seconds) / NUM_GPUS
+#   Decode  TPGS = (output_throughput_tokens_per_sec) / NUM_GPUS
+#
+# Blog reference numbers (GB200 NVL72, 16 GPUs):
+#   Prefill: 26.2K TPGS   Decode: 10.1K TPGS
+#
+# For the 8B variant: showcase-deepseek-r1-8b with --num-gpus 1
 
 set -euo pipefail
 
@@ -41,7 +60,7 @@ CONCURRENCY_LEVELS=""
 NUM_GPUS=""
 REQUEST_COUNT=""
 AIPERF_IMAGE="nvcr.io/nvidia/ai-dynamo/aiperf:0.5.0"
-PVC_NAME="dynamo-pvc"
+PVC_NAME="dynamo-model-cache"
 USE_PVC=true
 RESULTS_DIR="${BLUEPRINT_DIR}/test-results/benchmarks"
 DO_WARMUP=true
@@ -137,7 +156,7 @@ show_help() {
 AIPerf Benchmark for NVIDIA Dynamo Deployments
 
 Launches AIPerf 0.5.0 as K8s Jobs to benchmark any Dynamo deployment.
-Results are written to dynamo-pvc (EFS) for reuse by DGDR planners.
+Results are written to dynamo-model-cache PVC (EFS) for reuse by DGDR planners.
 
 Usage:
   ./scripts/benchmark.sh <deployment-name> [OPTIONS]
@@ -150,7 +169,7 @@ Options:
   --num-gpus <n>         GPUs per worker (enables TPGS calculation)
   --request-count <n>    Requests per concurrency level (default: concurrency*4)
   --aiperf-image <img>   AIPerf container image
-  --pvc-name <name>      PVC for results (default: dynamo-pvc)
+  --pvc-name <name>      PVC for results (default: dynamo-model-cache)
   --no-pvc               Disable PVC, stdout-only mode
   --results-dir <path>   Local results directory
   --warmup / --no-warmup Enable/disable warmup phase (default: on)

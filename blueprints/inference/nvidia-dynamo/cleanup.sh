@@ -772,7 +772,7 @@ info "Platform components preserved:"
 echo "  ✓ Dynamo operator"
 echo "  ✓ etcd (state storage)"
 echo "  ✓ NATS (messaging)"
-echo "  ✓ Shared model cache PVC (dynamo-pvc)"
+echo "  ✓ Shared model cache PVC (dynamo-model-cache)"
 
 # Show observability status if infrastructure removal was requested
 if [ "$REMOVE_OTEL" = true ] || [ "$REMOVE_MONITORING" = true ] || [ "$REMOVE_CONFIGS" = true ] || [ "$REMOVE_ALL_INFRA" = true ]; then
@@ -791,5 +791,5 @@ fi
 
 echo ""
 info "To remove platform: kubectl delete namespace ${NAMESPACE}"
-info "To remove shared cache: kubectl delete pvc dynamo-pvc -n ${NAMESPACE}"
+info "To remove shared cache: kubectl delete pvc dynamo-model-cache -n ${NAMESPACE}"
 info "To remove observability: ./cleanup.sh --remove-all-infra"

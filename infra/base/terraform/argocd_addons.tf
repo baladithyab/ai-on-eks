@@ -537,9 +537,10 @@ resource "kubectl_manifest" "nvidia_dynamo_platform_yaml" {
 }
 
 #---------------------------------------------------------------
-# Dynamo Model Weights PVC
-# Creates a ReadWriteMany PVC for model weights/artifacts cache
-# This allows pods to share model downloads via EFS
+# Dynamo Model Cache PVC (canonical name: dynamo-model-cache)
+# Creates a ReadWriteMany PVC for model weights/artifacts cache.
+# Shared by Model Express (existingClaim), DGD blueprints, and
+# prefetch/benchmark scripts. All layers reference this PVC name.
 #---------------------------------------------------------------
 resource "kubernetes_persistent_volume_claim_v1" "dynamo_pvc" {
   count = var.enable_dynamo_stack ? 1 : 0

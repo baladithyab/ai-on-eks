@@ -15,7 +15,7 @@ TIER=standard TIMEOUT=1200 ./scripts/run-all-tests.sh
 CLEANUP=false TIER=core ./scripts/run-all-tests.sh
 
 # Offline validation (no cluster required)
-./scripts/validate-offline.sh
+./scripts/validate.sh offline
 ```
 
 ---
@@ -24,18 +24,20 @@ CLEANUP=false TIER=core ./scripts/run-all-tests.sh
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
-| **`run-all-tests.sh`** | Automated testing pipeline | CI/CD integration, tier-based testing |
-| `validate-features.sh` | Feature validation | Pre-commit checks |
-| `validate-offline.sh` | Offline validation (no cluster required) | Terraform + Helm + YAML + docs links |
-| `patch-cache.sh` | Cache patching utility | Model cache management |
-| `patch-profiler-job-pvc.sh` | PVC patching for profiler | DGDR job support |
-| **`benchmark.sh`** | AIPerf benchmarking | Benchmark any deployment with AIPerf 0.5.0 |
+| **`run-all-tests.sh`** | Automated testing pipeline (single entry point) | CI/CD integration, tier-based testing |
+| **`validate.sh`** | Consolidated validation (file, batch, offline, runtime) | All validation workflows |
+| **`benchmark.sh`** | AIPerf benchmarking (incl. DeepSeek R1 notes) | Benchmark any deployment with AIPerf 0.5.0 |
+| **`verify-tracing.sh`** | Observability verification (tracing, metrics, infra) | Full OTEL/Prometheus/Tempo validation |
+| `prefetch-models.sh` | Model prefetching orchestrator | Pre-download HF models |
+| `prefetch-job.yaml` | K8s Job template for prefetching (MX + direct PVC) | Used by prefetch-models.sh |
+| `dgdr-retry.sh` | DGDR retry helper | Re-trigger DGDR profiling |
+| `kvbm-stress-test.sh` | KVBM stress testing | KV cache backend validation |
 
 ---
 
 ## run-all-tests.sh
 
-**Primary automated testing pipeline** for catalog-backed Dynamo smoke coverage. Designed for:
+**Primary automated testing pipeline** for catalog-backed Dynamo smoke coverage. This is the single test runner entry point (consolidates the former `run-test-matrix.sh` and `run-full-validation.sh`). Designed for:
 - CI/CD integration
 - Tier-based testing (`core`, `standard`, `advanced`)
 - Markdown-formatted results
@@ -161,89 +163,6 @@ jobs:
         with:
           name: test-results
           path: blueprints/inference/nvidia-dynamo/test-results/
-
-      - name: Post Results to PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const results = fs.readdirSync('blueprints/inference/nvidia-dynamo/test-results/')
-              .filter(f => f.endsWith('.md'))
-              .sort()
-              .pop();
-            const content = fs.readFileSync(`blueprints/inference/nvidia-dynamo/test-results/${results}`, 'utf8');
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## Dynamo Blueprint Test Results\n\n${content}`
-            });
-```
-
-#### GitLab CI
-
-```yaml
-stages:
-  - test
-
-dynamo-core-tests:
-  stage: test
-  tags:
-    - eks-runner
-  timeout: 2h
-  script:
-    - aws eks update-kubeconfig --name dynamo-cluster
-    - cd blueprints/inference/nvidia-dynamo
-    - TIER=core TIMEOUT=1200 ./scripts/run-all-tests.sh
-  artifacts:
-    paths:
-      - blueprints/inference/nvidia-dynamo/test-results/
-    when: always
-    expire_in: 30 days
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - blueprints/inference/nvidia-dynamo/**/*
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-```
-
-#### Jenkins Pipeline
-
-```groovy
-pipeline {
-    agent { label 'eks-agent' }
-
-    environment {
-        KUBECONFIG = credentials('eks-kubeconfig')
-    }
-
-    stages {
-        stage('Test Core Tier') {
-            steps {
-                dir('blueprints/inference/nvidia-dynamo') {
-                    sh '''
-                        TIER=core TIMEOUT=1200 ./scripts/run-all-tests.sh
-                    '''
-                }
-            }
-        }
-    }
-
-    post {
-        always {
-            archiveArtifacts artifacts: 'blueprints/inference/nvidia-dynamo/test-results/**/*'
-
-            script {
-                def results = readFile('blueprints/inference/nvidia-dynamo/test-results/SUMMARY.txt')
-                slackSend(
-                    color: currentBuild.result == 'SUCCESS' ? 'good' : 'danger',
-                    message: "Dynamo Tests: ${currentBuild.result}\n${results}"
-                )
-            }
-        }
-    }
-}
 ```
 
 ### Exit Codes
@@ -255,60 +174,11 @@ pipeline {
 
 ---
 
-## validate-features.sh
-
-Validates blueprint feature flags and configuration consistency.
-
-```bash
-./scripts/validate-features.sh
-```
-
----
-
-## validate-offline.sh
-
-Offline validation workflow that runs without cluster access. It performs:
-- Terraform fmt + validate for `infra/base/terraform` and `infra/nvidia-dynamo/terraform`
-- Helm template rendering for local Dynamo charts (`dynamo/deploy/cloud/helm`)
-- Blueprint YAML linting + schema validation + `validate-blueprint.sh`
-- Guardrails (no `dynamoNamespace`, no committed test outputs, autoscaling examples present)
-- Website docs relative link checks
-
-```bash
-# Basic offline validation
-./scripts/validate-offline.sh
-
-# CI/strict mode (warnings + skipped tools fail)
-./scripts/validate-offline.sh --ci
-```
-
-**Tooling (auto-skipped if missing):** terraform, helm, kubeconform or kubeval, yamllint, python3.
-
----
-
-## patch-cache.sh
-
-Patches model cache configurations for EFS/PVC-based caching.
-
-```bash
-./scripts/patch-cache.sh <deployment-name>
-```
-
----
-
-## patch-profiler-job-pvc.sh
-
-Patches PVC configurations for DGDR profiler jobs.
-
-```bash
-./scripts/patch-profiler-job-pvc.sh <job-name>
-```
-
----
-
 ## benchmark.sh
 
 **AIPerf 0.5.0 benchmarking** for any Dynamo deployment. Launches AIPerf as K8s Jobs using the NGC container (`nvcr.io/nvidia/ai-dynamo/aiperf:0.5.0`). Results are written to `dynamo-pvc` for reuse by DGDR planners.
+
+Includes notes for **DeepSeek R1** benchmarking (2K ISL/OSL, TPGS calculation) — see comments in the script header.
 
 ### Usage
 
@@ -319,7 +189,7 @@ Patches PVC configurations for DGDR profiler jobs.
 # Full benchmark (ISL=2048, OSL=2048, concurrency=1-64)
 ./scripts/benchmark.sh vllm-aggregated-default --profile full
 
-# Full benchmark with TPGS calculation
+# Full benchmark with TPGS calculation (DeepSeek R1)
 ./scripts/benchmark.sh showcase-deepseek-r1-p6 --profile full --num-gpus 16
 
 # Custom parameters
@@ -351,6 +221,74 @@ Patches PVC configurations for DGDR profiler jobs.
 Results are saved to:
 - **Local:** `test-results/benchmarks/<deployment>-<timestamp>.json`
 - **PVC:** `/data/benchmarks/<deployment>-<timestamp>/` (includes per-request `profile_export.jsonl` from AIPerf)
+
+---
+
+## verify-tracing.sh
+
+**Consolidated observability verification** — the single entry point for OTEL tracing, metrics infrastructure, and Tempo/Jaeger backend checks. Subsumes the former `test-integration.sh`, `test-blueprint-with-observability.sh`, `test-observability-infra.sh`, and `verify-metrics-collection.sh`.
+
+### Usage
+
+```bash
+# Basic tracing verification
+./scripts/verify-tracing.sh
+
+# Full verification with trace generation
+./scripts/verify-tracing.sh --generate-trace --check-backend --check-traces --verbose
+
+# Check specific deployment
+./scripts/verify-tracing.sh --deployment vllm-aggregated-default
+
+# Verify with logging
+./scripts/verify-tracing.sh --log-file tracing-test.log
+```
+
+---
+
+## validate.sh
+
+Consolidated validation script with subcommand dispatch. Replaces the former
+`validate-blueprint.sh`, `validate-features.sh`, `validate-offline.sh`,
+and `lint-all-blueprints.sh` scripts.
+
+### Subcommands
+
+| Subcommand | Purpose |
+|------------|---------|
+| `file <path>` | Validate a single blueprint YAML (syntax, labels, secrets, resources, observability, naming, SPDX, v0.8.0 deprecation) |
+| `file --all` | Validate all blueprint files |
+| `file --tier <tier>` | Validate blueprints in a specific tier |
+| `all` | Batch YAML linting + validation across all blueprints (JUnit XML + Markdown reports) |
+| `all --ci` | CI mode (strict, no colors, reports generated) |
+| `offline` | Full CI/CD umbrella: terraform fmt/validate, helm template, kubeconform/kubeval, yamllint, blueprint validation, guardrails, link checks |
+| `offline --ci` | CI offline mode (strict, no color) |
+| `runtime <name>` | Live runtime feature validation of a deployed DGD (prefill/decode, router, multimodal pods) |
+| `help` | Show usage |
+
+### Usage
+
+```bash
+# Single file validation
+./scripts/validate.sh file engines/vllm/vllm-aggregated-default.yaml
+
+# Validate all blueprints (strict mode)
+./scripts/validate.sh file --all --strict
+
+# Batch linting with CI reports
+./scripts/validate.sh all --ci
+
+# Full offline validation (no cluster required)
+./scripts/validate.sh offline
+
+# CI/strict offline mode (warnings + skipped tools fail)
+./scripts/validate.sh offline --ci
+
+# Runtime feature validation of a deployed DGD
+./scripts/validate.sh runtime vllm-aggregated-default
+```
+
+**Tooling (auto-skipped if missing):** terraform, helm, kubeconform or kubeval, yamllint, python3.
 
 ---
 

@@ -8,11 +8,16 @@ For comprehensive documentation on observability features, see:
 
 **[NVIDIA Dynamo Blueprints - Observability](https://awslabs.github.io/ai-on-eks/docs/blueprints/inference/GPUs/nvidia-dynamo#observability-features)**
 
+## Other Engines (SGLang, TRT-LLM)
+
+> **Note:** SGLang and TRT-LLM follow the **same observability pattern** as vLLM.
+> The vLLM manifests in this directory serve as the **canonical reference**.
+> To use a different engine, swap the container image and command in the manifest —
+> all OTEL tracing, audit logging, and metrics configuration is engine-agnostic.
+
 ## Available Examples
 
 - **`vllm-full-observability.yaml`** - vLLM with OTEL tracing + audit logging + metrics (aggregated architecture)
-
-Additional observability examples in this directory:
 - **`vllm-otel-tracing.yaml`** - vLLM with OpenTelemetry distributed tracing
 - **`vllm-audit-logging.yaml`** - vLLM with audit logging for compliance
 

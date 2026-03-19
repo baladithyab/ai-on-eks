@@ -270,65 +270,12 @@ entries:
     hardware: "g6e.12xlarge (4x GPU)"
     test_date: "2026-01-01"
 
-  - id: sglang-full-observability
-    name: sglang-full-obs
-    path: observability/sglang-full-observability.yaml
-    backend: sglang
-    tier: standard
-    prereqs: "GPU nodes; Tempo/OTEL stack (observability namespace)"
-    notes: "SGLang all-in-one: metrics + logs + tracing + audit"
-    validation_status: pending
-    hardware: "g6e.2xlarge+ (single GPU)"
-
-  - id: sglang-otel-tracing
-    name: sglang-otel
-    path: observability/sglang-otel-tracing.yaml
-    backend: sglang
-    tier: standard
-    prereqs: "GPU nodes; Tempo/OTEL stack"
-    notes: "SGLang tracing-only variant"
-    validation_status: pending
-    hardware: "g6e.2xlarge+ (single GPU)"
-
-  - id: sglang-audit-logging
-    name: sglang-audit
-    path: observability/sglang-audit-logging.yaml
-    backend: sglang
-    tier: standard
-    prereqs: "GPU nodes"
-    notes: "SGLang audit-logging-only variant"
-    validation_status: pending
-    hardware: "g6e.2xlarge+ (single GPU)"
-
-  - id: trtllm-full-observability
-    name: trtllm-full-obs
-    path: observability/trtllm-full-observability.yaml
-    backend: trtllm
-    tier: standard
-    prereqs: "GPU nodes; Tempo/OTEL stack (observability namespace)"
-    notes: "TRT-LLM all-in-one: metrics + logs + tracing + audit"
-    validation_status: pending
-    hardware: "g6e.2xlarge+ (single GPU)"
-
-  - id: trtllm-otel-tracing
-    name: trtllm-otel
-    path: observability/trtllm-otel-tracing.yaml
-    backend: trtllm
-    tier: standard
-    prereqs: "GPU nodes; Tempo/OTEL stack"
-    notes: "TRT-LLM tracing-only variant"
-    validation_status: pending
-    hardware: "g6e.2xlarge+ (single GPU)"
-
-  - id: trtllm-audit-logging
-    name: trtllm-audit
-    path: observability/trtllm-audit-logging.yaml
-    backend: trtllm
-    tier: standard
-    prereqs: "GPU nodes"
-    notes: "TRT-LLM audit-logging-only variant"
-    validation_status: pending
-    hardware: "g6e.2xlarge+ (single GPU)"
+  # sglang-full-observability DELETED: consolidated into vllm-full-observability golden path
+  # sglang-otel-tracing DELETED: consolidated into vllm-otel-tracing golden path
+  # sglang-audit-logging DELETED: consolidated into vllm-audit-logging golden path
+  # trtllm-full-observability DELETED: consolidated into vllm-full-observability golden path
+  # trtllm-otel-tracing DELETED: consolidated into vllm-otel-tracing golden path
+  # trtllm-audit-logging DELETED: consolidated into vllm-audit-logging golden path
 
   - id: multi-replica-trtllm
     path: features/multi-replica/multi-replica-trtllm.yaml
@@ -406,21 +353,23 @@ entries:
 
   - id: vllm-dgdr-deepseek-70b
     name: vllm-deepseek-70b
-    path: experimental/vllm-dgdr-deepseek-70b.yaml
+    path: models/deepseek/vllm-dgdr-deepseek-70b.yaml
     backend: vllm
-    tier: experimental
+    tier: model-showcase
+    category: DeepSeek
     prereqs: "Prometheus; very long profiling; 4+ GPUs"
-    notes: "DGDR 70B (experimental) - adapted for g6e"
+    notes: "DGDR 70B - adapted for g6e (moved from experimental)"
     validation_status: experimental
     hardware: "g6e.24xlarge+ (4x L40S, TP=4)"
 
   - id: vllm-dgdr-deepseek-70b-g6
     name: vllm-deepseek-70b-g6
-    path: experimental/vllm-dgdr-deepseek-70b-g6.yaml
+    path: models/deepseek/vllm-dgdr-deepseek-70b-g6.yaml
     backend: vllm
-    tier: experimental
+    tier: model-showcase
+    category: DeepSeek
     prereqs: "Prometheus; very long profiling; many GPUs; GPU type-specific"
-    notes: "DGDR 70B variant (g6 tuning)"
+    notes: "DGDR 70B variant (g6 tuning) (moved from experimental)"
     validation_status: experimental
     hardware: "g6e.48xlarge (specific tuning)"
 

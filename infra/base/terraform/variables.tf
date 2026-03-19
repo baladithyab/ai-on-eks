@@ -869,13 +869,15 @@ variable "dynamo_storage_class" {
 # --- PVC config ---
 
 #---------------------------------------------------------------
-# Shared Model Cache PVC (fallback when Model Express is disabled)
-# Provides a ReadWriteMany volume for model weights/artifacts cache
+# Shared Model Cache PVC
+# Provides a ReadWriteMany volume for model weights/artifacts cache.
+# Used by all DGD blueprints, Model Express, and prefetch scripts.
+# Canonical name: dynamo-model-cache (must match DGD manifests).
 #---------------------------------------------------------------
 variable "dynamo_shared_cache_pvc_name" {
-  description = "Name of the shared PVC for model weights cache (used when Model Express is disabled)"
+  description = "Name of the shared PVC for model weights cache. Must match the PVC name in DGD blueprints (dynamo-model-cache)."
   type        = string
-  default     = "dynamo-pvc"
+  default     = "dynamo-model-cache"
 }
 
 variable "dynamo_shared_cache_size" {

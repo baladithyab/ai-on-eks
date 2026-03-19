@@ -203,20 +203,23 @@ Comprehensive test scripts are available in the `test-scripts/` directory:
 ### Available Scripts
 - **`test-image-url.sh`** - Test with publicly accessible image URLs
 - **`test-image-base64.sh`** - Test with base64-encoded local images
-- **`test-video.sh`** - Test video understanding capabilities (Qwen2.5-VL only)
+- **`test-multimodal.sh`** - Consolidated image + video tests (in `tests/targeted/multimodal-tests/`)
 
 ### Quick Test
 ```bash
+# Test with unified multimodal script (image + video)
+../../tests/targeted/multimodal-tests/test-multimodal.sh <deployment-name>
+
+# Image tests only
+../../tests/targeted/multimodal-tests/test-multimodal.sh <deployment-name> --skip-video
+
+# Video tests only (Qwen2.5-VL)
+../../tests/targeted/multimodal-tests/test-multimodal.sh <deployment-name> --skip-image
+
+# Or use legacy test-scripts if present
 cd test-scripts
-
-# Test LLaVA with image URL
 ./test-image-url.sh llava-frontend 8000 llava-hf/llava-1.5-7b-hf
-
-# Test Qwen2.5-VL with image URL
 ./test-image-url.sh qwen-vl-frontend 8000 Qwen/Qwen2.5-VL-7B-Instruct
-
-# Test Qwen2.5-VL with video
-./test-video.sh qwen-vl-video-frontend 8000 Qwen/Qwen2.5-VL-7B-Instruct
 ```
 
 See `test-scripts/README.md` for detailed usage, API format reference, and troubleshooting.
@@ -321,4 +324,3 @@ outputs = llm.generate({
 ```
 
 For complete configuration options, testing procedures, and troubleshooting, see the [full documentation](https://awslabs.github.io/ai-on-eks/docs/blueprints/inference/GPUs/nvidia-dynamo#multimodal-support).
-

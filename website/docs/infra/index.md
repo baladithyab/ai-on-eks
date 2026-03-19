@@ -39,7 +39,8 @@ Infrastructure solutions optimized for AI/ML model inference workloads:
 
 - **[Inference-Ready Cluster](./inference/inference-ready-cluster.md)** - Pre-configured EKS cluster for inference workloads
 - **[Nvidia NIM on EKS](../blueprints/inference/framework-guides/GPUs/nvidia-nim-llama3.md)** - Nvidia NIM deployment sample
-- **[Nvidia Dynamo on EKS](../blueprints/inference/framework-guides/GPUs/nvidia-dynamo.md)** - Nvidia Dyanmo deployment sample
+- **[Nvidia Dynamo on EKS](./nvidia-dynamo.md)** - NVIDIA Dynamo platform infrastructure on EKS
+- **[Dynamo Model Management](./dynamo-model-management.md)** — Manage models and LoRA adapters with the DynamoModel CRD
 
 ### Miscellaneous
 

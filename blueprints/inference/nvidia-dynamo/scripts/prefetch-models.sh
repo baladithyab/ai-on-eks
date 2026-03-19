@@ -103,12 +103,13 @@ detect_prefetch_mode() {
 }
 
 # Detect which PVC to use for direct downloads
+# Canonical name: dynamo-model-cache (matches DGD blueprints and Terraform default)
 detect_pvc() {
   local ns="${NAMESPACE:-dynamo}"
-  if kubectl get pvc modelexpress-pvc -n "$ns" &>/dev/null 2>&1; then
-    echo "modelexpress-pvc"
+  if kubectl get pvc dynamo-model-cache -n "$ns" &>/dev/null 2>&1; then
+    echo "dynamo-model-cache"
   elif kubectl get pvc dynamo-pvc -n "$ns" &>/dev/null 2>&1; then
-    echo "dynamo-pvc"
+    echo "dynamo-pvc"  # legacy fallback
   else
     echo ""
   fi
@@ -207,9 +208,11 @@ check_hf_secret() {
 #     with --strategy server-only. The MX server handles all storage.
 #
 #   direct mode:
-#     Uses prefetch-job-direct.yaml — mounts the shared PVC directly and
+#     Generates a Job inline that mounts the shared PVC directly and
 #     downloads via huggingface-cli. No MX dependency. Files land at
 #     /models/hub/models--org--name/ on the PVC.
+#     (Previously used prefetch-job-direct.yaml; now consolidated into
+#     prefetch-job.yaml as a commented-out reference and generated here.)
 launch_prefetch_job() {
   local models_csv="$1"
   local max_parallel="${2:-1}"
@@ -221,19 +224,14 @@ launch_prefetch_job() {
 
   if [[ "$mode" == "direct" ]]; then
     # ── Direct mode: huggingface-cli downloads to PVC ──────────────────────
-    local job_yaml="${SCRIPT_DIR}/prefetch-job-direct.yaml"
-    if [[ ! -f "$job_yaml" ]]; then
-      echo "ERROR: Direct Job template not found: $job_yaml" >&2
-      exit 1
-    fi
 
     # Detect PVC
     local pvc_name
     pvc_name=$(detect_pvc)
     if [[ -z "$pvc_name" ]]; then
       echo "ERROR: No model cache PVC found in namespace '$namespace'" >&2
-      echo "Looked for: modelexpress-pvc, dynamo-pvc" >&2
-      echo "Create one, or switch to Model Express mode." >&2
+      echo "Looked for: dynamo-model-cache, dynamo-pvc (legacy)" >&2
+      echo "Create one via Terraform (dynamo_shared_cache_pvc_name), or switch to Model Express mode." >&2
       exit 1
     fi
     echo "Using PVC: $pvc_name"
@@ -242,13 +240,84 @@ launch_prefetch_job() {
     echo "Cleaning up previous prefetch job (if any)..."
     kubectl delete job model-prefetch -n "$namespace" --ignore-not-found 2>/dev/null
 
-    # Inject placeholders into the Job template.
-    # Uses '|' as sed delimiter — model IDs contain '/' but not '|'.
-    sed "s|PVC_PLACEHOLDER|${pvc_name}|g; \
-         s|NAMESPACE_PLACEHOLDER|${namespace}|g; \
-         s|MODELS_PLACEHOLDER|${models_csv}|g; \
-         s|PARALLEL_PLACEHOLDER|${max_parallel}|g" \
-      "$job_yaml" | kubectl apply -n "$namespace" -f -
+    # Generate direct-mode Job YAML inline (consolidated from former
+    # prefetch-job-direct.yaml). Uses heredoc with placeholder substitution.
+    cat <<DIRECT_JOB_EOF | kubectl apply -n "$namespace" -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: model-prefetch
+  namespace: ${namespace}
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: prefetch
+          image: python:3.11-slim
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -uo pipefail
+              MODELS="\$PREFETCH_MODELS"
+              MAX_PARALLEL="\$PREFETCH_MAX_PARALLEL"
+              FAIL_LOG="/tmp/prefetch-failures.log"
+              touch "\$FAIL_LOG"
+              echo "=== Direct HuggingFace Prefetch Job ==="
+              echo "Cache dir: \$HF_HUB_CACHE"
+              echo "Models: \$MODELS"
+              echo "Max parallel: \$MAX_PARALLEL"
+              echo ""
+              echo "Installing huggingface_hub[cli]..."
+              pip install --quiet --no-cache-dir 'huggingface_hub[cli]' || { echo "ERROR: Failed to install huggingface_hub[cli]"; exit 1; }
+              echo "huggingface-cli version: \$(huggingface-cli version 2>/dev/null || echo unknown)"
+              echo ""
+              if [[ -n "\${HF_TOKEN:-}" ]]; then echo "HuggingFace token: configured"; else echo "WARNING: HF_TOKEN not set — gated models will fail"; fi
+              echo ""
+              IFS=',' read -ra MODEL_LIST <<< "\$MODELS"
+              TOTAL=\${#MODEL_LIST[@]}
+              download_model() { local model="\$1"; local fail_log="\$2"; echo "[START] \$model"; if huggingface-cli download "\$model" 2>&1; then echo "[OK] \$model"; else echo "[FAIL] \$model"; echo "\$model" >> "\$fail_log"; fi; }
+              export -f download_model
+              printf '%s\n' "\${MODEL_LIST[@]}" | xargs -P "\$MAX_PARALLEL" -I{} bash -c 'download_model "\$@"' _ {} "\$FAIL_LOG"
+              echo ""
+              echo "=== Prefetch complete ==="
+              FAIL_COUNT=\$(wc -l < "\$FAIL_LOG" 2>/dev/null || echo 0)
+              OK_COUNT=\$((TOTAL - FAIL_COUNT))
+              echo "Results: \$OK_COUNT succeeded, \$FAIL_COUNT failed out of \$TOTAL total"
+              if [ "\$FAIL_COUNT" -gt 0 ]; then echo ""; echo "Failed models:"; cat "\$FAIL_LOG" | while read -r m; do echo "  - \$m"; done; fi
+              echo ""
+              echo "Cached models on disk:"
+              ls -d "\$HF_HUB_CACHE"/models--* 2>/dev/null || echo "  (none)"
+          env:
+            - name: PREFETCH_MODELS
+              value: "${models_csv}"
+            - name: PREFETCH_MAX_PARALLEL
+              value: "${max_parallel}"
+            - name: HF_HUB_CACHE
+              value: "/models/hub"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token-secret
+                  key: HF_TOKEN
+                  optional: true
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: ${pvc_name}
+DIRECT_JOB_EOF
 
   else
     # ── Model Express mode: signal MX server via CLI ───────────────────────
@@ -318,7 +387,7 @@ show_status() {
     pvc_name=$(detect_pvc)
     if [[ -z "$pvc_name" ]]; then
       echo "ERROR: No model cache PVC found in namespace '$NAMESPACE'" >&2
-      echo "Looked for: modelexpress-pvc, dynamo-pvc" >&2
+      echo "Looked for: dynamo-model-cache, dynamo-pvc (legacy)" >&2
       exit 1
     fi
     echo "PVC: $pvc_name"

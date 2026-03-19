@@ -20,6 +20,8 @@ This directory demonstrates DeepSeek's cutting-edge open-source reasoning models
 
 | Blueprint | Backend | Architecture | GPUs | Status |
 |-----------|---------|--------------|------|--------|
+| [`vllm-dgdr-deepseek-70b.yaml`](vllm-dgdr-deepseek-70b.yaml) | vLLM | DGDR | 8 (TP=8) | 🔬 Heavy profiling |
+| [`vllm-dgdr-deepseek-70b-g6.yaml`](vllm-dgdr-deepseek-70b-g6.yaml) | vLLM | DGDR | 8 (TP=8) | 🔬 g6 GPU tuning |
 | [`vllm-disaggregated-deepseek-70b.yaml`](vllm-disaggregated-deepseek-70b.yaml) | vLLM | Disaggregated | 16 (TP=8 x 2) | ⚠️ Requires NVLink |
 | [`sglang-aggregated-deepseek-70b.yaml`](sglang-aggregated-deepseek-70b.yaml) | SGLang | Aggregated | 4 (TP=4) | 🧪 New - g6e.24xlarge |
 | [`sglang-disaggregated-deepseek-70b.yaml`](sglang-disaggregated-deepseek-70b.yaml) | SGLang | Disaggregated | 8 (TP=4 x 2) | ⏳ Untested - requires 8 GPUs |
@@ -107,7 +109,7 @@ DeepSeek R1-Distill models excel at:
   "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
   "messages": [
     {
-      "role": "user", 
+      "role": "user",
       "content": "Think through this carefully: A farmer has 17 sheep. All but 9 run away. How many sheep does the farmer have left? Explain your reasoning."
     }
   ]

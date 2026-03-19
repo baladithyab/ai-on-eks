@@ -18,6 +18,34 @@
 #   TIMEOUT=1200 ./scripts/run-all-tests.sh       # Custom timeout (seconds)
 #   DEBUG=true ./scripts/run-all-tests.sh         # Enable verbose debug logging
 #
+# Consolidated Notes
+# ~~~~~~~~~~~~~~~~~~
+# This script is the single test runner entry point. It subsumes the
+# functionality of the former:
+#
+#   run-test-matrix.sh — Full 62-example wave-based matrix runner.
+#     Key features that were unique to the matrix runner:
+#       --wave <N>         Run a specific wave (1-5) organized by GPU size
+#       --resume <wave> N  Resume from a specific example index
+#       --example <id>     Run a single catalog example
+#       --dry-run          Preview without deploying
+#       --reset / append   Report management modes
+#     Wave definitions: 1=small/g5, 2=multimodal, 3=medium-large/g6e,
+#       4=p5/p6/multinode, 5=DGDRs
+#     Blocked example tracking, DGDR detection, large-model extended waits
+#       (30 min for 70B+, 60 min for 120B+/multinode), observability checks,
+#       feature-specific checks (router topology, KVBM metrics, disagg layout).
+#     To replicate: use TIER=all or iterate specific examples via deploy.sh/
+#       test.sh/cleanup.sh manually.
+#
+#   run-full-validation.sh — Multi-phase observability validation suite.
+#     Phases: 1=infra validation, 2=blueprint deploy+test, 3=observability
+#       (metrics + tracing), 4=integration tests.
+#     Key features: --phase <name>, --quick, --ci, --blueprint, phased
+#       results tracking with durations.
+#     To replicate: use verify-tracing.sh (which now covers observability)
+#       combined with this script for deployment testing.
+#
 #===============================================================================
 
 set -euo pipefail

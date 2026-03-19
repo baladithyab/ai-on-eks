@@ -142,10 +142,11 @@ Test Organization:
   ├── general/                 Basic tests for any deployment
   │   └── basic-inference.sh   Health, models, chat completion
   └── targeted/                Feature-specific tests
-      ├── multimodal-tests/    Image/video tests for VLM
+      ├── multimodal-tests/    Image/video tests for VLM (test-multimodal.sh)
       ├── kv-routing-tests/    KV cache routing tests
-      ├── observability-tests/ OTEL and metrics tests
-      └── performance-tests/   Throughput and latency benchmarks
+      └── observability-tests/ OTEL and metrics tests
+  scripts/
+  └── benchmark.sh             Performance benchmarks (TTFT, throughput)
 
 HELP
     exit 0
@@ -288,7 +289,7 @@ run_pre_test_validation() {
     echo -e "${BLUE}  Pre-Test Blueprint Validation${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 
-    local validate_script="${SCRIPTS_DIR}/validate-blueprint.sh"
+    local validate_script="${SCRIPTS_DIR}/validate.sh"
     local manifest_path=$(resolve_manifest_path "$example")
 
     if [ -z "$manifest_path" ] || [ ! -f "$manifest_path" ]; then
@@ -298,7 +299,7 @@ run_pre_test_validation() {
 
     if [ -f "$validate_script" ]; then
         info "Validating blueprint: $(basename "$manifest_path")"
-        if bash "$validate_script" "$manifest_path"; then
+        if bash "$validate_script" file "$manifest_path"; then
             success "Blueprint validation passed"
             return 0
         else
@@ -674,7 +675,7 @@ run_multimodal_tests() {
     echo -e "${BLUE}  Running Multimodal Tests${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 
-    local test_script="${TESTS_DIR}/targeted/multimodal-tests/test-image.sh"
+    local test_script="${TESTS_DIR}/targeted/multimodal-tests/test-multimodal.sh"
 
     if [ ! -f "$test_script" ]; then
         error "Multimodal test script not found: $test_script"
@@ -682,16 +683,16 @@ run_multimodal_tests() {
     fi
 
     chmod +x "$test_script"
-    "$test_script" "$DGD_NAME" $EXTRA_ARGS
 
-    # Run video tests if it looks like a video model
-    if [[ "$EXAMPLE" == *"video"* ]]; then
-        local video_script="${TESTS_DIR}/targeted/multimodal-tests/test-video.sh"
-        if [ -f "$video_script" ]; then
-            chmod +x "$video_script"
-            "$video_script" "$DGD_NAME" $EXTRA_ARGS
-        fi
+    # Build multimodal-specific args
+    local mm_args="$EXTRA_ARGS"
+
+    # Skip video tests unless it looks like a video-capable model
+    if [[ "$EXAMPLE" != *"video"* ]] && [[ "$EXAMPLE" != *"vl"* ]]; then
+        mm_args="$mm_args --skip-video"
     fi
+
+    "$test_script" "$DGD_NAME" $mm_args
 }
 
 run_kv_routing_tests() {
@@ -734,10 +735,11 @@ run_performance_tests() {
     echo -e "${BLUE}  Running Performance Tests${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 
-    local test_script="${TESTS_DIR}/targeted/performance-tests/test-performance.sh"
+    local test_script="${SCRIPTS_DIR}/benchmark.sh"
 
     if [ ! -f "$test_script" ]; then
-        error "Performance test script not found: $test_script"
+        error "Benchmark script not found: $test_script"
+        info "Performance tests have been consolidated into scripts/benchmark.sh"
         return 1
     fi
 
