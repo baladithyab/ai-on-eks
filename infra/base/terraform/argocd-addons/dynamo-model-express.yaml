@@ -60,14 +60,20 @@ spec:
                 key: HF_TOKEN
                 optional: true
 
-        # EFS storage for model cache (ReadWriteMany for shared access)
-        # Use the Terraform-managed PVC (dynamo-model-cache) created by
-        # kubernetes_persistent_volume_claim_v1.dynamo_pvc in argocd_addons.tf.
-        # This ensures a single canonical PVC name across Model Express,
-        # DGD blueprints, and prefetch/benchmark scripts.
+        # NOTE: Chart v0.2.2 ignores persistence.existingClaim — it always
+        # creates its own 10Gi gp3 PVC. Disable the built-in PVC and mount
+        # the Terraform-managed EFS PVC via extraVolumes instead.
         persistence:
-          enabled: true
-          existingClaim: "dynamo-model-cache"
+          enabled: false
+
+        extraVolumes:
+          - name: model-cache
+            persistentVolumeClaim:
+              claimName: dynamo-model-cache
+
+        extraVolumeMounts:
+          - name: model-cache
+            mountPath: /root
 
         # Resource limits for model express server
         # Increased to 4 CPU / 8Gi to speed up model downloads

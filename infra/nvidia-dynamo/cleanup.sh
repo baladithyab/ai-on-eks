@@ -11,11 +11,16 @@
 #       doesn't block namespace/CRD teardown during terraform destroy.
 #   1b. Unblock stuck namespace deletion: remove stale APIServices, patch
 #       stuck ArgoCD finalizers, and force-finalize the dynamo namespace if
-#       it is stuck in Terminating.
+#       it is stuck in Terminating.  Also PRE-EMPTIVELY delete aggregated
+#       APIServices (metrics-server, etc.) that will lose backing pods when
+#       terraform destroys node groups (prevents timing-gap race condition).
 #   2.  Delegate to the base cleanup template in terraform/_LOCAL/ for:
 #      - kubectl_manifest targeted destroy
 #      - full terraform destroy
 #      - EBS volume cleanup
+#   2b. If Phase 2 fails: re-check for stale APIServices that appeared
+#       DURING destroy, force-remove namespace finalizers, patch stuck
+#       ArgoCD apps, then retry terraform destroy.
 #   3. Gate success/failure on the base template's exit code AND output
 #      analysis (Terraform error markers).
 #   4. Delete terraform/_LOCAL by default on conclusive success (exit 0 +
@@ -235,6 +240,53 @@ if [[ "$CLUSTER_ACCESSIBLE" == "true" ]]; then
         info "  No stale APIServices found"
     fi
 
+    # --- Pre-emptive APIService deletion ---
+    # TIMING GAP FIX: The stale-APIService check above only catches services
+    # that are ALREADY unhealthy.  But during terraform destroy (Phase 2),
+    # node groups are removed which kills addon pods (metrics-server, etc.)
+    # AFTER this check runs.  Their APIService registrations stay behind with
+    # Available=False/MissingEndpoints, blocking the namespace controller's
+    # discovery sweep and causing namespace deletion to hang indefinitely.
+    #
+    # Solution: pre-emptively delete known aggregated APIServices that will
+    # lose their backing pods during terraform destroy.  These are all about
+    # to be destroyed anyway, so removing them early prevents the race.
+    echo ""
+    info "  --- Pre-emptive: removing aggregated APIServices before terraform destroy ---"
+
+    # Well-known aggregated APIServices backed by addon pods on worker nodes
+    PREEMPTIVE_APISERVICES=(
+        "v1beta1.metrics.k8s.io"                   # metrics-server addon
+        "v1beta3.flowcontrol.apiserver.k8s.io"      # sometimes stale after node loss
+    )
+    for api_svc in "${PREEMPTIVE_APISERVICES[@]}"; do
+        if kubectl get apiservice "$api_svc" &>/dev/null; then
+            info "    Deleting APIService: $api_svc (pre-emptive, will be destroyed by terraform)"
+            kubectl delete apiservice "$api_svc" --timeout=30s 2>/dev/null || true
+        fi
+    done
+
+    # Also delete any OTHER aggregated (non-local) APIServices that are backed
+    # by in-cluster pods about to lose their nodes.  Aggregated APIServices
+    # have a non-null .spec.service field; local ones (backed by the API
+    # server itself) have spec.service == null and are safe to skip.
+    info "    Checking for additional aggregated APIServices..."
+    _agg_apis=$(kubectl get apiservice -o json 2>/dev/null | jq -r '
+        .items[] |
+        select(.spec.service != null and .spec.service.name != null) |
+        .metadata.name
+    ' 2>/dev/null || echo "")
+    if [[ -n "$_agg_apis" ]]; then
+        while IFS= read -r api_svc; do
+            [[ -z "$api_svc" ]] && continue
+            info "    Deleting aggregated APIService: $api_svc"
+            kubectl delete apiservice "$api_svc" --timeout=30s 2>/dev/null || true
+        done <<< "$_agg_apis"
+    else
+        info "    No additional aggregated APIServices found"
+    fi
+    info "  --- Pre-emptive APIService cleanup complete ---"
+
     # --- (b) Remove finalizers from stuck ArgoCD Applications ---
     # During teardown, ArgoCD apps may have deletionTimestamp set but their
     # finalizers can't reconcile (controller pods gone).  Patch them out.
@@ -307,28 +359,139 @@ else
 
     CLEANUP_LOG="${TERRAFORM_DIR}/cleanup-wrapper.log"
 
-    tf_rc=0
-    ( cd "$TERRAFORM_DIR" && bash ./cleanup.sh ) > >(tee "$CLEANUP_LOG") 2>&1 || tf_rc=$?
-
-    if (( tf_rc != 0 )); then
-        error "Base cleanup template exited with code ${tf_rc}"
-        print_recovery "$tf_rc"
-        exit "$tf_rc"
-    fi
-
-    # -------------------------------------------------------------------------
-    # Scan captured output for Terraform error markers.
+    # --- Helper: check for Terraform error markers in log output ---
     # Terraform sometimes exits 0 despite emitting error blocks.  We detect
     # lines matching the standard Terraform error box format:
     #   │ Error: <message>
     # or bare error lines:
     #   Error: <message>
-    # -------------------------------------------------------------------------
-    if grep -qE '^(│ Error:|Error:)' "$CLEANUP_LOG" 2>/dev/null; then
-        error "Terraform error markers detected in cleanup output (despite exit code 0)"
-        error "See log: ${CLEANUP_LOG}"
-        print_recovery 1
-        exit 1
+    _has_tf_errors() {
+        grep -qE '^(│ Error:|Error:)' "$CLEANUP_LOG" 2>/dev/null
+    }
+
+    # --- First attempt ---
+    tf_rc=0
+    ( cd "$TERRAFORM_DIR" && bash ./cleanup.sh ) > >(tee "$CLEANUP_LOG") 2>&1 || tf_rc=$?
+
+    _first_failed=false
+    if (( tf_rc != 0 )); then
+        warn "Base cleanup template exited with code ${tf_rc} — will attempt recovery"
+        _first_failed=true
+    elif _has_tf_errors; then
+        warn "Terraform error markers detected in cleanup output (exit 0) — will attempt recovery"
+        _first_failed=true
+    fi
+
+    # =========================================================================
+    # Phase 2b — Post-destroy recovery and retry
+    # =========================================================================
+    # If the first terraform destroy failed, it's often because namespace
+    # deletion hung due to stale APIServices that appeared DURING the destroy
+    # (the timing gap: nodes died → metrics-server died → APIService went
+    # stale → namespace controller blocked).
+    #
+    # Recovery steps:
+    #   1. Re-check for stale APIServices (may have appeared during destroy)
+    #   2. Force-remove namespace finalizers for any stuck namespaces
+    #   3. Retry terraform destroy
+    # =========================================================================
+    if [[ "$_first_failed" == "true" ]]; then
+        echo ""
+        info "=== Phase 2b: Post-destroy recovery ==="
+
+        # Check if the cluster API is still reachable for remediation
+        _p2b_cluster_ok=false
+        if kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
+            _p2b_cluster_ok=true
+        fi
+
+        if [[ "$_p2b_cluster_ok" == "true" ]]; then
+            # --- (2b-a) Re-check and remove stale APIServices ---
+            info "  Re-checking for stale APIServices after failed destroy..."
+            _stale_apis_p2b=$(kubectl get apiservices -o json 2>/dev/null \
+                | jq -r '.items[] | select(.status.conditions[]? | select(.type=="Available" and .status=="False")) | .metadata.name' 2>/dev/null || echo "")
+            if [[ -n "$_stale_apis_p2b" ]]; then
+                info "  Found stale APIServices — removing"
+                while IFS= read -r api; do
+                    [[ -z "$api" ]] && continue
+                    info "    Deleting stale APIService: ${api}"
+                    kubectl delete apiservice "$api" --ignore-not-found --timeout=30s 2>/dev/null || true
+                done <<< "$_stale_apis_p2b"
+            else
+                info "  No stale APIServices found"
+            fi
+
+            # Also sweep any remaining aggregated (non-local) APIServices
+            _agg_apis_p2b=$(kubectl get apiservice -o json 2>/dev/null | jq -r '
+                .items[] |
+                select(.spec.service != null and .spec.service.name != null) |
+                .metadata.name
+            ' 2>/dev/null || echo "")
+            if [[ -n "$_agg_apis_p2b" ]]; then
+                info "  Removing remaining aggregated APIServices..."
+                while IFS= read -r api_svc; do
+                    [[ -z "$api_svc" ]] && continue
+                    info "    Deleting aggregated APIService: $api_svc"
+                    kubectl delete apiservice "$api_svc" --timeout=30s 2>/dev/null || true
+                done <<< "$_agg_apis_p2b"
+            fi
+
+            # --- (2b-b) Force-remove finalizers from stuck namespaces ---
+            info "  Checking for stuck namespaces..."
+            _stuck_ns=$(kubectl get ns -o json 2>/dev/null \
+                | jq -r '.items[] | select(.status.phase == "Terminating") | .metadata.name' 2>/dev/null || echo "")
+            if [[ -n "$_stuck_ns" ]]; then
+                info "  Found stuck namespaces — force-removing finalizers"
+                while IFS= read -r ns; do
+                    [[ -z "$ns" ]] && continue
+                    warn "    Force-removing finalizers from namespace: ${ns}"
+                    kubectl get ns "$ns" -o json 2>/dev/null \
+                        | jq '.spec.finalizers = []' \
+                        | kubectl replace --raw "/api/v1/namespaces/${ns}/finalize" -f - 2>/dev/null || true
+                done <<< "$_stuck_ns"
+                info "  Waiting 15s for namespaces to terminate..."
+                sleep 15
+            else
+                info "  No stuck namespaces found"
+            fi
+
+            # --- (2b-c) Remove stuck ArgoCD Application finalizers ---
+            _stuck_apps_p2b=$(kubectl get applications -n argocd -o json 2>/dev/null \
+                | jq -r '.items[] | select(.metadata.deletionTimestamp != null) | .metadata.name' 2>/dev/null || echo "")
+            if [[ -n "$_stuck_apps_p2b" ]]; then
+                info "  Found stuck ArgoCD Applications — removing finalizers"
+                while IFS= read -r app; do
+                    [[ -z "$app" ]] && continue
+                    info "    Patching Application: ${app}"
+                    kubectl patch application "$app" -n argocd \
+                        --type=merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+                done <<< "$_stuck_apps_p2b"
+            fi
+        else
+            warn "  Cluster API not reachable — skipping Kubernetes-level recovery"
+        fi
+
+        # --- Retry terraform destroy ---
+        echo ""
+        info "  Retrying terraform destroy..."
+        CLEANUP_LOG_RETRY="${TERRAFORM_DIR}/cleanup-wrapper-retry.log"
+        tf_rc_retry=0
+        ( cd "$TERRAFORM_DIR" && bash ./cleanup.sh ) > >(tee "$CLEANUP_LOG_RETRY") 2>&1 || tf_rc_retry=$?
+
+        if (( tf_rc_retry != 0 )); then
+            error "Retry: base cleanup template exited with code ${tf_rc_retry}"
+            print_recovery "$tf_rc_retry"
+            exit "$tf_rc_retry"
+        fi
+
+        if grep -qE '^(│ Error:|Error:)' "$CLEANUP_LOG_RETRY" 2>/dev/null; then
+            error "Retry: Terraform error markers detected in cleanup output"
+            error "See log: ${CLEANUP_LOG_RETRY}"
+            print_recovery 1
+            exit 1
+        fi
+
+        info "  Retry succeeded"
     fi
 
     info "Base cleanup template completed successfully"
