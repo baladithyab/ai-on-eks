@@ -73,13 +73,22 @@ spec:
                 local endpoint="$2"
                 local cli="$3"
                 local fail_log="$4"
+                local max_attempts=2
+                local attempt=0
                 echo "[START] $model"
-                if $cli -e "$endpoint" -t 86400 model download "$model" --strategy server-only 2>&1; then
-                  echo "[OK] $model"
-                else
-                  echo "[FAIL] $model"
-                  echo "$model" >> "$fail_log"
-                fi
+                while [ "$attempt" -lt "$max_attempts" ]; do
+                  attempt=$((attempt + 1))
+                  if $cli -e "$endpoint" -t 86400 model download "$model" --strategy server-only 2>&1; then
+                    echo "[OK] $model"
+                    return 0
+                  fi
+                  if [ "$attempt" -lt "$max_attempts" ]; then
+                    echo "[RETRY] $model — attempt $attempt/$max_attempts failed, waiting 10s..."
+                    sleep 10
+                  fi
+                done
+                echo "[FAIL] $model (after $max_attempts attempts)"
+                echo "$model" >> "$fail_log"
               }
               export -f download_model
 

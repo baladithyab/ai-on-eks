@@ -344,6 +344,38 @@ DIRECT_JOB_EOF
     echo "Cleaning up previous prefetch job (if any)..."
     kubectl delete job model-prefetch -n "$namespace" --ignore-not-found 2>/dev/null
 
+    # Pre-flight: clean stale HF Hub lock files from the MX pod's cache.
+    # When a large model download is interrupted (network error, pod restart,
+    # etc.), HuggingFace Hub leaves .lock files in the blobs/ directory.
+    # On re-download, the MX server's HF provider sees these locks and
+    # immediately rejects with "Previous download failed - retrying" instead
+    # of resuming. Cleaning locks + restarting the MX pod clears both
+    # file-system and in-memory failure state, allowing downloads to resume
+    # from partial shards (.part files serve as HF Hub resume checkpoints).
+    echo "Pre-flight: checking for stale lock files in MX cache..."
+    local mx_pod_preflight
+    mx_pod_preflight=$(find_mx_pod)
+    if [[ -n "$mx_pod_preflight" ]]; then
+      local stale_locks
+      stale_locks=$(kubectl exec -n "$namespace" "$mx_pod_preflight" -- sh -c \
+        'find /root/models--*/blobs/ -name "*.lock" 2>/dev/null | wc -l' 2>/dev/null) || stale_locks="0"
+      # Trim whitespace (wc -l may include leading spaces)
+      stale_locks=$(echo "$stale_locks" | tr -d '[:space:]')
+      if [[ "${stale_locks:-0}" -gt 0 ]]; then
+        echo "  Found ${stale_locks} stale .lock files — removing to unblock downloads..."
+        kubectl exec -n "$namespace" "$mx_pod_preflight" -- sh -c \
+          'find /root/models--*/blobs/ -name "*.lock" -delete' 2>/dev/null || true
+        echo "  Restarting MX deployment to clear in-memory failure state..."
+        kubectl rollout restart deployment/modelexpress -n "$namespace"
+        kubectl rollout status deployment/modelexpress -n "$namespace" --timeout=180s
+        echo "  MX pod ready after lock cleanup."
+      else
+        echo "  No stale lock files found — skipping cleanup."
+      fi
+    else
+      echo "  Warning: MX pod not found for pre-flight cleanup — proceeding anyway."
+    fi
+
     # Inject image, model list, namespace, and parallelism into the Job template.
     # Uses '|' as sed delimiter — model IDs contain '/' but not '|'.
     sed "s|IMAGE_PLACEHOLDER|${mx_image}|g; \
