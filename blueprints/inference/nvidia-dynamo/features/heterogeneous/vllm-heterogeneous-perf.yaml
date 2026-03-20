@@ -1,0 +1,225 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# ============================================================================
+# Experiment 2: Performance-Optimized Heterogeneous Disaggregated Inference
+# ============================================================================
+#
+# Rationale:
+#   H100 (p5) for maximum prefill throughput, L40S (g6e) for cost-effective
+#   decode. Prefill is compute-bound and benefits from H100's superior FP16
+#   FLOPS (989 TFLOPS vs L40S's 362 TFLOPS). Decode is memory-bandwidth-
+#   bound and L40S (864 GB/s) provides adequate bandwidth at lower cost.
+#
+# GPU Assignment:
+#   Prefill: p5-nvidia  (H100, 80 GB VRAM) — 1 GPU, TP=1
+#   Decode:  g6e-nvidia (L40S, 48 GB VRAM) — 1 GPU, TP=1
+#
+# VRAM Constraints:
+#   - Both GPUs comfortably fit the 8B model at max-model-len 8192
+#
+# KV Cache Transfer: TCP (default in Dynamo ≥ 0.8.0)
+#
+# Prerequisites:
+#   - Karpenter NodePools: p5-nvidia, g6e-nvidia
+#   - PVC: dynamo-model-cache (EFS-backed, ReadWriteMany)
+#   - Secret: hf-token-secret (HuggingFace token)
+#   - ImagePullSecret: nvcr-imagepullsecret (configured on namespace or SA)
+# ============================================================================
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-hetero-perf
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    # ── Frontend ──────────────────────────────────────────────────────────
+    # No GPU required — runs on any schedulable node.
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 -m dynamo.frontend --http-port 8000
+
+    # ── Decode Worker — L40S (g6e-nvidia) ────────────────────────────────
+    # L40S has 48 GB VRAM and 864 GB/s bandwidth — sufficient for decode.
+    # max-model-len 8192 fits comfortably within 48 GB.
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: UCX_TLS
+          value: ^mm # Disable shared memory transport to avoid broadcast deadlock
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "4"
+          memory: 16Gi
+          gpu: "1"
+        limits:
+          cpu: "4"
+          memory: 16Gi
+          gpu: "1"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 10
+            failureThreshold: 60
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - >-
+              python3 -m dynamo.vllm
+              --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+              --tensor-parallel-size 1
+              --enforce-eager
+              --max-model-len 8192
+              2>&1 | tee /tmp/vllm-decode.log
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    # ── Prefill Worker — H100 (p5-nvidia) ────────────────────────────────
+    # H100 has 80 GB VRAM and 989 TFLOPS FP16 — maximum prefill throughput.
+    # max-model-len 8192 uses a small fraction of available VRAM.
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: UCX_TLS
+          value: ^mm # Disable shared memory transport to avoid broadcast deadlock
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "8"
+          memory: 32Gi
+          gpu: "1"
+        limits:
+          cpu: "8"
+          memory: 32Gi
+          gpu: "1"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 10
+            failureThreshold: 60
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - >-
+              python3 -m dynamo.vllm
+              --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+              --is-prefill-worker
+              --tensor-parallel-size 1
+              --enforce-eager
+              --max-model-len 8192
+              2>&1 | tee /tmp/vllm-prefill.log
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

@@ -614,6 +614,28 @@ if ! declare -F resolve_deployment_name >/dev/null 2>&1; then
             fi
         fi
 
+        # Strategy 3: Find YAML file by name and extract metadata.name
+        local found_file
+        found_file=$(find "$script_dir" -type f -name "${input}.yaml" \
+            -not -path "*/catalog/*" -not -path "*/_internal/*" -print -quit 2>/dev/null || true)
+        if [ -n "$found_file" ] && [ -f "$found_file" ]; then
+            local meta_name
+            meta_name=$(awk '
+                /^kind:[[:space:]]*DynamoGraphDeployment/ { found_dgd=1 }
+                /^kind:[[:space:]]*DynamoGraphDeploymentRequest/ { found_dgd=1 }
+                found_dgd && /^metadata:/ { in_meta=1; next }
+                in_meta && /^[[:space:]]*name:/ {
+                    gsub(/.*name:[[:space:]]*/, ""); gsub(/["\r\n]/, "");
+                    print; exit
+                }
+                in_meta && /^[^[:space:]]/ { in_meta=0 }
+            ' "$found_file" 2>/dev/null || echo "")
+            if [ -n "$meta_name" ]; then
+                echo "$meta_name"
+                return 0
+            fi
+        fi
+
         echo "$input"
     }
 fi
