@@ -1,0 +1,279 @@
+# DeepSeek R1 (671B MoE) — Homogeneous Disaggregated on p6-b200 with EFA RDMA
+#
+# Experiment 2b: Same as Experiment 2 (disagg-p6) but with EFA explicitly enabled
+# for NIXL KV cache transfers between prefill and decode nodes.
+#
+# Key difference from disagg-p6:
+#   - EFA network interfaces requested (vpc.amazonaws.com/efa: 8)
+#   - RDMA/UCX env vars configured for NIXL backend
+#   - GPUDirect RDMA (GDRCopy) enabled for zero-copy KV cache transfer
+#
+# This measures the impact of EFA RDMA vs. TCP for inter-node KV cache
+# transfers in disaggregated inference.
+#
+# Hardware: 2× p6-b200.48xlarge (8× B200, 192GB each = 1536GB VRAM per node)
+# Precision: BF16 weights, FP8 KV cache (fp8_e5m2)
+# TP=8 on each worker, Expert Parallel enabled
+# Network: EFA v2 RDMA (8 interfaces per node)
+#
+# Prerequisites:
+#   - Karpenter NodePool: p6-b200-nvidia (maxNodes >= 2)
+#   - PVC: dynamo-model-cache (EFS-backed, ReadWriteMany)
+#   - Secret: hf-token-secret (HuggingFace token)
+#   - EFA device plugin running on p6-b200 nodes
+#   - aws-efa-k8s-device-plugin DaemonSet deployed
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: dsr1-disagg-efa-p6
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 20
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 180
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            # Blackwell optimizations
+            - name: VLLM_ATTENTION_BACKEND
+              value: "FLASHINFER_MLA"
+            - name: VLLM_MLA_FP8_PROJ
+              value: "1"
+            - name: NCCL_CUMEM_ENABLE
+              value: "1"
+            - name: NCCL_NVLS_ENABLE
+              value: "1"
+            # EFA RDMA / NIXL KV cache transfer
+            - name: NVIDIA_GDRCOPY
+              value: "enabled"
+            - name: UCX_NET_DEVICES
+              value: "all"
+            - name: GLOO_SOCKET_IFNAME
+              value: "eth0"
+            - name: NCCL_SOCKET_IFNAME
+              value: "eth0"
+            - name: DYN_KVBM_NIXL_BACKEND_UCX
+              value: "true"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "deepseek-ai/DeepSeek-R1-0528"
+            - "--tensor-parallel-size"
+            - "8"
+            - "--enable-expert-parallel"
+            - "--kv-cache-dtype"
+            - "fp8"
+            - "--max-model-len"
+            - "8192"
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.90"
+            - "--max-num-seqs"
+            - "1024"
+            - "--dyn-reasoning-parser"
+            - "deepseek_r1"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 180
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            # Blackwell optimizations
+            - name: VLLM_ATTENTION_BACKEND
+              value: "FLASHINFER_MLA"
+            - name: VLLM_MLA_FP8_PROJ
+              value: "1"
+            - name: NCCL_CUMEM_ENABLE
+              value: "1"
+            - name: NCCL_NVLS_ENABLE
+              value: "1"
+            # EFA RDMA / NIXL KV cache transfer
+            - name: NVIDIA_GDRCOPY
+              value: "enabled"
+            - name: UCX_NET_DEVICES
+              value: "all"
+            - name: GLOO_SOCKET_IFNAME
+              value: "eth0"
+            - name: NCCL_SOCKET_IFNAME
+              value: "eth0"
+            - name: DYN_KVBM_NIXL_BACKEND_UCX
+              value: "true"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "deepseek-ai/DeepSeek-R1-0528"
+            - "--tensor-parallel-size"
+            - "8"
+            - "--enable-expert-parallel"
+            - "--kv-cache-dtype"
+            - "fp8"
+            - "--max-model-len"
+            - "8192"
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.90"
+            - "--max-num-seqs"
+            - "1024"
+            - "--dyn-reasoning-parser"
+            - "deepseek_r1"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

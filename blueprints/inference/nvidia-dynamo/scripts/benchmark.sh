@@ -258,6 +258,13 @@ discover() {
     FRONTEND_URL="http://${SERVICE_NAME}.${NAMESPACE}.svc.cluster.local:${SERVICE_PORT}"
     info "Frontend URL (in-cluster): ${FRONTEND_URL}"
 
+    # Use pre-set MODEL env var if provided (e.g., heterogeneous deployments
+    # where /v1/models may list a prefill model first that returns 404).
+    if [ -n "${MODEL:-}" ]; then
+        success "Using pre-set model: ${MODEL}"
+        return 0
+    fi
+
     # Discover model via temporary port-forward
     local local_port
     local_port=$(find_available_port 18000)

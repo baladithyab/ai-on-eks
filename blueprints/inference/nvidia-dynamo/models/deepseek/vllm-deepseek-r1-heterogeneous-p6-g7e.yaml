@@ -1,0 +1,261 @@
+# DeepSeek R1 (671B MoE) — Heterogeneous Disaggregated: B200 Prefill + g7e Decode
+#
+# Experiment 3: Heterogeneous disaggregated inference with NVFP4 quantization.
+# Prefill on p6-b200 (HBM3e, NVSwitch, 192GB/GPU) for compute-intensive prompt
+# processing. Decode on g7e RTX PRO 6000 (GDDR7, PCIe, 96GB/GPU) for cost-
+# optimized token generation — decode is memory-bandwidth-bound.
+#
+# This uses the NVFP4 checkpoint (nvidia/DeepSeek-R1-0528-NVFP4-v2) which is
+# the only quantization level that fits 671B on g7e at TP=8:
+#   - NVFP4: ~44 GB/GPU → fits on 96 GB g7e with 52 GB for KV cache
+#   - FP8:   ~84 GB/GPU → barely fits, no room for KV cache
+#   - BF16: ~160 GB/GPU → does not fit on 96 GB
+#
+# Both B200 and RTX PRO 6000 are Blackwell (sm_100) with 5th-gen Tensor Cores
+# and native FP4 support, so NVFP4 GEMM kernels work on both.
+#
+# g7e-specific constraints:
+#   - No NVLink/NVSwitch → NCCL_NVLS_ENABLE=0, disable custom allreduce
+#   - No EFA → KV cache transfer falls back to TCP (not RDMA)
+#   - PCIe 5.0 interconnect → TP=8 allreduce over PCIe (slower but decode is
+#     memory-bandwidth-bound, not communication-bound)
+#
+# Hardware:
+#   Prefill: 1× p6-b200.48xlarge (8× B200, 192GB HBM3e, NVSwitch, 8× EFA)
+#   Decode:  1× g7e.48xlarge     (8× RTX PRO 6000, 96GB GDDR7, PCIe 5.0)
+#
+# Prerequisites:
+#   - Karpenter NodePools: p6-b200-nvidia, g7e-nvidia
+#   - PVC: dynamo-model-cache (EFS-backed, ReadWriteMany)
+#   - Secret: hf-token-secret (HuggingFace token)
+#   - NVFP4 checkpoint pre-fetched to EFS (~350 GB)
+#   - Smoke test: verify NVFP4 kernels work on g7e before full benchmark
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: deepseek-r1-hetero
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 20
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 180
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            # Blackwell optimizations — B200 has NVLink/NVSwitch
+            - name: VLLM_ATTENTION_BACKEND
+              value: "FLASHINFER_MLA"
+            - name: VLLM_MLA_FP8_PROJ
+              value: "1"
+            - name: NCCL_CUMEM_ENABLE
+              value: "1"
+            - name: NCCL_NVLS_ENABLE
+              value: "1"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "nvidia/DeepSeek-R1-0528-NVFP4-v2"
+            - "--tensor-parallel-size"
+            - "8"
+            - "--enable-expert-parallel"
+            - "--kv-cache-dtype"
+            - "fp8"
+            - "--max-model-len"
+            - "8192"
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.90"
+            - "--max-num-seqs"
+            - "1024"
+            - "--dyn-reasoning-parser"
+            - "deepseek_r1"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "48"
+          memory: 512Gi
+          gpu: "8"
+        limits:
+          cpu: "48"
+          memory: 512Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g7e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 180
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            # Blackwell optimizations — g7e has NO NVLink/NVSwitch
+            - name: VLLM_ATTENTION_BACKEND
+              value: "FLASHINFER_MLA"
+            - name: VLLM_MLA_FP8_PROJ
+              value: "1"
+            - name: NCCL_CUMEM_ENABLE
+              value: "1"
+              # g7e has no NVLink — disable NVLink-dependent features
+            - name: NCCL_NVLS_ENABLE
+              value: "0"
+            - name: VLLM_DEEPEP_LOW_LATENCY_ALLOW_NVLINK
+              value: "0"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "nvidia/DeepSeek-R1-0528-NVFP4-v2"
+            - "--tensor-parallel-size"
+            - "8"
+            - "--enable-expert-parallel"
+            - "--kv-cache-dtype"
+            - "fp8"
+            - "--max-model-len"
+            - "8192"
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.90"
+            - "--max-num-seqs"
+            - "1024"
+            - "--disable-custom-all-reduce"
+            - "--dyn-reasoning-parser"
+            - "deepseek_r1"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

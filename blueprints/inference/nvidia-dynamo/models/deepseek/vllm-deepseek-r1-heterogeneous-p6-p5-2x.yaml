@@ -1,0 +1,311 @@
+# DeepSeek R1 (671B MoE) — Heterogeneous Disaggregated: B200 Prefill + 2×H100 Decode (TCP)
+#
+# Experiment 3b-tcp: Cross-architecture heterogeneous disaggregated inference with
+# mixed-precision quantization and multi-node decode on 2× p5 (16 H100 GPUs).
+# TCP variant — KV cache transfer uses TCP (no EFA). See -efa- variant for RDMA.
+#
+# Multi-node decode: Grove (PodCliqueScalingGroup) handles scheduling 2 p5 nodes.
+#   multinode.nodeCount: 2 + gpu: "8" per node = 16 GPUs total.
+#   The operator detects TP=16 > gpu=8 and injects Ray distributed executor.
+#   command: ["python3"] is required — the operator wraps with ray start --head.
+#
+# Problem with 1× p5 (8 GPUs):
+#   671B FP8 = 624 GiB / 8 GPUs = 78 GiB/GPU > 80 GiB H100 total (no room for KV cache)
+#
+# Solution with 2× p5 (16 GPUs):
+#   671B FP8 = 624 GiB / 16 GPUs = 39 GiB/GPU on 80 GiB → 41 GiB headroom for KV cache ✓
+#
+# Mixed-Precision Quantization Strategy (cross-architecture):
+#   Prefill (B200, SM100): NVFP4 via nvidia/DeepSeek-R1-0528-NVFP4-v2 checkpoint
+#     ~350GB / 8 GPUs = ~44GB/GPU on 192GB → 148GB headroom for KV cache.
+#     Uses Blackwell FlashInfer-CUTLASS NVFP4 GEMM, FlashInfer MLA, FP8 KV cache.
+#   Decode (H100, SM90):  FP8 via --quantization fp8 on BF16 checkpoint
+#     ~624GB / 16 GPUs = ~39GB/GPU on 80GB → 41GB headroom for KV cache.
+#     H100 has native FP8 Tensor Cores. No NVFP4 (requires SM100 Blackwell).
+#
+# Hardware:
+#   Prefill: 1× p6-b200.48xlarge (8× B200, 192GB HBM3e, NVSwitch, 8× EFA)
+#   Decode:  2× p5.48xlarge       (16× H100, 80GB HBM3, NVSwitch intra-node, 32× EFA per node)
+#
+# Prerequisites:
+#   - Karpenter NodePools: p6-b200-nvidia, p5-nvidia
+#   - PVC: dynamo-model-cache (EFS-backed, ReadWriteMany)
+#   - Secret: hf-token-secret (HuggingFace token)
+#   - BF16 checkpoint pre-fetched to EFS (~1.3 TB)
+#   - EFA device plugin on both p6 and p5 nodes
+#   - Grove operator with PodClique CRDs installed
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  # Short name required: Grove PodClique naming = pcs + pcsg + pclq ≤ 45 chars
+  # 'dsr1-2x' (7) + 'vllmdecodeworker' (16) + 'vllmdecodeworker-ldr' (20) = 43 ✓
+  name: dsr1-2x
+  namespace: dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 20
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.8.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p6-b200-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 180
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            # --- GPU/NCCL system (Blackwell B200) ---
+            - name: NCCL_CUMEM_ENABLE
+              value: "1"
+            - name: NCCL_NVLS_ENABLE
+              value: "1"
+            - name: NVIDIA_GDRCOPY
+              value: "1"
+            - name: NVSHMEM_IB_ENABLE_IBGDA
+              value: "1"
+            - name: VLLM_SKIP_P2P_CHECK
+              value: "1"
+            # --- vLLM MoE / EP (NVFP4 on Blackwell) ---
+            - name: VLLM_USE_FLASHINFER_MOE_FP4
+              value: "1"
+            - name: VLLM_FLASHINFER_MOE_BACKEND
+              value: "latency"
+            - name: VLLM_RANDOMIZE_DP_DUMMY_INPUTS
+              value: "1"
+            - name: VLLM_USE_NCCL_SYMM_MEM
+              value: "1"
+            - name: VLLM_ENABLE_MOE_DP_CHUNK
+              value: "0"
+            - name: VLLM_ENABLE_FUSED_MOE_ACTIVATION_CHUNKING
+              value: "0"
+            # --- Attention ---
+            - name: VLLM_ATTENTION_BACKEND
+              value: "FLASHINFER_MLA"
+            - name: VLLM_MLA_FP8_PROJ
+              value: "1"
+            # --- TCP KV cache transfer to decode nodes (no EFA) ---
+            - name: GLOO_SOCKET_IFNAME
+              value: "eth0"
+            - name: NCCL_SOCKET_IFNAME
+              value: "eth0"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "nvidia/DeepSeek-R1-0528-NVFP4-v2"
+            - "--is-prefill-worker"
+            - "--tensor-parallel-size"
+            - "8"
+            - "--enable-expert-parallel"
+            - "--all2all-backend"
+            - "allgather_reducescatter"
+            - "--kv-cache-dtype"
+            - "fp8"
+            - "--max-model-len"
+            - "8192"
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.85"
+            - "--max-num-batched-tokens"
+            - "65536"
+            - "--max-num-seqs"
+            - "1024"
+            - "--enforce-eager"
+            - "--disable-custom-all-reduce"
+            - "--no-enable-prefix-caching"
+            - "--swap-space"
+            - "16"
+            - "--async-scheduling"
+            - "--dyn-reasoning-parser"
+            - "deepseek_r1"
+            - "--safetensors-load-strategy"
+            - "eager"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      multinode:
+        nodeCount: 2
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        # Per-node resources: 8 GPUs × 2 nodes = 16 total (Grove multinode)
+        # Each p5 has 8 H100 80GB + NVSwitch
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 240
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          env:
+            # H100 (Hopper) — no Blackwell-specific MLA optimizations
+            # NVLink/NVSwitch within each node, TCP between nodes
+            - name: NCCL_NVLS_ENABLE
+              value: "1"
+            - name: GLOO_SOCKET_IFNAME
+              value: "eth0"
+            - name: NCCL_SOCKET_IFNAME
+              value: "eth0"
+            # Ray DAG: overlap compute and communication for multi-node TP
+            - name: VLLM_USE_RAY_COMPILED_DAG_OVERLAP_COMM
+              value: "1"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "deepseek-ai/DeepSeek-R1-0528"
+            # TP=16 across 2× p5 nodes (8 GPUs each)
+            - "--tensor-parallel-size"
+            - "16"
+            - "--enable-expert-parallel"
+            - "--kv-cache-dtype"
+            - "fp8"
+            - "--quantization"
+            - "fp8"
+            - "--max-model-len"
+            - "8192"
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.90"
+            - "--max-num-seqs"
+            - "1024"
+            - "--enforce-eager"
+            - "--dyn-reasoning-parser"
+            - "deepseek_r1"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

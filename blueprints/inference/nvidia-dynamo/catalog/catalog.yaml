@@ -588,6 +588,83 @@ entries:
     validation_status: pending
     hardware: "p6-b200 (TP=8 single node)"
 
+  # DeepSeek R1 671B disaggregated prefill/decode on B200 (TCP)
+  - id: showcase-deepseek-r1-disagg-p6
+    name: deepseek-r1-disagg-p6
+    path: models/deepseek/vllm-deepseek-r1-disagg-p6.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "2x p6-b200.48xlarge (16x B200); hf-token-secret; p6-b200-nvidia NodePool"
+    notes: "DeepSeek R1 671B disaggregated prefill/decode on B200 (TCP KV transfer). Benchmark Exp 2."
+    validation_status: experimental
+    hardware: "2x p6-b200.48xlarge (16x B200, TP=8 per worker)"
+
+  # DeepSeek R1 671B disaggregated prefill/decode on B200 (EFA RDMA)
+  - id: showcase-deepseek-r1-disagg-efa-p6
+    name: dsr1-disagg-efa-p6
+    path: models/deepseek/vllm-deepseek-r1-disagg-efa-p6.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "2x p6-b200.48xlarge (16x B200); EFA; hf-token-secret; p6-b200-nvidia NodePool"
+    notes: "DeepSeek R1 671B disaggregated with EFA RDMA KV transfer. Benchmark Exp 2b. 5/5 tests PASS. Karpenter v1.8.1 provisions EFA-enabled nodes dynamically. TTFT=62ms (c1), ITL=25ms, 40 tok/s per user."
+    validation_status: validated
+    hardware: "2x p6-b200.48xlarge (16x B200, TP=8 per worker, EFA)"
+    test_date: "2026-03-23"
+
+  # DeepSeek R1 671B heterogeneous: B200 NVFP4 prefill + g7e RTX PRO 6000 NVFP4 decode (TCP)
+  - id: showcase-deepseek-r1-hetero-p6-g7e
+    name: deepseek-r1-hetero
+    path: models/deepseek/vllm-deepseek-r1-heterogeneous-p6-g7e.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "1x p6-b200.48xlarge + 1x g7e.48xlarge; hf-token-secret"
+    notes: "BLOCKED: g7e decode worker OOM/engine crash. g7e.48xlarge (96GB GDDR7) cannot fit 671B NVFP4 + FP8 KV cache at gpu-mem=0.90. Karpenter provisions g7e on-demand successfully. Fixed: removed --quantization nvfp4 (model config has modelopt_fp4)."
+    validation_status: blocked
+    hardware: "p6-b200.48xlarge (prefill) + g7e.48xlarge (decode)"
+    test_date: "2026-03-23"
+
+  # DeepSeek R1 671B heterogeneous: B200 NVFP4 prefill + g7e RTX PRO 6000 NVFP4 decode (EFA RDMA)
+  - id: showcase-deepseek-r1-hetero-efa-p6-g7e
+    name: dsr1-hetero-efa-p6-g7e
+    path: models/deepseek/vllm-deepseek-r1-heterogeneous-efa-p6-g7e.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "1x p6-b200.48xlarge + 1x g7e.48xlarge; EFA; hf-token-secret"
+    notes: "BLOCKED: same g7e OOM as TCP variant. EFA provisioning is dynamic (Karpenter v1.8.1). Blocked by g7e 96GB GPU memory for 671B model."
+    validation_status: blocked
+    hardware: "p6-b200.48xlarge (prefill, EFA) + g7e.48xlarge (decode, EFA)"
+    test_date: "2026-03-23"
+
+  # showcase-deepseek-r1-hetero-p6-p5 DELETED: 671B FP8 (78GiB/GPU) > H100 80GiB. OOM on 1×p5. Replaced by 2x variant.
+
+  # DeepSeek R1 671B heterogeneous: B200 NVFP4 prefill + 2×H100 FP8 decode (TCP)
+  - id: showcase-deepseek-r1-hetero-p6-p5-2x
+    name: dsr1-hetero-p6-p5-2x
+    path: models/deepseek/vllm-deepseek-r1-heterogeneous-p6-p5-2x.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "1x p6-b200.48xlarge + 2x p5.48xlarge; multi-node scheduling (LWS/Grove); hf-token-secret"
+    notes: "Heterogeneous disagg TCP: NVFP4 prefill (B200, 44GiB/GPU) + FP8 decode (2×H100 TP=16, 39GiB/GPU). Requires multi-node scheduling."
+    validation_status: pending
+    hardware: "p6-b200.48xlarge (prefill) + 2x p5.48xlarge (decode, TP=16)"
+
+  # DeepSeek R1 671B heterogeneous: B200 NVFP4 prefill + 2×H100 FP8 decode (EFA RDMA)
+  - id: showcase-deepseek-r1-hetero-efa-p6-p5-2x
+    name: dsr1-het-efa-p6p5-2x
+    path: models/deepseek/vllm-deepseek-r1-heterogeneous-efa-p6-p5-2x.yaml
+    backend: vllm
+    tier: model-showcase
+    category: DeepSeek
+    prereqs: "1x p6-b200.48xlarge + 2x p5.48xlarge; EFA; multi-node scheduling (LWS/Grove); hf-token-secret"
+    notes: "Heterogeneous disagg EFA: NVFP4 prefill (B200) + FP8 decode (2×H100 TP=16). EFA RDMA for KV cache + TP all-reduce."
+    validation_status: pending
+    hardware: "p6-b200.48xlarge (prefill, EFA) + 2x p5.48xlarge (decode, TP=16, EFA)"
+
   # DeepSeek V3.2 685B multi-node (requires SM90 for FlashMLA)
   - id: showcase-deepseek-v3.2-multinode
     path: models/deepseek/vllm-deepseek-v3.2-multinode.yaml
