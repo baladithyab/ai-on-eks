@@ -1,0 +1,15 @@
+# Shared model cache PVC for all Dynamo workloads
+# Requires an EFS StorageClass (efs-sc-dynamic) to be available.
+# Apply before deploying any DGD: kubectl apply -f pvc.yaml -n dynamo-system
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dynamo-model-cache
+  namespace: dynamo-system
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-sc-dynamic
+  resources:
+    requests:
+      storage: 500Gi

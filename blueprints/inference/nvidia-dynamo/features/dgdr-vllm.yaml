@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM DynamoGraphDeploymentRequest (DGDR) - Online Profiling
+#
+# Automates profiling and deployment:
+# 1. Runs AIPerf profiling (2-4 hours)
+# 2. Finds optimal configuration for SLA targets
+# 3. Auto-creates a DynamoGraphDeployment
+#
+# Prerequisites:
+#   - kube-prometheus-stack installed
+#   - Secret: hf-token-secret
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeploymentRequest
+metadata:
+  name: vllm-online
+  namespace: dynamo-system
+spec:
+  model: Qwen/Qwen3-0.6B
+  backend: vllm
+
+  profilingConfig:
+    profilerImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1"
+    config:
+      sweep:
+        use_ai_configurator: false
+      sla:
+        isl: 3000
+        osl: 150
+        ttft: 200.0
+        itl: 20.0
+
+  deploymentOverrides:
+    workersImage: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1"
+
+  autoApply: true

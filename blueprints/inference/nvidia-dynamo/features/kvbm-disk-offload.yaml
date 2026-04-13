@@ -1,0 +1,208 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# vLLM Disaggregated with KVBM CPU and Disk Offloading
+# Extends KV cache capacity using CPU memory and disk storage
+# Disk offload filtering enabled by default to extend SSD lifespan
+#
+# GPU: g5-nvidia (A10G 24GB) with reduced CPU/disk cache sizes
+# For production, use g6e-nvidia (L40S) with larger cache configs
+#
+# PVC Requirements:
+#   - dynamo-model-cache: Shared model cache (or modelexpress-pvc, patched by deploy.sh)
+#   - dynamo-kvbm: Dedicated KVBM disk cache PVC (created below)
+#
+# For production, consider gp3 (EBS) per-worker PVCs for lower latency.
+# EFS is used here for ReadWriteMany support across prefill/decode workers.
+
+---
+# KVBM disk cache PVC — shared between prefill and decode workers
+# Uses EFS for ReadWriteMany; for production low-latency, switch to gp3 per-worker PVCs
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dynamo-kvbm
+  namespace: dynamo-system
+  labels:
+    app.kubernetes.io/part-of: nvidia-dynamo
+    app.kubernetes.io/component: kvbm-disk-cache
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-sc-dynamic
+  resources:
+    requests:
+      storage: 1Ti
+---
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-disaggregated-kvbm-disk
+  namespace: dynamo-system
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+    - name: dynamo-kvbm
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.frontend
+          args:
+            - --http-port
+            - "8000"
+          resources:
+            requests:
+              cpu: "4"
+              memory: "8Gi"
+            limits:
+              cpu: "8"
+              memory: "16Gi"
+
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+        - name: dynamo-kvbm
+          mountPoint: /tmp/kvbm-cache
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "8"
+          memory: "20Gi"
+          gpu: "1"
+        limits:
+          cpu: "8"
+          memory: "24Gi"
+          gpu: "1"
+      envs:
+        # Disable shared memory transport to avoid broadcast deadlock
+        - name: UCX_TLS
+          value: "^mm"
+          # CPU cache size in GB (scale up on larger instances)
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "8"
+          # Disk cache size in GB (uses dynamo-kvbm PVC)
+        - name: DYN_KVBM_DISK_CACHE_GB
+          value: "20"
+          # Enable KVBM metrics (optional)
+        - name: DYN_KVBM_METRICS
+          value: "true"
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+            - --gpu-memory-utilization
+            - "0.85"
+            - --disable-log-requests
+            - --max-model-len
+            - "16384"
+            - --enforce-eager
+          # Disk cache volume mounted via DGD-level pvcs (dynamo-kvbm PVC)
+          # No emptyDir needed — the operator mounts dynamo-kvbm at /tmp/kvbm-cache
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+        - name: dynamo-kvbm
+          mountPoint: /tmp/kvbm-cache
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "16"
+          memory: "200Gi"
+        limits:
+          gpu: "1"
+          memory: "250Gi"
+      envs:
+        # Disable shared memory transport to avoid broadcast deadlock
+        - name: UCX_TLS
+          value: "^mm"
+          # CPU cache size in GB (required)
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "100"
+          # Disk cache size in GB (optional, enables disk offloading)
+        - name: DYN_KVBM_DISK_CACHE_GB
+          value: "200"
+          # Disable disk offload filtering to offload all blocks (optional)
+          # Default: false (filtering enabled to extend SSD lifespan)
+          # - name: DYN_KVBM_DISABLE_DISK_OFFLOAD_FILTER
+          #   value: "false"
+          # Enable KVBM metrics (optional)
+        - name: DYN_KVBM_METRICS
+          value: "true"
+          # KVBM metrics port (optional, default: 6880)
+          # - name: DYN_KVBM_METRICS_PORT
+          #   value: "6880"
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+            - --disaggregation-mode
+            - prefill
+            - --kv-transfer-config
+            - '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+            - --gpu-memory-utilization
+            - "0.85"
+            - --disable-log-requests
+            - --max-model-len
+            - "16384"
+            - --enforce-eager
+            - --kv-transfer-config
+            - '{"kv_connector":"PdConnector","kv_role":"kv_both","kv_connector_extra_config":{"connectors":[{"kv_connector":"DynamoConnector","kv_connector_module_path":"kvbm.vllm_integration.connector","kv_role":"kv_both"},{"kv_connector":"NixlConnector","kv_role":"kv_both"}]},"kv_connector_module_path":"kvbm.vllm_integration.connector"}'
+          # Disk cache volume mounted via DGD-level pvcs (dynamo-kvbm PVC)
+          # No emptyDir needed — the operator mounts dynamo-kvbm at /tmp/kvbm-cache
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

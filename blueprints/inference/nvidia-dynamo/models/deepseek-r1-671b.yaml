@@ -1,0 +1,269 @@
+# DeepSeek R1 (671B MoE) — Disaggregated Prefill/Decode
+#
+# IMPORTANT: DeepSeek R1 uses Multi-head Latent Attention (MLA) which
+# requires Hopper (H100/H200) or Blackwell (B200/B300) compute capability.
+# vLLM has NO MLA backend for Ada Lovelace (RTX PRO 6000) or earlier GPUs.
+# This blueprint will NOT work on g7e, g6e, g5, or any pre-Hopper hardware.
+#
+# Hardware options (only Hopper/Blackwell will work for MLA):
+#   p5-nvidia:      2× p5.48xlarge     (8× H100 80GB  = 640GB)  — use FP8 quant
+#   p5e-nvidia:     2× p5e.48xlarge    (8× H200 141GB = 1128GB) — BF16 or FP8
+#   p5en-nvidia:    2× p5en.48xlarge   (8× H200 141GB = 1128GB) — BF16 or FP8
+#   p6-b200-nvidia: 2× p6-b200.48xlarge (8× B200 180GB = 1440GB) — BF16 native
+#   p6-b300-nvidia: 2× p6-b300.48xlarge (8× B300 270GB = 2160GB) — BF16 native
+#
+# AVAILABILITY: As of 2026-04, H200 and Blackwell instances are extremely
+#   capacity-constrained in us-west-2. Check other regions (us-east-1, us-east-2)
+#   or request quota increases before deploying.
+#
+# Alternative for capacity-constrained environments:
+#   Use distilled variants which do NOT use MLA:
+#   - deepseek-ai/DeepSeek-R1-Distill-Llama-70B (uses standard attention)
+#   - deepseek-ai/DeepSeek-R1-Distill-Llama-8B  (works on A10G, tested)
+#   See: features/heterogeneous.yaml and engines/vllm/vllm-disaggregated.yaml
+#
+# Precision: FP8 quantized weights (default), FP8 KV cache
+# TP=8 on each worker, Expert Parallel enabled
+#
+# Prerequisites:
+#   - Karpenter NodePool: p5/p5e/p5en/p6-b200/p6-b300 (MUST be Hopper/Blackwell)
+#   - PVC: dynamo-model-cache (EFS-backed, ReadWriteMany)
+#   - Secret: hf-token-secret (HuggingFace token)
+#
+# Notes:
+#   - Model is 163 shards (~600GB on disk). First download takes 30-60 minutes.
+#   - Both workers download simultaneously; HF may rate-limit (429). Pods will
+#     retry automatically. Subsequent deploys use the EFS cache.
+#   - If pods crash with "Lock acquisition failed", delete stale locks:
+#     kubectl exec -it <any-worker-pod> -- find /models -name '*.lock' -delete
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: deepseek-r1-disagg
+  namespace: dynamo-system
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 20
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          # Must be Hopper/Blackwell for MLA support. Options:
+          #   p5en-nvidia (H200), p6-b200-nvidia (B200), p6-b300-nvidia (B300)
+          karpenter.sh/nodepool: p5en-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 180
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          env:
+            - name: VLLM_ATTENTION_BACKEND
+              value: "FLASHINFER_MLA"
+            - name: VLLM_MLA_FP8_PROJ
+              value: "1"
+            - name: NCCL_CUMEM_ENABLE
+              value: "1"
+            - name: NCCL_NVLS_ENABLE
+              value: "1"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "deepseek-ai/DeepSeek-R1-0528"
+            - "--tensor-parallel-size"
+            - "8"
+            - "--enable-expert-parallel"
+            - "--quantization"
+            - "fp8"
+            - "--kv-cache-dtype"
+            - "fp8"
+            - "--max-model-len"
+            - "8192"
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.90"
+            - "--max-num-seqs"
+            - "1024"
+            - "--dyn-reasoning-parser"
+            - "deepseek_r1"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      sharedMemory:
+        size: 64Gi
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 5
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 120
+      resources:
+        requests:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: 1024Gi
+          gpu: "8"
+      extraPodSpec:
+        nodeSelector:
+          # Must be Hopper/Blackwell for MLA support. Options:
+          #   p5en-nvidia (H200), p6-b200-nvidia (B200), p6-b300-nvidia (B300)
+          karpenter.sh/nodepool: p5en-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 30
+            failureThreshold: 180
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          env:
+            - name: VLLM_ATTENTION_BACKEND
+              value: "FLASHINFER_MLA"
+            - name: VLLM_MLA_FP8_PROJ
+              value: "1"
+            - name: NCCL_CUMEM_ENABLE
+              value: "1"
+            - name: NCCL_NVLS_ENABLE
+              value: "1"
+          command:
+            - python3
+          args:
+            - "-m"
+            - "dynamo.vllm"
+            - "--model"
+            - "deepseek-ai/DeepSeek-R1-0528"
+            - "--tensor-parallel-size"
+            - "8"
+            - "--enable-expert-parallel"
+            - "--quantization"
+            - "fp8"
+            - "--kv-cache-dtype"
+            - "fp8"
+            - "--max-model-len"
+            - "8192"
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.90"
+            - "--max-num-seqs"
+            - "1024"
+            - "--dyn-reasoning-parser"
+            - "deepseek_r1"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

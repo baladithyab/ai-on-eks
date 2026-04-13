@@ -1,0 +1,233 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# LLaVA-NeXT-Video 7B Video Processing Deployment with KVBM Long-Context Caching
+#
+# This is the recommended model for video understanding with NVIDIA Dynamo as it's
+# natively supported by the video_encode_worker.py pipeline.
+#
+# Architecture (from dynamo/examples/multimodal):
+#   HTTP → Processor → VideoEncodeWorker → VLMWorker (prefill+decode)
+#                   ↓                    ↓
+#              video_url             frames via RDMA
+#
+# Key Features:
+# - Native video understanding via raw frame processing
+# - KVBM three-tier caching: GPU → CPU (30GB) → Disk (50GB)
+# - Dynamic frame sampling (8 frames default)
+# - Extended context for video sequences
+#
+# GPU Target: g6e (L40S 48GB) via nodeSelector
+#
+# Test with:
+#   curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{
+#     "model": "llava-hf/LLaVA-NeXT-Video-7B-hf",
+#     "messages": [{"role": "user", "content": [
+#       {"type": "text", "text": "Describe what happens in this video"},
+#       {"type": "video_url", "video_url": {"url": "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4"}}
+#     ]}],
+#     "max_tokens": 100
+#   }'
+#
+# Test with:
+#   curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{
+#     "model": "llava-hf/LLaVA-NeXT-Video-7B-hf",
+#     "messages": [{"role": "user", "content": [
+#       {"type": "text", "text": "Describe what happens in this video"},
+#       {"type": "video_url", "video_url": {"url": "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4"}}
+#     ]}],
+#     "max_tokens": 100
+#   }'
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: llava-video
+  namespace: dynamo-system
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          # Uses vllm-runtime intentionally — multimodal frontend runs custom processor code from /workspace/examples/multimodal
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+
+    VideoEncodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+          # Skip UCX IB/RDMA devices — UCX fails on Bottlerocket NVLink devices
+          # due to memlock ulimit (8192 KB). TCP transport suffices for single-node.
+        - name: UCX_TLS
+          value: "tcp,cuda_copy,cuda_ipc"
+        - name: UCX_NET_DEVICES
+          value: "all"
+      componentType: worker
+      replicas: 1
+      sharedMemory:
+        size: 16Gi
+      resources:
+        requests:
+          cpu: "4"
+          memory: "32Gi"
+        limits:
+          gpu: "1"
+          memory: "48Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 180
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - pip install --force-reinstall --no-deps opencv-python-headless &&python3 components/video_encode_worker.py --model llava-hf/LLaVA-NeXT-Video-7B-hf --num-frames-to-sample 8
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    VLMWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      componentType: worker
+      replicas: 1
+      sharedMemory:
+        size: 16Gi
+      resources:
+        requests:
+          cpu: "8"
+          memory: "64Gi"
+        limits:
+          gpu: "1"
+          memory: "80Gi"
+      envs:
+        - name: DYN_KVBM_CPU_CACHE_GB
+          value: "30"
+        - name: DYN_KVBM_DISK_CACHE_GB
+          value: "50"
+        - name: DYN_KVBM_METRICS
+          value: "true"
+          # Skip UCX IB/RDMA devices — UCX fails on Bottlerocket NVLink devices
+          # due to memlock ulimit (8192 KB). TCP transport suffices for single-node.
+        - name: UCX_TLS
+          value: "tcp,cuda_copy,cuda_ipc"
+        - name: UCX_NET_DEVICES
+          value: "all"
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 180
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - pip install --force-reinstall --no-deps opencv-python-headless &&python3 components/worker.py --model llava-hf/LLaVA-NeXT-Video-7B-hf --worker-type prefill --max-model-len 8192 --gpu-memory-utilization 0.85
+        volumes:
+          - name: kvbm-disk-cache
+            emptyDir:
+              sizeLimit: 60Gi
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    Processor:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "16Gi"
+        limits:
+          gpu: "1"
+          memory: "24Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          workingDir: /workspace/examples/multimodal
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /live
+              port: 9090
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 180
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - 'pip install --force-reinstall --no-deps opencv-python-headless &&python3 components/processor.py --model llava-hf/LLaVA-NeXT-Video-7B-hf --prompt-template "USER: <video>\n<prompt> ASSISTANT:"'
+        nodeSelector:
+          karpenter.sh/nodepool: g6e-nvidia
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

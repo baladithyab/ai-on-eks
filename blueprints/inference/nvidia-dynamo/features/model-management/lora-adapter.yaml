@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example: LoRA Adapter Management with DynamoModel
+#
+# This example demonstrates how to deploy LoRA adapters on top of running
+# base models using the DynamoModel CRD. LoRA adapters enable fine-tuned
+# model capabilities without restarting pods.
+#
+# Prerequisites:
+# 1. A running DynamoGraphDeployment with modelRef configured
+# 2. Worker pods must be ready and serving the base model
+# 3. Access to the model source (S3 bucket or HuggingFace)
+
+---
+# Example 1: LoRA Adapter from S3
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: customer-support-lora
+  namespace: dynamo-system
+spec:
+  # Unique identifier for this LoRA adapter
+  modelName: customer-support-v1
+
+  # Base model that this LoRA extends - must match modelRef.name in DGD
+  baseModelName: meta-llama/Llama-3.3-70B-Instruct
+
+  # Specify this is a LoRA adapter
+  modelType: lora
+
+  # Source location for LoRA weights
+  source:
+    # S3 URI format: s3://bucket-name/path/to/lora
+    uri: s3://my-models-bucket/loras/customer-support/v1
+
+---
+# Example 2: LoRA Adapter from HuggingFace Hub
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: multilingual-lora
+  namespace: dynamo-system
+spec:
+  modelName: multilingual-adapter
+  baseModelName: Qwen/Qwen3-0.6B
+  modelType: lora
+  source:
+    # HuggingFace URI format: hf://org/model@revision (revision is optional)
+    uri: hf://myorg/qwen-multilingual-lora@v1.0.0
+
+---
+# Example 3: Multiple LoRA Adapters on Same Base Model
+# You can deploy multiple LoRA adapters that share the same base model.
+# Each adapter will be loaded on all pods serving that base model.
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: code-gen-lora
+  namespace: dynamo-system
+spec:
+  modelName: code-generation-adapter
+  baseModelName: Qwen/Qwen3-0.6B
+  modelType: lora
+  source:
+    uri: s3://my-models-bucket/loras/code-generation/latest
+
+---
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: summarization-lora
+  namespace: dynamo-system
+spec:
+  modelName: summarization-adapter
+  baseModelName: Qwen/Qwen3-0.6B
+  modelType: lora
+  source:
+    uri: s3://my-models-bucket/loras/summarization/latest

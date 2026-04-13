@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# K8s Job template for in-cluster AIPerf benchmarking.
+# Placeholders (__VAR__) are replaced by benchmark.sh at runtime.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: __JOB_NAME__
+  namespace: __NAMESPACE__
+  labels:
+    app.kubernetes.io/name: dynamo-benchmark
+    app.kubernetes.io/component: benchmark
+    app.kubernetes.io/part-of: nvidia-dynamo
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dynamo-benchmark
+        app.kubernetes.io/component: benchmark
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: aiperf
+        image: __IMAGE__
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+        resources:
+          requests:
+            cpu: "4"
+            memory: "8Gi"
+          limits:
+            cpu: "8"
+            memory: "16Gi"
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token-secret
+              key: HF_TOKEN
+              optional: true
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          echo "=== AIPerf Benchmark ==="
+          echo "Model:       __MODEL__"
+          echo "URL:         __URL__"
+          echo "ISL:         __ISL__"
+          echo "OSL:         __OSL__"
+          echo "Concurrency: __CONCURRENCY__"
+          echo "Requests:    __REQUEST_COUNT__"
+          echo "========================"
+
+          aiperf profile \
+            --model "__MODEL__" \
+            --url "__URL__" \
+            --endpoint-type chat \
+            --endpoint /v1/chat/completions \
+            --streaming \
+            --synthetic-input-tokens-mean __ISL__ \
+            --synthetic-input-tokens-stddev 0 \
+            --output-tokens-mean __OSL__ \
+            --output-tokens-stddev 0 \
+            --extra-inputs max_tokens:__OSL__ \
+            --extra-inputs ignore_eos:true \
+            --concurrency __CONCURRENCY__ \
+            --request-count __REQUEST_COUNT__ \
+            --warmup-request-count $(( __CONCURRENCY__ * 2 )) \
+            --artifact-dir /tmp/results \
+            --ui simple
+
+          echo "=== Benchmark Complete ==="

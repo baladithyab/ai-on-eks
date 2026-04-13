@@ -1,0 +1,149 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example: vLLM Aggregated Deployment with LoRA Support
+#
+# This DynamoGraphDeployment enables LoRA adapter loading at runtime.
+# Apply this first, then apply lora-adapter.yaml to register LoRA adapters.
+#
+# End-to-end steps:
+#   1. kubectl apply -f vllm-aggregated-lora.yaml   # Deploy engine with LoRA enabled
+#   2. kubectl apply -f base-model.yaml              # (Optional) Register base model
+#   3. kubectl apply -f lora-adapter.yaml            # Register LoRA adapter(s)
+#
+# Prerequisites:
+#   - Dynamo CRDs and operator installed
+#   - GPU nodes available (nodeSelector: karpenter.sh/nodepool: g5-nvidia)
+#   - Secret 'hf-token-secret' with HuggingFace token (for gated models)
+#
+# LoRA Configuration:
+#   --enable-lora       Activates vLLM LoRA support
+#   --max-loras 4       Max concurrent LoRA adapters in memory
+#   --max-lora-rank 64  Max LoRA rank supported (higher = more expressive but more VRAM)
+#   DYN_LORA_ENABLED    Enables Dynamo LoRA management API on the worker
+#
+# Upstream reference: dynamo/examples/backends/vllm/deploy/lora/agg_lora.yaml
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-aggregated-lora
+  namespace: dynamo-system
+spec:
+  backendFramework: vllm
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 60
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - python3 -m dynamo.frontend --http-port 8000
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      componentType: worker
+      # modelRef links this worker to DynamoModel CRDs with matching baseModelName
+      modelRef:
+        name: Qwen/Qwen3-0.6B
+      replicas: 1
+      envs:
+        # Enable Dynamo LoRA management API (load/unload via /v1/loras)
+      - name: DYN_LORA_ENABLED
+        value: "true"
+        # Local cache path for downloaded LoRA weights
+      - name: DYN_LORA_PATH
+        value: "/tmp/dynamo_loras"
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 5
+        timeoutSeconds: 30
+        failureThreshold: 1
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 10
+        timeoutSeconds: 30
+        failureThreshold: 60
+      resources:
+        requests:
+          cpu: "10"
+          memory: 20Gi
+          gpu: "1"
+        limits:
+          cpu: "10"
+          memory: 20Gi
+          gpu: "1"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          workingDir: /workspace/components/backends/vllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - >-
+            python3 -m dynamo.vllm
+            --model Qwen/Qwen3-0.6B
+            --enable-lora
+            --max-loras 4
+            --max-lora-rank 64
+            --enforce-eager
+            2>&1 | tee /tmp/vllm-lora.log
