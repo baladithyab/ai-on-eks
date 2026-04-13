@@ -1,5 +1,29 @@
+# Dynamo Platform Helm Values (templated by Terraform)
+# See: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+
+# --- Component Installation (subchart mode) ---
+global:
+  grove:
+    install: ${grove_install}
+    enabled: ${grove_adopt}
+  kai-scheduler:
+    install: ${kai_install}
+    enabled: ${kai_adopt}
+  etcd:
+    install: ${etcd_install}
+
+# --- NATS Messaging ---
+nats:
+  enabled: ${nats_enabled}
+
+# --- Operator Configuration ---
 dynamo-operator:
   upgradeCRD: true
+  discoveryBackend: "${discovery_backend}"
+  etcdAddr: "${etcd_addr}"
+  modelExpressURL: "${model_express_url}"
+  nats:
+    enabled: ${nats_enabled}
   dynamo:
     metrics:
-      prometheusEndpoint: ${prometheus_endpoint}
+      prometheusEndpoint: "${prometheus_endpoint}"

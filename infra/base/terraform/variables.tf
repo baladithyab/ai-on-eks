@@ -609,6 +609,98 @@ variable "dynamo_platform_namespace" {
   default     = "dynamo-system"
 }
 
+# --- Dynamo Component Installation (subchart mode) ---
+variable "dynamo_grove_install" {
+  description = "Deploy Grove as a Dynamo platform subchart (v0.1.0-alpha.6). Mutually exclusive with dynamo_grove_adopt unless you want both."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_kai_install" {
+  description = "Deploy KAI Scheduler as a Dynamo platform subchart (v0.13.0-rc1)"
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_etcd_install" {
+  description = "Deploy etcd as a Dynamo platform subchart. Requires discoveryBackend=etcd. Default K8s-native discovery does not need this."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_nats_enabled" {
+  description = "Enable NATS messaging for Dynamo operator communication (default transport)"
+  type        = bool
+  default     = true
+}
+
+# --- Dynamo Component Adoption (external/standalone mode) ---
+variable "dynamo_grove_adopt" {
+  description = "Enable Grove integration using an externally deployed Grove instance. Set to true when Grove is deployed standalone."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_kai_adopt" {
+  description = "Enable KAI Scheduler integration using an externally deployed KAI instance. Set to true when KAI is deployed standalone."
+  type        = bool
+  default     = false
+}
+
+variable "dynamo_discovery_backend" {
+  description = "Service discovery backend: 'kubernetes' (default, K8s-native) or 'etcd' (legacy, requires etcd)"
+  type        = string
+  default     = "kubernetes"
+  validation {
+    condition     = contains(["kubernetes", "etcd"], var.dynamo_discovery_backend)
+    error_message = "Must be 'kubernetes' or 'etcd'."
+  }
+}
+
+variable "dynamo_etcd_addr" {
+  description = "External etcd address for BYO etcd (e.g., 'http://etcd.etcd-ns.svc.cluster.local:2379'). Only used when dynamo_discovery_backend='etcd' and dynamo_etcd_install=false."
+  type        = string
+  default     = ""
+}
+
+variable "dynamo_model_express_url" {
+  description = "External ModelExpress server URL. Leave empty to disable (default: EFS shared PVC for model storage)."
+  type        = string
+  default     = ""
+}
+
+# --- Standalone Component Versions (for adopt mode with standalone ArgoCD apps) ---
+variable "grove_standalone_version" {
+  description = "Grove Helm chart version for standalone deployment"
+  type        = string
+  default     = "v0.1.0-alpha.7"
+}
+
+variable "kai_standalone_version" {
+  description = "KAI Scheduler Helm chart version for standalone deployment"
+  type        = string
+  default     = "v0.13.0"
+}
+
+# --- Observability ---
+variable "enable_grafana_tempo" {
+  description = "Deploy Grafana Tempo for distributed tracing"
+  type        = bool
+  default     = false
+}
+
+variable "grafana_tempo_version" {
+  description = "Grafana Tempo Helm chart version"
+  type        = string
+  default     = "1.18.0"
+}
+
+variable "grafana_tempo_namespace" {
+  description = "Namespace for Grafana Tempo"
+  type        = string
+  default     = "tempo"
+}
+
 # Enable SOCI snapshotter parallel pull/unpack mode
 variable "enable_soci_snapshotter" {
   description = "Enable SOCI snapshotter parallel pull/unpack mode"

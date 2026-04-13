@@ -21,7 +21,7 @@ locals {
     for name in local.ec2nodeclassnames :
     name => templatefile("${path.module}/karpenter-resources/templates/nodepool.tpl", {
       name            = name,
-      instance_family = split("-", name)[0]
+      instance_family = join("-", slice(split("-", name), 0, length(split("-", name)) - 1))
       ami_family      = var.ami_family
       taints          = contains(split("-", name), "nvidia") ? "nvidia.com/gpu" : contains(split("-", name), "neuron") ? "aws.amazon.com/neuron" : ""
     })
