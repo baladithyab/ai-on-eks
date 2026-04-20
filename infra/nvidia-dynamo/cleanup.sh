@@ -11,6 +11,20 @@ for arg in "$@"; do
   esac
 done
 
+# --- Auto-reexec under script(1) if no TTY ---
+# The base cleanup.sh uses `tee /dev/tty` which fails in non-interactive
+# environments (CI, background shells, etc). Re-exec under script(1) to
+# allocate a pseudo-terminal so the base script runs unattended.
+if [[ ! -c /dev/tty ]] && [[ "${DYNAMO_CLEANUP_UNDER_SCRIPT:-}" != "1" ]]; then
+  if command -v script &>/dev/null; then
+    echo "[INFO] No TTY detected — re-executing under script(1) for pty allocation"
+    export DYNAMO_CLEANUP_UNDER_SCRIPT=1
+    exec script -q -e -c "$0 $*" /dev/null
+  else
+    echo "[WARN] No TTY and script(1) unavailable — base cleanup may emit tee errors"
+  fi
+fi
+
 echo "[INFO] NVIDIA Dynamo Stack Cleanup"
 echo ""
 

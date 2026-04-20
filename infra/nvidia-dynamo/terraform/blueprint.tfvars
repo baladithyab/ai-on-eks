@@ -34,8 +34,8 @@ dynamo_platform_version = "1.0.1"
 # --- Component Installation (subchart mode — platform deploys them) ---
 # When enabled, the Dynamo platform Helm chart deploys these as subcharts.
 # Use this for quick-start / all-in-one deployments.
-# dynamo_grove_install           = false  # Deploy Grove v0.1.0-alpha.6 as subchart
-# dynamo_kai_install             = false  # Deploy KAI v0.13.0-rc1 as subchart
+dynamo_grove_install = true # Deploy Grove v0.1.0-alpha.6 as subchart
+dynamo_kai_install   = true # Deploy KAI v0.13.0-rc1 as subchart
 # dynamo_etcd_install            = false  # Deploy etcd (only for legacy discovery)
 
 # NATS is the only messaging transport in Dynamo v1.0.1 and is always enabled.
