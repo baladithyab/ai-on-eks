@@ -32,26 +32,26 @@ karpenter_additional_ec2nodeclassnames = ["p5-nvidia", "p5e-nvidia", "p5en-nvidi
 dynamo_platform_version = "1.0.1"
 
 # --- Component Installation (subchart mode — platform deploys them) ---
-# When enabled, the Dynamo platform Helm chart deploys these as subcharts.
-# Use this for quick-start / all-in-one deployments.
-dynamo_grove_install = true # Deploy Grove v0.1.0-alpha.6 as subchart
-dynamo_kai_install   = true # Deploy KAI v0.13.0-rc1 as subchart
-# dynamo_etcd_install            = false  # Deploy etcd (only for legacy discovery)
+# Dynamo-bundled versions have known issues:
+#   Grove v0.1.0-alpha.6: cert-rotation restart loop (fixed in alpha.7)
+#   KAI v0.13.0-rc1: release candidate (v0.13.0 stable available)
+# Subchart mode disabled in favor of standalone/adopt mode below.
+# dynamo_grove_install           = false  # Grove v0.1.0-alpha.6 as subchart
+# dynamo_kai_install             = false  # KAI v0.13.0-rc1 as subchart
+# dynamo_etcd_install            = false  # etcd (only for legacy discovery)
 
 # NATS is the only messaging transport in Dynamo v1.0.1 and is always enabled.
 # The toggle exists for documentation; disabling it would break operator communication.
 # dynamo_nats_enabled            = true
 
 # --- Standalone Component Deployment (independent ArgoCD apps) ---
-# When enabled, deploys Grove/KAI as separate ArgoCD applications at the
-# standalone version (below). Use this for production BYO deployments where
-# you want version control independent of the Dynamo platform chart.
-# After deploying standalone, set the corresponding _adopt flag to tell
-# the Dynamo operator to use the external instance.
-# dynamo_grove_adopt             = false  # Enable Grove integration (external instance)
-# dynamo_kai_adopt               = false  # Enable KAI integration (external instance)
-# grove_standalone_version       = "v0.1.0-alpha.7"
-# kai_standalone_version         = "v0.13.0"
+# Deploys Grove/KAI as separate ArgoCD applications at stable standalone
+# versions, then tells the Dynamo operator to adopt them as external instances.
+# This avoids Grove alpha.6 cert bugs and uses KAI stable (not RC).
+dynamo_grove_adopt       = true
+dynamo_kai_adopt         = true
+grove_standalone_version = "v0.1.0-alpha.7"
+kai_standalone_version   = "v0.13.0"
 
 # --- Discovery & External Services ---
 # dynamo_discovery_backend       = "kubernetes"  # "kubernetes" (default) or "etcd"
