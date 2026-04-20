@@ -112,12 +112,12 @@ spec:
         failureThreshold: 180
       resources:
         requests:
-          cpu: "48"
-          memory: "400Gi"
+          cpu: "32"
+          memory: "200Gi"
           gpu: "4"
         limits:
-          cpu: "48"
-          memory: "400Gi"
+          cpu: "32"
+          memory: "200Gi"
           gpu: "4"
       sharedMemory:
         size: 64Gi
