@@ -11,13 +11,15 @@ for arg in "$@"; do
   esac
 done
 
-# --- Auto-reexec under script(1) if no TTY ---
+# --- Auto-reexec under script(1) if no usable TTY ---
 # The base cleanup.sh uses `tee /dev/tty` which fails in non-interactive
-# environments (CI, background shells, etc). Re-exec under script(1) to
-# allocate a pseudo-terminal so the base script runs unattended.
-if [[ ! -c /dev/tty ]] && [[ "${DYNAMO_CLEANUP_UNDER_SCRIPT:-}" != "1" ]]; then
+# environments (CI, background shells, etc). /dev/tty may exist as a device
+# node but fail to open without a controlling terminal — so we test by
+# actually attempting to write to it. If that fails, re-exec under script(1)
+# to allocate a pseudo-terminal so the base script runs unattended.
+if [[ "${DYNAMO_CLEANUP_UNDER_SCRIPT:-}" != "1" ]] && ! (echo > /dev/tty) 2>/dev/null; then
   if command -v script &>/dev/null; then
-    echo "[INFO] No TTY detected — re-executing under script(1) for pty allocation"
+    echo "[INFO] No usable TTY — re-executing under script(1) for pty allocation"
     export DYNAMO_CLEANUP_UNDER_SCRIPT=1
     exec script -q -e -c "$0 $*" /dev/null
   else
@@ -131,7 +133,24 @@ done
 echo ""
 echo "[INFO] === Phase 3: Terraform destroy (via base template) ==="
 if [[ -f "./cleanup.sh" ]]; then
-  source ./cleanup.sh
+  # Run as subprocess (not source) so its failures don't terminate us via set -e.
+  # kubectl delete rayjob/rayservice fails when those CRDs are absent — harmless.
+  set +e
+  bash ./cleanup.sh
+  BASE_EXIT=$?
+  set -e
+  if [[ $BASE_EXIT -ne 0 ]]; then
+    echo "[WARN] Base cleanup exited with code ${BASE_EXIT} — retrying once more to catch stragglers"
+    set +e
+    bash ./cleanup.sh
+    BASE_EXIT=$?
+    set -e
+    if [[ $BASE_EXIT -ne 0 ]]; then
+      echo "[ERROR] Base cleanup failed after retry. Check terraform state:"
+      echo "        terraform -chdir=${LOCAL_DIR} state list"
+      exit 1
+    fi
+  fi
 else
   echo "[ERROR] Base cleanup.sh not found in terraform/_LOCAL/"
   exit 1
