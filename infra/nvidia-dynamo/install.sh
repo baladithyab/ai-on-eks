@@ -3,6 +3,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# --- Auto-reexec under script(1) if no usable TTY ---
+# Base install.sh uses `tee /dev/tty` which fails without a controlling
+# terminal. Re-exec under script(1) to allocate a pseudo-terminal.
+if [[ "${DYNAMO_INSTALL_UNDER_SCRIPT:-}" != "1" ]] && ! (echo > /dev/tty) 2>/dev/null; then
+  if command -v script &>/dev/null; then
+    echo "[INFO] No usable TTY — re-executing under script(1) for pty allocation"
+    export DYNAMO_INSTALL_UNDER_SCRIPT=1
+    exec script -q -e -c "$0 $*" /dev/null
+  else
+    echo "[WARN] No TTY and script(1) unavailable — base install may emit tee errors"
+  fi
+fi
+
 echo "[INFO] NVIDIA Dynamo v1.0.1 — Infrastructure Setup"
 echo ""
 
@@ -13,7 +26,17 @@ cp -r "${SCRIPT_DIR}/../base/terraform/"* "${SCRIPT_DIR}/terraform/_LOCAL/"
 cd "${SCRIPT_DIR}/terraform/_LOCAL"
 
 # --- Run base infrastructure install ---
-source ./install.sh
+# Run as subprocess (not source) so its failures don't terminate us via set -e.
+# Env vars we need afterward (kubectl config) come from terraform state on disk.
+set +e
+bash ./install.sh
+BASE_EXIT=$?
+set -e
+if [[ $BASE_EXIT -ne 0 ]]; then
+  echo "[ERROR] Base install failed with exit code ${BASE_EXIT}"
+  echo "        Check terraform state: terraform -chdir=${SCRIPT_DIR}/terraform/_LOCAL state list"
+  exit 1
+fi
 
 # --- Post-install: Configure kubectl ---
 echo ""

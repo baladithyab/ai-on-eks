@@ -14,8 +14,10 @@ spec:
     chart: dynamo-platform
     targetRevision: ${version}
     helm:
-      # dynamo operator manage CRDs via a pre-install/pre-upgrade hook Job via server-side apply.
-      skipCrds: true
+      # Dynamo operator manages its own CRDs via pre-install/pre-upgrade hook (server-side apply).
+      # Subcharts (Grove, KAI) install their CRDs from chart crds/ dirs — Helm needs to apply them.
+      # Set false when subcharts are enabled; true when only operator CRDs needed.
+      skipCrds: ${skip_crds}
       values: |
         ${user_values_yaml}
   destination:

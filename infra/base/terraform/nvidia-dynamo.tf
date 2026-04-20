@@ -20,6 +20,9 @@ resource "kubectl_manifest" "nvidia_dynamo_platform_yaml" {
     version          = var.dynamo_platform_version
     namespace        = var.dynamo_platform_namespace
     user_values_yaml = indent(8, yamlencode(local.nvidia_dynamo_values))
+    # When Grove or KAI subcharts are enabled, Helm must install their CRDs.
+    # Otherwise, the Dynamo operator's pre-install hook handles its own CRDs.
+    skip_crds = (var.dynamo_grove_install || var.dynamo_kai_install) ? "false" : "true"
   })
 
   depends_on = [
