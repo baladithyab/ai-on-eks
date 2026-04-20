@@ -9,9 +9,10 @@ are sized for their actual compute requirements.
 | Model | Parameters | Hardware | Blueprint | Notes |
 |-------|-----------|----------|-----------|-------|
 | **DeepSeek-R1** | 671B (MoE) | 2× p5e/p6-b200 | [deepseek-r1-671b.yaml](deepseek-r1-671b.yaml) | **Hopper/Blackwell only** (MLA) |
-| **DeepSeek-R1-Distill-Llama** | 70B | 2× g7e (B200) | [deepseek-r1-distill-llama-70b.yaml](deepseek-r1-distill-llama-70b.yaml) | **Works on any GPU** (GQA) |
-| **Llama 3.3** | 70B | 2× g7e (B200) | [llama-3.3-70b.yaml](llama-3.3-70b.yaml) | Requires Meta license |
-| **Qwen3-30B-A3B** | 30B (MoE) | 2× g7e (B200) | [qwen3-30b-a3b.yaml](qwen3-30b-a3b.yaml) | 128 experts, 8 active |
+| **DeepSeek-R1-Distill-Llama** | 70B | 1× g7e (RTX PRO) | [deepseek-r1-distill-llama-70b.yaml](deepseek-r1-distill-llama-70b.yaml) | **Works on any GPU** (GQA) |
+| **Llama 3.3** | 70B | 1× g7e (RTX PRO) | [llama-3.3-70b.yaml](llama-3.3-70b.yaml) | Requires Meta license |
+| **MiniMax-M2.7** | 230B/10B (MoE) | 1× g7e.48xlarge (TP=4) | [minimax-m2.7.yaml](minimax-m2.7.yaml) | Agentic + coding, MHA (no MLA) |
+| **Qwen3-30B-A3B** | 30B (MoE) | 1× g7e (RTX PRO) | [qwen3-30b-a3b.yaml](qwen3-30b-a3b.yaml) | 128 experts, 8 active |
 
 ## DeepSeek R1 — Architecture Note
 
@@ -30,11 +31,14 @@ Llama 3.3's standard GQA:
 ```bash
 cd blueprints/inference/nvidia-dynamo
 
-# Reasoning on widely-available hardware (g7e B200)
+# Reasoning on widely-available hardware (g7e RTX PRO)
 ./deploy.sh models/deepseek-r1-distill-llama-70b.yaml
 
 # MoE mixture of experts
 ./deploy.sh models/qwen3-30b-a3b.yaml
+
+# Agentic + coding MoE (MiniMax-M2.7 with tool-calling)
+./deploy.sh models/minimax-m2.7.yaml
 
 # Standard instruction following
 ./deploy.sh models/llama-3.3-70b.yaml
@@ -57,6 +61,7 @@ First-time model download takes minutes to hours depending on size:
 | Llama-3.3-70B | ~140GB | 5-15 min |
 | Qwen3-30B-A3B | ~60GB | 3-8 min |
 | DeepSeek-R1-Distill-70B | ~140GB | 5-15 min |
+| MiniMax-M2.7 (FP8) | ~230GB | 10-20 min |
 | DeepSeek-R1 671B | ~600GB | 30-60 min (HF may rate-limit 429) |
 
 Subsequent deploys reuse the EFS cache.

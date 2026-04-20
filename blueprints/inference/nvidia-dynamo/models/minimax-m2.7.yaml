@@ -1,0 +1,152 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# MiniMax-M2.7 (230B MoE, 10B active) — Agentic Workflows + Coding
+#
+# MiniMax-M2.7 is a sparse Mixture-of-Experts model optimized for coding and
+# complex agentic tasks. Unlike DeepSeek R1 (which uses MLA), MiniMax-M2.7
+# uses multi-head causal self-attention + RoPE + QK RMSNorm — standard
+# attention that works on any modern GPU including Ada Lovelace (RTX PRO 6000).
+#
+# Hardware: g7e.48xlarge (8× RTX PRO 96GB = 768GB VRAM, TP=4)
+#           or 4× H100/H200 on p5/p5e.48xlarge
+#
+# NOTE: Pure TP=8 is NOT supported by MiniMax-M2. Use TP=4 per worker.
+#       On g7e.48xlarge (8 GPUs), this means aggregated deployment with
+#       --tensor-parallel-size=4 uses 4 of 8 GPUs per pod.
+#
+# Features:
+#   - 230B total / 10B active parameters (4.3% activation rate)
+#   - Native FP8 quantization
+#   - Multi-Head Attention (MHA) — standard, no MLA
+#   - Tool-calling parser: minimax_m2
+#   - Reasoning parser: minimax_m2
+#   - 200K context window
+#
+# Prerequisites:
+#   - Karpenter NodePool: g7e-nvidia
+#   - PVC: dynamo-model-cache (EFS-backed, ReadWriteMany)
+#   - Secret: hf-token-secret (HuggingFace token)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: minimax-m2-7
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - "exit 0"
+        initialDelaySeconds: 120
+        periodSeconds: 60
+        timeoutSeconds: 30
+        failureThreshold: 10
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      replicas: 1
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 9090
+        periodSeconds: 30
+        timeoutSeconds: 30
+        failureThreshold: 180
+      resources:
+        requests:
+          cpu: "48"
+          memory: "400Gi"
+          gpu: "4"
+        limits:
+          cpu: "48"
+          memory: "400Gi"
+          gpu: "4"
+      sharedMemory:
+        size: 64Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g7e-nvidia
+        mainContainer:
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            periodSeconds: 60
+            failureThreshold: 300
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model MiniMaxAI/MiniMax-M2.7 \
+                --tensor-parallel-size 4 \
+                --max-model-len 32768 \
+                --gpu-memory-utilization 0.90 \
+                --trust-remote-code \
+                --dyn-tool-call-parser minimax_m2 \
+                --dyn-reasoning-parser minimax_m2 \
+                2>&1 | tee /tmp/vllm.log
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
