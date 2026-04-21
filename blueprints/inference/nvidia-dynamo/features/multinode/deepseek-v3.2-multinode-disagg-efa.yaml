@@ -1,0 +1,205 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# DeepSeek V3.2-Exp — Multi-Node + Disaggregated + EFA (production-grade)
+#
+# Combines three patterns in one blueprint:
+#   1. Disaggregation — separate Prefill and Decode worker services
+#   2. Multinode TP on the decode role — TP=16 split across 2 p5e.48xlarge
+#   3. EFA — for both NCCL all-reduce (TP) and NIXL KV cache transfer (disagg)
+#
+# DeepSeek V3.2-Exp architecture:
+#   - 671B total parameters, ~37B active (MoE)
+#   - Uses MLA + DeepSeek Sparse Attention (DSA) — REQUIRES Hopper/Blackwell.
+#     Will not work on Ada (RTX PRO 6000) or earlier.
+#   - Block-FP8 weights (~340 GB on disk)
+#   - 163 safetensor shards — prefetching is mandatory to avoid HF 429 loops
+#
+# Layout:
+#   Frontend:        1× dynamo-frontend pod (CPU only)
+#   PrefillWorker:   1× p5e.48xlarge (8× H200 141 GB), TP=8, single-node
+#   DecodeWorker:    2× p5e.48xlarge (8× H200 141 GB each), TP=16, MULTINODE
+#   Total: 3 p5e.48xlarge = 24 H200s, 3384 GB VRAM, all with EFA
+#
+# Why this split:
+#   - Decode is memory-bandwidth-bound and benefits most from EFA RDMA on
+#     cross-node all-reduce per token generation. Making decode multinode
+#     exercises the EFA benefit at every step.
+#   - Prefill is compute-bound; the KV cache it produces flows one-way to
+#     decode over NIXL (also EFA-accelerated). Single-node TP=8 per prefill
+#     pod is the cleanest minimum viable setup; scale out by increasing
+#     prefill replicas rather than adding cross-node complexity.
+#
+# Prerequisites:
+#   - Karpenter NodePool: p5e-nvidia (H200, EFA-capable)
+#   - aws-efa-k8s-device-plugin installed (default in blueprint.tfvars)
+#   - PVC: dynamo-model-cache (MUST prefetch first:
+#          ./scripts/prefetch-model.sh deepseek-ai/DeepSeek-V3.2-Exp
+#          allow 30-60 min; 340GB download)
+#   - Secret: hf-token-secret
+#   - Grove + KAI Scheduler installed (default in our infra via adopt mode)
+#
+# Capacity note:
+#   p5e is heavily capacity-constrained. If p5e.48xlarge cannot be
+#   provisioned, try p5en-nvidia (same H200 with enhanced network) or fall
+#   back to p5-nvidia (H100 80GB — tighter but feasible).
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: ds-v32-disagg-efa
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    PrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: NCCL_SOCKET_IFNAME
+          value: "^lo,docker,veth"
+        - name: NCCL_PROTO
+          value: simple
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      # Single-node TP=8 for prefill — fits in one p5e.48xlarge.
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          vpc.amazonaws.com/efa: "32"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          vpc.amazonaws.com/efa: "32"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5e-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1-efa-amd64
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model deepseek-ai/DeepSeek-V3.2-Exp \
+                --tensor-parallel-size 8 \
+                --enable-expert-parallel \
+                --kv-cache-dtype fp8 \
+                --max-model-len 8192 \
+                --trust-remote-code \
+                --gpu-memory-utilization 0.90 \
+                --disaggregation-mode prefill \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    DecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: NCCL_SOCKET_IFNAME
+          value: "^lo,docker,veth"
+        - name: NCCL_PROTO
+          value: simple
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      # Multi-node TP=16 for decode — 2× p5e.48xlarge gang-scheduled by Grove.
+      multinode:
+        nodeCount: 2
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          vpc.amazonaws.com/efa: "32"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          vpc.amazonaws.com/efa: "32"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5e-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1-efa-amd64
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model deepseek-ai/DeepSeek-V3.2-Exp \
+                --tensor-parallel-size 16 \
+                --enable-expert-parallel \
+                --kv-cache-dtype fp8 \
+                --max-model-len 8192 \
+                --trust-remote-code \
+                --gpu-memory-utilization 0.90 \
+                --disaggregation-mode decode \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
