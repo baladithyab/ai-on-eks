@@ -1,0 +1,127 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# TensorRT-LLM Aggregated — High-Performance Variant
+#
+# Tuned for maximum throughput:
+#   max_num_tokens: 8192 -> 16384
+#   max_batch_size: 16 -> 32 (batch + cuda_graph)
+#   kv_cache_config.free_gpu_memory_fraction: 0.85 -> 0.90
+#   worker resources: 10 CPU / 20Gi RAM -> 16 CPU / 32Gi RAM
+#
+# Probes are omitted — the Dynamo operator injects HTTP probes on /live and
+# /health (port 9090) via its WorkerDefaults.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trtllm-agg-hp-config
+  namespace: dynamo-system
+data:
+  agg.yaml: |
+    # High-Performance TensorRT-LLM Engine Configuration
+    tensor_parallel_size: 1
+    moe_expert_parallel_size: 1
+    enable_attention_dp: false
+    max_num_tokens: 16384
+    max_batch_size: 32
+    trust_remote_code: true
+    backend: pytorch
+    enable_chunked_prefill: true
+
+    kv_cache_config:
+      free_gpu_memory_fraction: 0.90
+
+    cuda_graph_config:
+      max_batch_size: 32
+# yamllint disable-line rule:document-start
+---
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: trtllm-aggregated-high-performance
+  namespace: dynamo-system
+spec:
+  backendFramework: trtllm
+  pvcs:
+  - name: dynamo-model-cache
+    create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          workingDir: /workspace/components/backends/trtllm
+          command:
+          - /bin/sh
+          - -c
+          args:
+          - python3 -m dynamo.frontend --http-port 8000
+    TRTLLMWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+      - name: dynamo-model-cache
+        mountPoint: /models
+      envs:
+      - name: HF_HOME
+        value: /models
+      - name: HF_HUB_CACHE
+        value: /models
+      componentType: worker
+      replicas: 1
+      resources:
+        requests:
+          cpu: "16"
+          memory: 32Gi
+          gpu: "1"
+        limits:
+          cpu: "16"
+          memory: 32Gi
+          gpu: "1"
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g5-nvidia
+        tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        volumes:
+        - name: trtllm-agg-hp-config
+          configMap:
+            name: trtllm-agg-hp-config
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:1.0.1
+          workingDir: /workspace/components/backends/trtllm
+          volumeMounts:
+          - name: trtllm-agg-hp-config
+            mountPath: /workspace/components/backends/trtllm/engine_configs
+            readOnly: true
+          command:
+          - python3
+          - -m
+          - dynamo.trtllm
+          args:
+          - --model-path
+          - Qwen/Qwen3-0.6B
+          - --served-model-name
+          - Qwen/Qwen3-0.6B
+          - --extra-engine-args
+          - engine_configs/agg.yaml

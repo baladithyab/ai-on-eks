@@ -38,6 +38,35 @@ cd blueprints/inference/nvidia-dynamo
 ./deploy.sh features/dgdr-vllm.yaml
 ```
 
+## Multi-replica ≠ multi-node tensor parallelism
+
+`multi-replica.yaml` provides **high availability and load balancing** using
+multiple independent worker replicas, each running the complete model at
+`--tensor-parallel-size 1`. This is not the same as cross-node tensor
+parallelism.
+
+### What multi-replica provides
+
+- Multiple independent workers, each loading the full model
+- Load balancing via KV-aware routing (`DYN_ROUTER_MODE=kv`)
+- Fault tolerance: service continues if individual workers fail
+- Cache-aware request distribution based on KV overlap
+
+### What multi-replica does NOT provide
+
+- Tensor parallelism across nodes (each worker is a single node)
+- Memory scaling for large models (70B+ needs each worker to fit the full model)
+- Cross-node model sharding
+
+### True cross-node tensor parallelism in Dynamo
+
+For models that don't fit on a single node, set `multinode.nodeCount > 1`
+on the worker service. The Dynamo operator auto-wires either Grove
+(preferred when enabled) or LWS (LeaderWorkerSet) to gang-schedule the
+leader/worker pods. No manual `PodClique` or `schedulerName` field is
+required — the operator creates them on your behalf. Reference example:
+`dynamo/examples/backends/vllm/deploy/disagg-multinode.yaml`.
+
 ## DGDR (DynamoGraphDeploymentRequest)
 
 DGDRs automate profiling and deployment. Apply a DGDR → Dynamo profiles the
@@ -68,6 +97,21 @@ All observability blueprints send OTEL traces to Grafana Tempo at
 `enable_grafana_tempo = true` in `blueprint.tfvars`.
 
 See [observability/README.md](observability/README.md) for details.
+
+## Troubleshooting
+
+Common issues when deploying disaggregated features:
+
+1. **NIXL transfer errors / slow disaggregation**: the base `:1.0.1` runtime
+   images lack libfabric, so NIXL falls back to TCP over UCX. Use the
+   `:1.0.1-efa-amd64` image variants on EFA-capable nodepools (`p5-nvidia`,
+   `p5e-nvidia`, `p5en-nvidia`) for full fabric bandwidth.
+2. **KV-aware routing not working**: verify the frontend has `DYN_ROUTER_MODE=kv`
+   and workers publish KV events on ZMQ port 20080.
+3. **Workers not discovering each other**: check NATS connectivity and that
+   the Dynamo operator pod is `Ready` in `dynamo-system`.
+4. **Throughput below expectations**: monitor GPU utilization via DCGM
+   exporter + Grafana; imbalanced prefill-to-decode ratio is a common cause.
 
 ## Related
 
