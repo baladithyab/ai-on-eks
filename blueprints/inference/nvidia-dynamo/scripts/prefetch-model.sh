@@ -181,7 +181,7 @@ echo ""
 echo "[INFO] Job created. Streaming logs..."
 echo ""
 
-# --- Wait for pod to start, then stream logs ---
+# --- Wait for pod to start, then stream logs in background ---
 for i in $(seq 1 30); do
   if kubectl get pods -n "$NAMESPACE" -l "app.kubernetes.io/instance=$JOB_NAME" --no-headers 2>/dev/null | grep -qv Pending; then
     break
@@ -189,16 +189,56 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-kubectl logs -n "$NAMESPACE" -l "app.kubernetes.io/instance=$JOB_NAME" -f 2>/dev/null || true
+# Stream logs in background; we'll kill this once the Job condition flips.
+kubectl logs -n "$NAMESPACE" -l "app.kubernetes.io/instance=$JOB_NAME" -f 2>/dev/null &
+LOG_PID=$!
 
-# --- Report final status ---
+# --- Wait for the Job to reach a terminal condition ---
+# kubectl wait --for=condition=complete OR --for=condition=failed.
+# Note: 'kubectl wait' on multiple conditions requires running both in
+# parallel and taking whichever returns first. We use a poll loop instead
+# to keep the script portable across kubectl versions.
+TIMEOUT="${PREFETCH_TIMEOUT:-7200}"  # 2h default — adequate for any model
+ELAPSED=0
+RESULT="unknown"
+while (( ELAPSED < TIMEOUT )); do
+  COMPLETE=$(kubectl get job "$JOB_NAME" -n "$NAMESPACE" \
+    -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+  FAILED=$(kubectl get job "$JOB_NAME" -n "$NAMESPACE" \
+    -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+  if [[ "$COMPLETE" == "True" ]]; then
+    RESULT="success"; break
+  fi
+  if [[ "$FAILED" == "True" ]]; then
+    RESULT="failure"; break
+  fi
+  sleep 5
+  ELAPSED=$((ELAPSED + 5))
+done
+
+# Stop log tail
+kill "$LOG_PID" 2>/dev/null || true
+wait "$LOG_PID" 2>/dev/null || true
+
 echo ""
-STATUS=$(kubectl get job "$JOB_NAME" -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null)
-if [[ "$STATUS" == "1" ]]; then
-  echo "[SUCCESS] Model '$MODEL_ID' is now cached on EFS."
-  echo "          Deploy your DGD and it will skip the download phase."
-else
-  echo "[ERROR] Job did not complete successfully. Check logs:"
-  echo "        kubectl logs -n $NAMESPACE -l app.kubernetes.io/instance=$JOB_NAME"
-  exit 1
-fi
+case "$RESULT" in
+  success)
+    SUCCEEDED=$(kubectl get job "$JOB_NAME" -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null)
+    DURATION=$(( $(date +%s) - $(date -d "$(kubectl get job "$JOB_NAME" -n "$NAMESPACE" -o jsonpath='{.status.startTime}' 2>/dev/null)" +%s 2>/dev/null || echo 0) ))
+    echo "[SUCCESS] Model '$MODEL_ID' is now cached on EFS."
+    echo "          succeeded=${SUCCEEDED}, duration=${DURATION}s"
+    echo "          Deploy your DGD and it will skip the download phase."
+    ;;
+  failure)
+    echo "[ERROR] Job '$JOB_NAME' reported Failed condition."
+    echo "        kubectl logs -n $NAMESPACE -l app.kubernetes.io/instance=$JOB_NAME"
+    exit 1
+    ;;
+  *)
+    echo "[ERROR] Timed out after ${TIMEOUT}s waiting for Job to complete."
+    echo "        Job may still be running; check:"
+    echo "        kubectl get job $JOB_NAME -n $NAMESPACE"
+    echo "        kubectl logs -n $NAMESPACE -l app.kubernetes.io/instance=$JOB_NAME"
+    exit 1
+    ;;
+esac
