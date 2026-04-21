@@ -3,718 +3,470 @@ title: NVIDIA Dynamo on Amazon EKS
 sidebar_position: 8
 ---
 
-import CollapsibleContent from '@site/src/components/CollapsibleContent';
-
-<div style={{background: '#d32f2f', color: 'white', padding: '2rem', textAlign: 'center', fontSize: '1.5rem', fontWeight: 'bold', borderRadius: '8px', marginBottom: '2rem', border: '3px solid #b71c1c'}}>
-  ⚠️ This blueprint is currently outdated  ⚠️
-</div>
-
-
-
-:::warning
-Deployment of ML models on EKS requires access to GPUs or Neuron instances. If your deployment isn't working, it's often due to missing access to these resources. Also, some deployment patterns rely on Karpenter autoscaling and static node groups; if nodes aren't initializing, check the logs for Karpenter or Node groups to resolve the issue.
-:::
-
 :::info
-NVIDIA Dynamo is a cloud-native platform for deploying and managing AI inference graphs at scale. This implementation provides complete infrastructure setup with enterprise-grade monitoring and scalability on Amazon EKS.
+This page covers deploying inference workloads on a running Dynamo platform.
+For platform installation (EKS cluster, operator, Grove, KAI, Tempo), see the
+[NVIDIA Dynamo on EKS infrastructure guide](/docs/infra/inference/nvidia-dynamo)
+first.
 :::
 
-# NVIDIA Dynamo on Amazon EKS
+# NVIDIA Dynamo Blueprints
 
-:::warning Active Development
-This NVIDIA Dynamo blueprint is currently in **active development**. We are continuously improving the user experience and functionality. Features, configurations, and deployment processes may change between releases as we iterate and enhance the implementation based on user feedback and best practices.
-
-Please expect iterative improvements in upcoming releases. If you encounter any issues or have suggestions for improvements, please feel free to open an issue or contribute to the project.
-:::
-
-## Quick Start
-
-**Want to get started immediately?** Here's the minimal command sequence:
-
-```bash
-# 1. Clone and navigate
-git clone https://github.com/awslabs/ai-on-eks.git && cd ai-on-eks/infra/nvidia-dynamo
-
-# 2. Deploy infrastructure and platform (15-30 minutes)
-./install.sh
-
-# 3. Deploy inference examples using prebuilt NGC containers
-cd ../../blueprints/inference/nvidia-dynamo
-
-./deploy.sh                # Interactive menu to choose example
-# ./deploy.sh vllm           # Deploy vLLM with interactive setup
-
-# 4. Test your deployment (wait for model download)
-kubectl port-forward svc/vllm-frontend 8000:8000 -n dynamo-cloud
-curl http://localhost:8000/health
-```
-
-**Prerequisites**: AWS CLI, kubectl, helm, terraform, git, NGC API token, HuggingFace token ([detailed setup below](#prerequisites))
-
----
-
-## What is NVIDIA Dynamo?
-
-[NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo) is an open-source inference framework designed to optimize performance and scalability for large language models (LLMs) and generative AI applications. Released under the Apache 2.0 license, Dynamo provides a datacenter-scale distributed inference serving framework that orchestrates complex AI workloads across multiple GPUs and nodes.
-
-### What is an Inference Graph?
-
-An **inference graph** is a computational workflow that defines how AI models process data through interconnected nodes, enabling complex multi-step AI operations like:
-- **LLM chains**: Sequential processing through multiple language models
-- **Multimodal processing**: Combining text, image, and audio processing
-- **Custom inference pipelines**: Tailored workflows for specific AI applications
-- **Disaggregated serving**: Separating prefill and decode phases for optimal resource utilization
-
-## Overview
-
-This blueprint uses the **[official NVIDIA Dynamo Helm charts](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/helm-charts/dynamo-platform)** from the [NVIDIA NGC catalog](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/collections/ai-dynamo), with additional shell scripts and Terraform automation to simplify the deployment process on Amazon EKS.
-
-### Deployment Approach
-
-**Why This Setup Process?**
-While this implementation involves multiple steps, it provides several advantages over a simple Helm-only deployment:
-
-- **Complete Infrastructure**: Automatically provisions VPC, EKS cluster, ECR repositories, and monitoring stack
-- **Production Ready**: Includes enterprise-grade security, monitoring, and scalability features
-- **AWS Integration**: Leverages EKS autoscaling, EFA networking, and AWS services
-- **Customizable**: Allows fine-tuning of GPU node pools, networking, and resource allocation
-- **Reproducible**: Infrastructure as Code ensures consistent deployments across environments
-
-**For Simpler Deployments**: If you already have an EKS cluster and prefer a minimal setup, you can use the Dynamo Helm charts directly from the source repository. This blueprint provides the full production-ready experience.
-
-As LLMs and generative AI applications become increasingly prevalent, the demand for efficient, scalable, and low-latency inference solutions has grown. Traditional inference systems often struggle to meet these demands, especially in distributed, multi-node environments. NVIDIA Dynamo addresses these challenges by offering innovative solutions to optimize performance and scalability with support for AWS services such as Amazon S3, Elastic Fabric Adapter (EFA), and Amazon EKS.
-
-### Key Features
-
-**Performance Optimizations:**
-- **Disaggregated Serving**: Separates prefill and decode phases across different GPUs for optimal resource utilization
-- **Dynamic GPU Scheduling**: Intelligent resource allocation based on real-time demand through the NVIDIA Dynamo Planner
-- **Smart Request Routing**: Minimizes KV cache recomputation by routing requests to workers with relevant cached data
-- **Accelerated Data Transfer**: Low-latency communication via NVIDIA NIXL library
-- **Efficient KV Cache Management**: Intelligent offloading across memory hierarchies with the KV Cache Block Manager
-
-**Infrastructure Ready:**
-- **Inference Engine Agnostic**: Supports TensorRT-LLM, vLLM, SGLang, and other runtimes
-- **Modular Design**: Pick and choose components that fit your existing AI stack
-- **Enterprise Grade**: Complete monitoring, logging, and security integration
-- **Amazon EKS Optimized**: Leverages EKS autoscaling, GPU support, and AWS services
-
-## Architecture
-
-The deployment uses Amazon EKS with the following components:
-
-![NVIDIA Dynamo Architecture](https://github.com/ai-dynamo/dynamo/blob/main/docs/images/architecture.png?raw=true)
-
-**Key Components:**
-- **VPC and Networking**: Standard VPC with EFA support for low-latency inter-node communication
-- **EKS Cluster**: Managed Kubernetes with GPU-enabled node groups using Karpenter
-- **Dynamo Platform**: Operator, API Store, and supporting services (NATS, PostgreSQL, MinIO)
-- **Monitoring Stack**: Prometheus, Grafana, and AI/ML observability
-- **Storage**: Amazon EFS for shared model storage and caching
+This blueprint provides 28 live-tested DynamoGraphDeployment (DGD) examples
+covering all of Dynamo v1.0.1's major capabilities, plus operational tooling
+for testing, benchmarking, prefetching models, and validating deployments.
 
 ## Prerequisites
 
-**System Requirements**: Ubuntu 22.04 or 24.04 (NVIDIA Dynamo officially supports only these versions)
+- A running Dynamo platform on EKS — see the
+  [infrastructure guide](/docs/infra/inference/nvidia-dynamo)
+- `kubectl` configured for your cluster (run `aws eks update-kubeconfig`)
+- Working directory: `blueprints/inference/nvidia-dynamo/` in the ai-on-eks repo
 
-Install the following tools on your setup host (recommended: EC2 instance t3.xlarge or higher with EKS and ECR permissions):
-
-- **AWS CLI**: Configured with appropriate permissions ([installation guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html))
-- **kubectl**: Kubernetes command-line tool ([installation guide](https://kubernetes.io/docs/tasks/tools/install-kubectl/))
-- **helm**: Kubernetes package manager ([installation guide](https://helm.sh/docs/intro/install/))
-- **terraform**: Infrastructure as code tool ([installation guide](https://learn.hashicorp.com/tutorials/terraform/install-cli))
-- **git**: Version control ([installation guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git))
-- **Python 3.10+**: With pip and venv ([installation guide](https://www.python.org/downloads/))
-- **EKS Cluster**: Version 1.33 (tested and supported)
-
-### Required API Tokens
-
-- **[NGC API Token](https://catalog.ngc.nvidia.com/)**: Required for accessing NVIDIA's prebuilt Dynamo container images
-  - Sign up at [NVIDIA NGC](https://catalog.ngc.nvidia.com/)
-  - Generate an API key from your account settings
-  - Set as `NGC_API_KEY` environment variable or provide during installation
-- **[HuggingFace Token](https://huggingface.co/settings/tokens)**: Required for downloading models
-  - Create account at [HuggingFace](https://huggingface.co/)
-  - Generate access token with model read permissions
-  - Set as `HF_TOKEN` environment variable or provide interactively during deployment
-
-<CollapsibleContent header={<h2><span>Deploying the Solution</span></h2>}>
-
-Complete the following steps to deploy NVIDIA Dynamo on Amazon EKS:
-
-### Step 1: Clone the Repository
+## Quick Start
 
 ```bash
-git clone https://github.com/awslabs/ai-on-eks.git && cd ai-on-eks
+cd blueprints/inference/nvidia-dynamo
+
+# 1. Create the shared PVC and HF token secret
+kubectl apply -f pvc.yaml
+kubectl create secret generic hf-token-secret \
+  --from-literal=HF_TOKEN="$HF_TOKEN" \
+  -n dynamo-system --dry-run=client -o yaml | kubectl apply -f -
+
+# 2. Validate the cluster
+./scripts/validate.sh
+
+# 3. Deploy the smallest DGD (Qwen3-0.6B on g5 A10G)
+kubectl apply -f engines/vllm/vllm-aggregated.yaml -n dynamo-system
+
+# 4. Test once Ready
+./test.sh vllm-aggregated
 ```
 
-### Step 2: Deploy Infrastructure and Platform
+## Deployment Workflow
 
-Navigate to the infrastructure directory and run the installation script:
+```mermaid
+graph TB
+    A[("PVC: dynamo-model-cache")] --> B["validate.sh"]
+    S[("Secret: hf-token-secret")] --> B
+    B --> C{"Model larger than 100GB?"}
+    C -->|"yes"| D["prefetch-model.sh (HF retry-on-429)"]
+    C -->|"no"| E["kubectl apply DGD manifest"]
+    D --> E
+    E --> F["Karpenter provisions GPU"]
+    F --> G["Worker loads model from EFS"]
+    G --> H(["DGD Ready=true"])
+    H --> I["test.sh"]
+    H --> J["benchmark.sh (AIPerf)"]
+
+    style A fill:#569a31,stroke:#333,color:#fff
+    style S fill:#27aae1,stroke:#333,color:#fff
+    style D fill:#ed8936,stroke:#333,color:#fff
+    style H fill:#48bb78,stroke:#333,color:#fff
+    style I fill:#667eea,stroke:#333,color:#fff
+    style J fill:#667eea,stroke:#333,color:#fff
+```
+
+### 1. Create the shared PVC
+
+The PVC `dynamo-model-cache` (500GB EFS, ReadWriteMany) is mounted by every
+DGD at `/models` and shared across all workloads. Models downloaded by one
+DGD are immediately available to all others.
 
 ```bash
-cd infra/nvidia-dynamo
-./install.sh
+kubectl apply -f pvc.yaml
 ```
 
-This command provisions your complete environment:
-- **VPC**: Subnets, security groups, NAT gateways, and internet gateway
-- **EKS Cluster**: With GPU-enabled node groups using Karpenter
-- **Monitoring Stack**: Prometheus, Grafana, and AI/ML observability
-- **ArgoCD**: GitOps deployment platform
-- **Dynamo Platform**: Deploys using [official NVIDIA Dynamo Helm charts](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/helm-charts/dynamo-platform) (Operator, API Store, NATS, PostgreSQL, MinIO)
-
-**Duration**: 15-30 minutes
-
-### Step 3: Deploy Inference Examples
-
-Deploy your inference service using the simplified deployment script with prebuilt [NGC container images](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/containers):
+### 2. Create the HuggingFace token secret
 
 ```bash
-cd ../../blueprints/inference/nvidia-dynamo
-
-# Interactive menu to choose from 9 examples
-./deploy.sh
-
-# Or deploy specific examples directly
-./deploy.sh vllm           # vLLM aggregated serving
-./deploy.sh sglang         # SGLang with RadixAttention
-./deploy.sh hello-world    # CPU-only testing
-./deploy.sh trtllm         # TensorRT-LLM optimized
+kubectl create secret generic hf-token-secret \
+  --from-literal=HF_TOKEN="$HF_TOKEN" \
+  -n dynamo-system --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-**Available Examples:**
-- **hello-world**: CPU-only connectivity testing
-- **vllm**: vLLM aggregated serving with OpenAI API
-- **sglang**: SGLang with advanced RadixAttention caching
-- **trtllm**: TensorRT-LLM optimized inference
-- **multi-replica-vllm**: Multi-replica deployment with KV routing and high availability
-- **vllm-disagg**: Disaggregated prefill/decode workers
-- **sglang-disagg**: SGLang disaggregated with RadixAttention
-- **trtllm-disagg**: TensorRT-LLM disaggregated serving
-- **kv-routing**: KV-aware intelligent routing
+Most blueprints reference this secret via `envFromSecret: hf-token-secret`
+in their DGD spec. While anonymous downloads work for public models, the
+HF token enables 5000+ req/min vs ~50 req/min anonymous — essential for
+models >10GB.
 
-**Key Benefits of Prebuilt Containers:**
-- **No Build Required**: Uses official [NGC container images](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/collections/ai-dynamo) (v0.4.1)
-- **Faster Deployment**: Skip 20+ minute build process
-- **Consistent Experience**: NVIDIA-tested and validated images
-- **Version Management**: Automatic version detection from `blueprint.tfvars`
-- **Override Support**: Use `DYNAMO_VERSION=v0.4.1 ./deploy.sh` to override version
+### 3. Validate the cluster
 
-</CollapsibleContent>
+```bash
+./scripts/validate.sh
+```
 
-## Available Examples
+Checks for required CRDs, PVC, HF token secret, Karpenter NodePools, and
+Dynamo operator health. Exits non-zero on any FAIL.
 
-### Production-Ready Examples
+### 4. Prefetch large models (mandatory for models >100GB)
 
-The following examples are fully tested and production-ready with comprehensive documentation:
+Dynamo's internal `fetch_model()` has no retry logic for HuggingFace 429 rate
+limits. Large models (100+ shards) will crash-loop during download. The
+`prefetch-model.sh` helper pre-warms the EFS cache using `huggingface_hub`'s
+retry-with-backoff Python client.
 
-| Example | Runtime | Model | Architecture | Node Type | Key Features |
-|---------|---------|--------|--------------|-----------|--------------|
-| **[hello-world](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/hello-world)** | CPU | N/A | Aggregated | CPU | Basic connectivity testing |
-| **[vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm)** | vLLM | Qwen3-0.6B | Aggregated | G5 GPU | OpenAI API, balanced performance |
-| **[sglang](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/sglang)** | SGLang | DeepSeek-R1-Distill-8B | Aggregated | G5 GPU | RadixAttention caching |
-| **[trtllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/trtllm)** | TensorRT-LLM | DeepSeek-R1-Distill-8B | Aggregated | G5 GPU | Maximum inference performance |
-| **[multi-replica-vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multi-replica-vllm)** | vLLM | Multiple models | Multi-replica HA | G5 GPU | KV routing, load balancing |
+```bash
+# Prefetch before deploying the DGD
+./scripts/prefetch-model.sh MiniMaxAI/MiniMax-M2.7
+./scripts/prefetch-model.sh deepseek-ai/DeepSeek-R1-Distill-Llama-70B
 
-### Advanced Examples (Beta)
+# Then deploy — download phase is skipped, weights loaded from EFS
+kubectl apply -f models/minimax-m2.7.yaml -n dynamo-system
+```
 
-These examples demonstrate advanced Dynamo features and are suitable for experimental workloads:
+The helper:
+- Auto-derives a K8s-safe Job name from the model ID
+- Uses `HF_TOKEN` from `hf-token-secret` if present
+- Retries on 429/5xx up to 30 times with exponential backoff
+- Is idempotent — rerunning resumes from where it stopped
+- Auto-cleans up the Job 1 hour after completion
+- Streams logs while running
 
-| Example | Runtime | Architecture | Use Case | Key Features |
-|---------|---------|--------------|----------|--------------|
-| **[vllm-disagg](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm-disagg)** | vLLM | Disaggregated | High throughput | Separate prefill/decode workers |
-| **[sglang-disagg](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/sglang-disagg)** | SGLang | Disaggregated | Memory optimization | RadixAttention + disaggregation |
-| **[trtllm-disagg](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/trtllm-disagg)** | TensorRT-LLM | Disaggregated | Ultra-high performance | TRT-LLM + disaggregation |
-| **[kv-routing](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/kv-routing)** | Multi-runtime | Intelligent routing | Cache optimization | KV-aware request routing |
+### 5. Deploy the DGD
 
-### Example Highlights
+Apply any blueprint manifest. Karpenter will provision the required GPU
+nodes based on the `nodeSelector` in the manifest.
 
-**🚀 **[hello-world](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/hello-world)**: Perfect starting point**
-- CPU-only deployment for testing Dynamo platform functionality
-- Fast deployment (~2 minutes)
-- No GPU or model dependencies
-- Ideal for CI/CD validation
+```bash
+kubectl apply -f models/minimax-m2.7.yaml -n dynamo-system
 
-**⚡ **[vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm)**: Recommended for most use cases**
-- OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`)
-- Small model (Qwen3-0.6B) for quick testing
-- Production-ready health checks
-- G5 GPU optimization
+kubectl wait --for=jsonpath='{.status.ready}'=true \
+  dgd/minimax-m2-7 -n dynamo-system --timeout=15m
+```
 
-**🧠 **[sglang](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/sglang)**: Advanced caching capabilities**
-- RadixAttention for 2-10x speedup on repetitive queries
-- Structured generation support (JSON/XML)
-- Advanced memory management
-- Perfect for cache-heavy workloads
+### 6. Test the DGD
 
-**🏎️ **[trtllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/trtllm)**: Maximum performance**
-- NVIDIA TensorRT-LLM optimized kernels
-- Highest throughput and lowest latency
-- Custom CUDA kernels
-- Best for production serving
+```bash
+./test.sh minimax-m2-7     # Specific DGD
+./test.sh                  # All deployed DGDs
+```
 
-**🌐 **[multi-replica-vllm](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multi-replica-vllm)**: High availability deployments**
-- Multiple independent worker replicas with KV routing
-- Automatic load balancing and failover
-- Intelligent cache-aware request routing
-- Ideal for production workloads requiring high availability
+`test.sh` port-forwards to the DGD's frontend service, hits `/health` and
+`/v1/chat/completions`, and reports pass/fail. It handles reasoning models
+(MiniMax, DeepSeek R1, GLM) that return output in `reasoning_content`
+instead of `content`.
 
-:::info Comprehensive Testing
-All 9 examples have been thoroughly tested and validated with on EKS clusters with GPU nodes. Each example includes proper health checks, OpenAI-compatible API endpoints, and production-ready configurations. See our [testing summary](https://github.com/awslabs/ai-on-eks/blob/main/NVIDIA_Dynamo_Testing_Summary.md) for detailed validation results.
+### 7. Benchmark
+
+```bash
+# Default: ISL=128, OSL=128, concurrency=1,4,8
+./scripts/benchmark.sh minimax-m2-7
+
+# Custom sequence lengths
+./scripts/benchmark.sh minimax-m2-7 --isl 2048 --osl 256 --concurrency 1,4,8
+
+# Concurrency sweep (1,2,4,8,16,32,64)
+./scripts/benchmark.sh minimax-m2-7 --sweep
+```
+
+The script runs [AIPerf](https://github.com/ai-dynamo/aiperf) via in-cluster
+Kubernetes Jobs using the Dynamo runtime image (AIPerf is pre-installed).
+Results are saved to `/tmp/dynamo-benchmarks/<dgd>/<timestamp>/` including
+CSV/JSON exports and an LLM metrics table (TTFT, ITL, throughput).
+
+## Blueprint Catalog
+
+### Engine Architecture Patterns
+
+```mermaid
+graph TB
+    subgraph AGG["Aggregated — single worker"]
+        AF["Frontend :8000"]
+        AW["Worker (prefill + decode)"]
+        AF -->|"OpenAI API"| AW
+    end
+
+    subgraph DIS["Disaggregated — split prefill and decode"]
+        DF["Frontend :8000"]
+        DP["Prefill Worker (compute-bound)"]
+        DD["Decode Worker (memory-bandwidth-bound)"]
+        DF --> DP
+        DP -. "KV cache transfer via NIXL/Mooncake" .-> DD
+        DD --> DF
+    end
+
+    subgraph RTR["Router — KV-aware"]
+        RF["KV Router Frontend :8000"]
+        RW1["Worker 1"]
+        RW2["Worker 2"]
+        RW3["Worker 3"]
+        RF -->|"routes by cache locality"| RW1
+        RF --> RW2
+        RF --> RW3
+    end
+
+    style AF fill:#76b900,stroke:#333,color:#fff
+    style DF fill:#76b900,stroke:#333,color:#fff
+    style RF fill:#76b900,stroke:#333,color:#fff
+    style DP fill:#ed8936,stroke:#333,color:#fff
+    style DD fill:#8e44ad,stroke:#333,color:#fff
+```
+
+### Engines (10 blueprints)
+
+Architecture patterns on the smallest usable hardware (Qwen3-0.6B on g5 A10G).
+
+| Blueprint | Pattern | Location |
+|-----------|---------|----------|
+| vLLM aggregated / disagg / router / disagg+router | 4 patterns | [`engines/vllm/`](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/engines/vllm) |
+| SGLang aggregated / disagg / router | 3 patterns | [`engines/sglang/`](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/engines/sglang) |
+| TRT-LLM aggregated / disagg / router | 3 patterns | [`engines/trtllm/`](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/engines/trtllm) |
+
+**Hardware notes:**
+- TRT-LLM disaggregated requires Hopper/Blackwell (B200+) due to its
+  `cache_transceiver_config` requirements. A10G and L40S fail with executor
+  errors. Use `g7e-nvidia` NodePool.
+
+### Models (5 blueprints)
+
+Production-scale deployments with hardware sizing.
+
+| Model | Params | Hardware | Architecture |
+|-------|--------|----------|--------------|
+| DeepSeek R1 | 671B MoE | 2× p5e / p6-b200 | MLA (**Hopper/Blackwell only**) |
+| DeepSeek R1 Distill Llama | 70B | 1× g7e (RTX PRO 6000) | Standard GQA |
+| Llama 3.3 | 70B | 1× g7e | Standard GQA |
+| MiniMax-M2.7 | 230B / 10B active | 1× g7e.48xlarge TP=4 | Sparse MoE + MHA |
+| Qwen3-30B-A3B | 30B / 3B active | 1× g7e | Sparse MoE |
+
+:::warning MLA Hardware Requirement
+DeepSeek R1 (671B) uses Multi-head Latent Attention (MLA) which requires
+**Hopper (H100/H200) or Blackwell (B200/B300)** compute capability. vLLM
+has no MLA backend for Ada Lovelace (RTX PRO 6000). For reasoning workloads
+on widely-available hardware, use the distilled variant.
 :::
 
-## Test and Validate
+### KV Block Manager (KVBM) Tiered Cache
 
-### Automated Testing
+```mermaid
+graph TB
+    REQ["Inference request"] --> GPU
+    subgraph TIERS["KVBM Tiered KV Cache"]
+        GPU["GPU VRAM — 4-16 GB (fastest)"]
+        CPU["CPU memory — 8-100 GB (2nd tier)"]
+        DISK["Disk EFS/local — 20-500 GB (3rd tier)"]
+        GPU -. "evict" .-> CPU
+        CPU -. "evict" .-> DISK
+        DISK -. "promote" .-> CPU
+        CPU -. "promote" .-> GPU
+    end
 
-Use the built-in test script to validate your deployment:
+    style GPU fill:#76b900,stroke:#333,color:#fff
+    style CPU fill:#27aae1,stroke:#333,color:#fff
+    style DISK fill:#569a31,stroke:#333,color:#fff
+```
+
+### Features (13 blueprints)
+
+| Category | Examples | Location |
+|----------|----------|----------|
+| KVBM (KV Block Manager) | CPU cache, 3-tier disk offload | [`features/kvbm-*.yaml`](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/features) |
+| Model management | DynamoModel CRDs, LoRA adapters | [`features/model-management/`](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/features/model-management) |
+| Multimodal | Qwen2.5-VL, LLaVA-1.5, LLaVA-Video | [`features/multimodal/`](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/features/multimodal) |
+| Observability | OTEL tracing, full observability, audit logging | [`features/observability/`](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/features/observability) |
+| Advanced | Multi-replica HA, heterogeneous GPUs, DGDRs | [`features/`](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/features) |
+
+### DynamoGraphDeploymentRequest (DGDR)
+
+DGDRs automate profiling and deployment. Apply a DGDR → Dynamo profiles the
+workload for hours → optimal DGD is auto-created.
 
 ```bash
-./test.sh
+kubectl apply -f features/dgdr-vllm.yaml -n dynamo-system
+kubectl get dgdr -n dynamo-system -w     # Monitor profiling
+kubectl get dgd -n dynamo-system -w      # Auto-generated DGD
 ```
 
-This script:
-- Starts port forwarding to the frontend service
-- Tests health check, metrics, and `/v1/models` endpoints
-- Runs sample inference requests to verify functionality
+DGDR requires `kube-prometheus-stack` (enabled by default in the infra).
 
-### Manual Testing
+## Observability
 
-Access your deployment directly:
+### Distributed Tracing (Grafana Tempo)
+
+Tempo is deployed by default with the platform. Blueprints in
+`features/observability/` demonstrate end-to-end OTEL integration:
 
 ```bash
-kubectl port-forward svc/<frontend-service> 8000:8000 -n dynamo-cloud &
+# Deploy a traced vLLM DGD
+kubectl apply -f features/observability/otel-tracing.yaml -n dynamo-system
 
-curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
-    "messages": [
-        {"role": "user", "content": "Explain what a Q-Bit is in quantum computing."}
-    ],
-    "max_tokens": 2000,
-    "temperature": 0.7,
-    "stream": false
-}'
+# Test (generates traces)
+./test.sh vllm-otel-tracing
+
+# Query Tempo for traces
+kubectl port-forward svc/grafana-tempo 3200:3200 -n tempo &
+curl -s "http://localhost:3200/api/search?q={}" | python3 -m json.tool
 ```
 
-**Expected Output:**
-```json
-{
-  "id": "1918b11a-6d98-4891-bc84-08f99de70fd0",
-  "choices": [
-    {
-      "index": 0,
-      "message": {
-        "content": "A Q-bit, or qubit, is the basic unit of quantum information...",
-        "role": "assistant"
-      },
-      "finish_reason": "stop"
-    }
-  ],
-  "created": 1752018267,
-  "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
-  "object": "chat.completion"
-}
-```
-
-## Monitor and Observe
-
-### Grafana Dashboard
-
-Access Grafana for visualization (default port 3000):
-
-```bash
-kubectl port-forward -n kube-prometheus-stack svc/kube-prometheus-stack-grafana 3000:80
-```
-
-### Prometheus Metrics
-
-Access Prometheus for metrics collection (port 9090):
-
-```bash
-kubectl port-forward -n kube-prometheus-stack svc/prometheus 9090:80
-```
-
-### Automatic Monitoring
-
-The deployment automatically creates:
-- **Service**: Exposes inference graphs for API calls and metrics
-- **ServiceMonitor**: Configures Prometheus to scrape metrics
-- **Dashboards**: Pre-configured Grafana dashboards for inference monitoring
-
-## Advanced Configuration
-
-### Version Management
-
-The deployment automatically manages Dynamo versions with flexible override options:
-
-**Default Behavior:**
-- Reads version from `terraform/blueprint.tfvars` (`dynamo_stack_version = "v0.4.1"`)
-- Automatically updates container image tags in YAML manifests
-- Creates temporary manifests without modifying source files
-
-**Override Options:**
-```bash
-# Environment variable (highest priority)
-export DYNAMO_VERSION=v0.4.1
-./deploy.sh vllm
-
-# Inline override
-DYNAMO_VERSION=v0.4.1 ./deploy.sh sglang
-
-# Update terraform/blueprint.tfvars (persistent)
-dynamo_stack_version = "v0.4.1"
-```
-
-**Supported Versions:**
-- **v0.4.1**: Current stable release (default)
-- Custom versions from private builds
-
-### Custom Model Deployment
-
-To deploy custom models, modify the configuration files in `dynamo/examples/llm/configs/`:
-
-1. **Choose Architecture**: Select based on model size and requirements
-2. **Update Configuration**: Edit the appropriate YAML file
-3. **Set Model Parameters**: Update `model` and `served_model_name` fields
-4. **Configure Resources**: Adjust GPU allocation and memory settings
-
-**Example for DeepSeek-R1 70B model:**
+The OTEL endpoint is `grafana-tempo.tempo.svc.cluster.local:4317`
+(gRPC) or `:4318` (HTTP). Traced blueprints set these env vars:
 
 ```yaml
-Common:
-  model: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
-  max-model-len: 32768
-  tensor-parallel-size: 4
-
-Frontend:
-  served_model_name: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
-
-VllmWorker:
-  ServiceArgs:
-    resources:
-      gpu: '4'
+envs:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: http://grafana-tempo.tempo.svc.cluster.local:4317
+  - name: OTEL_SERVICE_NAME
+    value: dynamo-vllm-worker
 ```
 
+### Metrics (Prometheus + Grafana)
 
-### Configuration Options
+```bash
+# Grafana UI
+kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 \
+  -n kube-prometheus-stack
 
-The main configuration is in `terraform/blueprint.tfvars`:
-
-```hcl
-# Required for Dynamo deployment
-enable_dynamo_stack = true
-enable_argocd       = true
-
-# Dynamo platform version
-dynamo_stack_version = "v0.4.1"
-
-# Required infrastructure components
-enable_aws_efs_csi_driver        = true
-enable_aws_efa_k8s_device_plugin = true
-enable_ai_ml_observability_stack = true
+# Prometheus UI
+kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090 \
+  -n kube-prometheus-stack
 ```
+
+Per-DGD metrics are scraped via the `servicemonitor-template.yaml` in the
+blueprint root. Apply after deploying a DGD to begin scraping its `/metrics`
+endpoint on port 9090.
+
+### Audit Logging
+
+`features/observability/audit-logging.yaml` demonstrates JSONL request/response
+audit logging. Useful for compliance and debugging inference workloads.
 
 ## Troubleshooting
 
-### Common Issues
+### Large model downloads crash-loop with HTTP 429
 
-1. **GPU Nodes Not Available**: Check Karpenter logs and instance availability
-2. **Pod Failures**: Check resource limits and cluster capacity
-3. **Model Download Failures**: Verify HuggingFace token and network connectivity
-4. **API 503 Errors**: Wait for model loading or check worker health
+**Symptom**: Worker pod crashes with `HfHubHTTPError: 429 Too Many Requests`.
+On restart, a few more shards download before crashing again. Never completes.
 
-### Debug Commands
+**Cause**: Dynamo's `fetch_model()` doesn't retry on HF rate limits.
 
-```bash
-# Check cluster status
-kubectl get nodes
-kubectl get pods -n dynamo-cloud
+**Fix**: Use `./scripts/prefetch-model.sh <model>` before deploying the DGD.
 
-# View logs
-kubectl logs -n argocd -l app.kubernetes.io/name=argocd-server
-kubectl logs -n dynamo-cloud -l app=vllm-worker
+### Models on Ada Lovelace (RTX PRO 6000) won't run
 
-# Check deployments
-kubectl get dynamographdeployment -n dynamo-cloud
-kubectl describe dynamographdeployment <name> -n dynamo-cloud
-```
+**Symptom**: `ValueError: No valid attention backend found for cuda` on
+DeepSeek, GLM-5.x, or other MLA-architecture models.
 
-## Node Selection and Customization
+**Cause**: The model uses Multi-head Latent Attention (MLA) which requires
+Hopper (H100/H200) or Blackwell (B200/B300). vLLM has no MLA backend for
+Ada architecture.
 
-### Selecting Instance Types
+**Fix**: Use a distilled variant (e.g., `models/deepseek-r1-distill-llama-70b.yaml`)
+or deploy on `p5-nvidia` / `p5e-nvidia` / `p6-b200-nvidia` NodePools.
 
-You can customize which Karpenter node pool your Dynamo components deploy to by modifying the `nodeSelector` in your DynamoGraphDeployment:
+### TRT-LLM disaggregated fails on A10G or L40S
 
-```yaml
-# Example: Deploy GPU worker to G5 instances
-VllmWorker:
-  extraPodSpec:
-    nodeSelector:
-      karpenter.sh/nodepool: g5-gpu-karpenter
-  resources:
-    requests:
-      gpu: "1"
+**Symptom**: "Executor worker returned error" regardless of memory tuning.
 
-# Example: Deploy frontend to CPU instances
-Frontend:
-  extraPodSpec:
-    nodeSelector:
-      karpenter.sh/nodepool: cpu-karpenter
-```
+**Cause**: TRT-LLM's `cache_transceiver_config` requires Hopper/Blackwell
+for its IPC mechanism.
 
-**Available Node Pools** (configured in base infrastructure):
-- `g5-gpu-karpenter`: G5 instances with NVIDIA A10G GPUs
-- `g6-gpu-karpenter`: G6 instances with NVIDIA L4 GPUs (if configured)
-- `cpu-karpenter`: CPU-only instances for frontends
+**Fix**: Change nodeSelector to `g7e-nvidia` (B200). Aggregated TRT-LLM works
+on all GPU tiers.
 
-### Custom Development
+### Inference returns `null` in the content field
 
-For advanced customization and development:
+**Symptom**: `choices[0].message.content` is `null` but the request
+succeeded.
 
-1. **Source Code**: Full Dynamo source code is available at [~/dynamo](https://github.com/ai-dynamo/dynamo) with comprehensive documentation and examples
-2. **Blueprint Examples**: Each example in the `blueprints/inference/nvidia-dynamo/` folder includes detailed README files
-3. **Container Source**: All source code is included in NGC containers at `/workspace/` for in-container customization
+**Cause**: Reasoning models (DeepSeek R1, MiniMax M2, GLM) separate their
+chain-of-thought into `reasoning_content`, leaving `content` as the final
+answer only.
 
-Refer to the individual README files in each blueprint example for specific customization guidance.
+**Fix**: Inspect both fields. The `test.sh` script handles this fallback
+automatically.
 
-## Multi-Node Tensor Parallelism Limitations
+## Configuration Reference
 
-### Understanding Multi-Replica vs Multi-Node
+Each DGD manifest can be customized in these ways:
 
-It's important to distinguish between **multi-replica deployments** (what our examples provide) and **true multi-node tensor parallelism** (which requires specialized infrastructure):
-
-#### What Our Examples Provide (Multi-Replica)
-- **Multiple Independent Workers**: Each worker replica runs the complete model independently (TP=1)
-- **High Availability**: Service continues operating if individual workers fail
-- **Load Balancing**: Requests distributed across workers for increased throughput
-- **KV-Aware Routing**: Intelligent request routing based on cache overlap to maximize performance
-- **Kubernetes Native**: Works seamlessly with standard Kubernetes deployments
-
-#### What Our Examples Do NOT Provide (True Multi-Node TP)
-- **Cross-Node Model Sharding**: Models are not split across multiple nodes
-- **Memory Scaling for Large Models**: Each worker must fit the complete model (no cross-node memory sharing)
-- **Tensor Parallelism Across Nodes**: No cross-node tensor operations
-
-### Current Kubernetes Limitations
-
-**Kubernetes does not currently support true multi-node tensor parallelism** for distributed inference workloads due to several technical constraints:
-
-#### Infrastructure Requirements
-True multi-node tensor parallelism requires:
-- **MPI/Slurm Environment**: Uses `mpirun` or `srun` for coordinated distributed model loading
-- **Synchronized Initialization**: All participating nodes must start simultaneously and maintain coordination
-- **Low-Latency Interconnects**: Requires InfiniBand, NVLink, or similar high-performance networking
-- **Shared Process Groups**: Distributed training/inference frameworks need process group management not available in K8s
-
-#### Why Kubernetes Doesn't Support This (Currently)
-
-1. **Pod Isolation**: Kubernetes pods are designed to be isolated units, making cross-pod tensor operations challenging
-2. **Dynamic Scheduling**: K8s dynamic pod placement conflicts with the static, coordinated startup required for multi-node TP
-3. **Network Abstraction**: K8s networking abstractions don't expose the low-level network primitives needed for efficient tensor communication
-4. **Missing MPI Integration**: No native MPI job management in Kubernetes (though projects like MPI-Operator exist, they're not widely adopted for inference)
-
-### Current Support in Dynamo Backends
-
-Based on the official Dynamo documentation and examples, here's what each backend supports:
-
-#### SGLang Multi-Node Support ✅
-- **Status**: Fully supported for multi-node tensor parallelism
-- **Requirements**: Slurm environment with MPI coordination
-- **Configuration**: Uses `--nnodes`, `--node-rank`, and `--dist-init-addr` parameters
-- **Example**: DeepSeek-R1 across 4 nodes with TP16 (16 GPUs total)
-- **Kubernetes**: Not supported - requires Slurm/MPI environment
-
-```bash
-# SGLang multi-node example (Slurm only)
-python3 -m dynamo.sglang.worker \
-  --model-path /model/ \
-  --tp 16 \
-  --nnodes 2 \
-  --node-rank 0 \
-  --dist-init-addr ${HEAD_NODE_IP}:29500
-```
-
-#### TensorRT-LLM Multi-Node Support ✅
-- **Status**: Fully supported with WideEP (Wide Expert Parallelism)
-- **Requirements**: Slurm environment with MPI launcher (`srun` or `mpirun`)
-- **Configuration**: Multi-node TP16/EP16 configurations available
-- **Example**: DeepSeek-R1 across 4x GB200 nodes
-- **Kubernetes**: Not supported - requires MPI coordination
-
-```bash
-# TRT-LLM multi-node example (Slurm only)
-srun --nodes=4 --ntasks-per-node=4 \
-  python3 -m dynamo.trtllm \
-  --model-path /model/ \
-  --engine-config wide_ep_config.yaml
-```
-
-#### vLLM Multi-Node Support ❌
-- **Status**: Currently not supported for true multi-node tensor parallelism
-- **Current Capability**: Single-node tensor parallelism only (multiple GPUs on same node)
-- **Our Implementation**: Multi-replica for high availability (each replica runs full model)
-- **Future**: May be added in future vLLM releases
-
-### Workarounds for Large Models
-
-If you need to run models that don't fit on a single node, consider these alternatives:
-
-#### 1. High-Memory Single-Node Instances
-Use AWS instances with large GPU memory:
+### nodeSelector
 
 ```yaml
-# Example: P5.48xlarge with 8x H100 (80GB each = 640GB total)
 extraPodSpec:
   nodeSelector:
-    karpenter.sh/nodepool: p5-gpu-karpenter
-    node.kubernetes.io/instance-type: p5.48xlarge
+    karpenter.sh/nodepool: g7e-nvidia    # Change GPU pool
+```
+
+Available pools (see the
+[infrastructure guide](/docs/infra/inference/nvidia-dynamo) for the full list):
+`g5-nvidia`, `g6-nvidia`, `g6e-nvidia`, `g7e-nvidia`, `p5-nvidia`,
+`p5e-nvidia`, `p5en-nvidia`, `p6-b200-nvidia`, `p6-b300-nvidia`.
+
+### Image versions
+
+```yaml
+image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+```
+
+Also available: `sglang-runtime:1.0.1`, `tensorrtllm-runtime:1.0.1`,
+`dynamo-frontend:1.0.1`. When v1.1.0 is published to NGC, update all tags.
+
+### Model and TP size
+
+```yaml
+args:
+  - python3 -m dynamo.vllm
+  - --model
+  - meta-llama/Llama-3.3-70B-Instruct
+  - --tensor-parallel-size
+  - "2"
+```
+
+### Resources
+
+```yaml
 resources:
   requests:
-    gpu: "8"
+    cpu: "16"
+    memory: "100Gi"
+    gpu: "2"
+  limits:
+    cpu: "16"
+    memory: "100Gi"
+    gpu: "2"
 ```
 
-#### 2. Model Optimization Techniques
-- **Quantization**: Use FP16, FP8, or INT8 quantized models
-- **Model Pruning**: Remove less important parameters
-- **LoRA/QLoRA**: Use parameter-efficient fine-tuned models
+Match memory to the instance type (g7e.24xlarge has 384GB RAM; request
+≤200Gi to leave headroom for system).
 
-#### 3. Slurm-Based Deployments
-For models requiring true multi-node TP, deploy outside Kubernetes:
+## Cleaning Up
+
+Delete a specific DGD:
 
 ```bash
-# Use official Dynamo examples with Slurm
-cd ~/dynamo/docs/components/backends/trtllm/
-./srun_disaggregated.sh  # 8-node disaggregated deployment
+kubectl delete dgd minimax-m2-7 -n dynamo-system
 ```
 
-#### 4. Disaggregated Architecture
-Use our disaggregated examples for better resource utilization:
+Delete all DGDs:
 
-- **Prefill Workers**: Handle input processing (can be smaller instances)
-- **Decode Workers**: Handle token generation (optimized for throughput)
-- **Independent Scaling**: Scale each component based on workload
+```bash
+kubectl delete dgd --all -n dynamo-system
+```
 
-### Future Development
-
-**Multi-Node Tensor Parallelism in Kubernetes** may become available in future versions through:
-
-1. **Enhanced MPI Integration**: Projects like Kubeflow's MPI-Operator for inference workloads
-2. **Native K8s Support**: Kubernetes SIG-Scheduling working on gang scheduling and coordinated pod startup
-3. **Vendor Solutions**: Cloud providers may develop custom solutions for managed inference
-4. **Framework Evolution**: Inference frameworks adding Kubernetes-native distributed execution
-
-### Recommendations
-
-**For Current Deployments:**
-
-1. **Small to Medium Models (≤70B)**: Use single-node deployments with multi-GPU instances
-2. **High Availability Needs**: Use our multi-replica examples with KV routing
-3. **Large Models (70B+)**: Consider Slurm-based deployments outside Kubernetes
-4. **Maximum Performance**: Use disaggregated architecture with optimized worker ratios
-
-**Monitoring Future Developments:**
-
-- Follow [Dynamo releases](https://github.com/ai-dynamo/dynamo/releases) for Kubernetes multi-node TP updates
-- Check [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) and [vLLM](https://github.com/vllm-project/vllm) roadmaps
-- Monitor [Kubernetes SIG-Scheduling](https://github.com/kubernetes/community/tree/master/sig-scheduling) for gang scheduling improvements
-
-## Alternative Deployment Options
-
-### For Existing EKS Clusters
-
-If you already have an EKS cluster with GPU nodes and prefer a simpler approach:
-
-1. **Direct Helm Installation**: Use the official NVIDIA Dynamo Helm charts directly from the [dynamo source repository](https://github.com/ai-dynamo/dynamo)
-2. **Manual Setup**: Follow the upstream NVIDIA Dynamo documentation for Kubernetes deployment
-3. **Custom Integration**: Integrate Dynamo components into your existing infrastructure
-
-### Why Use This Blueprint?
-
-This blueprint is designed for users who want:
-- **Complete Infrastructure**: End-to-end setup from VPC to running inference
-- **Production Readiness**: Enterprise-grade monitoring, security, and scalability
-- **AWS Integration**: Optimized for EKS, ECR, EFA, and other AWS services
-- **Best Practices**: Follows ai-on-eks patterns and AWS recommendations
+For complete infrastructure teardown, see the
+[infrastructure guide's cleanup section](/docs/infra/inference/nvidia-dynamo#clean-up).
 
 ## References
 
-### Official NVIDIA Resources
+### Blueprint Resources
 
-**📚 Documentation:**
-- [NVIDIA Dynamo Official Docs](https://docs.nvidia.com/dynamo/latest/): Complete platform documentation
-- [NVIDIA Developer Blog](https://developer.nvidia.com/blog/introducing-nvidia-dynamo-a-low-latency-distributed-inference-framework-for-scaling-reasoning-ai-models/): Introduction and architecture overview
-- [NVIDIA Dynamo Product Page](https://developer.nvidia.com/dynamo): Official product information
+- [Blueprint directory](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo) — all manifests + tooling
+- [Engines README](https://github.com/awslabs/ai-on-eks/blob/main/blueprints/inference/nvidia-dynamo/engines/README.md)
+- [Models README](https://github.com/awslabs/ai-on-eks/blob/main/blueprints/inference/nvidia-dynamo/models/README.md)
+- [Features README](https://github.com/awslabs/ai-on-eks/blob/main/blueprints/inference/nvidia-dynamo/features/README.md)
+- [Model management README](https://github.com/awslabs/ai-on-eks/blob/main/blueprints/inference/nvidia-dynamo/features/model-management/README.md)
+- [Observability README](https://github.com/awslabs/ai-on-eks/blob/main/blueprints/inference/nvidia-dynamo/features/observability/README.md)
 
-**🐙 Source Code:**
-- [NVIDIA Dynamo GitHub](https://github.com/ai-dynamo/dynamo): Main repository with source code
-- [NVIDIA NIXL Library](https://github.com/ai-dynamo/nixl): NVIDIA Inference Xfer Library for low-latency communication
+### Inference Frameworks
 
-**📦 Container Images & Helm Charts:**
-- [Dynamo Collection (NGC)](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/collections/ai-dynamo): Complete collection of Dynamo resources
-- [Dynamo Platform Helm Chart](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/helm-charts/dynamo-platform): Official Kubernetes deployment
-- [vLLM Runtime Container](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/containers/vllm-runtime): vLLM backend (v0.4.1)
-- [SGLang Runtime Container](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/containers/sglang-runtime): SGLang backend (v0.4.1)
-- [TensorRT-LLM Runtime Container](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/ai-dynamo/containers/trtllm-runtime): TRT-LLM backend (v0.4.1)
+- [vLLM](https://github.com/vllm-project/vllm) — high-throughput LLM inference engine
+- [SGLang](https://github.com/sgl-project/sglang) — structured generation with RadixAttention
+- [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) — NVIDIA optimized inference
 
-### AI-on-EKS Blueprint Resources
+### Other
 
-**🏗️ Infrastructure & Examples:**
-- [AI-on-EKS Repository](https://github.com/awslabs/ai-on-eks): Main blueprint repository
-- [Dynamo Blueprint](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo): Complete blueprint with examples
-- [Infrastructure Code](https://github.com/awslabs/ai-on-eks/tree/main/infra/nvidia-dynamo): Terraform and deployment scripts
-
-**📖 Example Documentation:**
-- [Hello World](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/hello-world/README.md): CPU-only testing example
-- [vLLM Example](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/vllm/README.md): vLLM aggregated serving
-- [SGLang Example](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/sglang/README.md): RadixAttention caching
-- [TensorRT-LLM Example](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/trtllm/README.md): Optimized inference
-- [Multi-Replica vLLM](https://github.com/awslabs/ai-on-eks/tree/main/blueprints/inference/nvidia-dynamo/multi-replica-vllm/README.md): High availability deployments
-
-### Related Technologies
-
-**🚀 Inference Frameworks:**
-- [vLLM](https://github.com/vllm-project/vllm): High-throughput LLM inference engine
-- [SGLang](https://github.com/sgl-project/sglang): Structured generation with RadixAttention
-- [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM): NVIDIA's optimized inference library
-
-**☸️ Kubernetes & AWS:**
-- [Amazon EKS](https://aws.amazon.com/eks/): Managed Kubernetes service
-- [Karpenter](https://karpenter.sh/): Kubernetes node autoscaling
-- [ArgoCD](https://argo-cd.readthedocs.io/): GitOps continuous delivery
-
-## Next Steps
-
-1. **Explore Examples**: Check the examples folder in the GitHub repository
-2. **Scale Deployments**: Configure multi-node setups for larger models
-3. **Integrate Applications**: Connect your applications to the inference endpoints
-4. **Monitor Performance**: Use Grafana dashboards for ongoing monitoring
-5. **Optimize Costs**: Implement auto-scaling and resource optimization
-
-## Clean Up
-
-When you're finished with your NVIDIA Dynamo deployment, remove all resources using the consolidated cleanup script:
-
-```bash
-cd infra/nvidia-dynamo
-./cleanup.sh
-```
-
-**What gets cleaned up (in proper order):**
-- **Dynamo Examples**: All deployed inference graphs and workloads
-- **Dynamo Platform**: Operator, API Store, and supporting services
-- **ArgoCD Applications**: GitOps-managed resources
-- **Kubernetes Resources**: Namespaces, secrets, and configurations
-- **Infrastructure**: EKS cluster, VPC, security groups, and all AWS resources
-- **Cost Optimization**: Ensures no lingering resources continue billing
-
-**Features:**
-- **Intelligent Ordering**: Cleans up dependencies in correct sequence
-- **Safety Checks**: Confirms resource existence before deletion attempts
-- **Progress Feedback**: Shows cleanup progress and any issues encountered
-- **Complete Removal**: No manual cleanup steps required
-
-**Duration**: ~10-15 minutes for complete infrastructure teardown
-
-This deployment provides a production-ready NVIDIA Dynamo environment on Amazon EKS with enterprise-grade features including Karpenter automatic scaling, EFA networking, and seamless AWS service integration.
+- [AIPerf benchmarking](https://github.com/ai-dynamo/aiperf)
+- [NVIDIA Dynamo docs](https://docs.nvidia.com/dynamo/latest/)
+- Infrastructure guide: [/docs/infra/inference/nvidia-dynamo](/docs/infra/inference/nvidia-dynamo)
