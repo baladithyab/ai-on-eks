@@ -138,8 +138,10 @@ EOF
 
             if [ -n "$response" ] && echo "$response" | jq -e '.choices[0]' >/dev/null 2>&1; then
                 local content
-                content=$(echo "$response" | jq -r '.choices[0].message.content' 2>/dev/null | head -1)
-                pass "${dgd_name}: chat completion OK — ${content:0:80}"
+                # Reasoning models (DeepSeek R1, MiniMax M2, GLM) put the answer in
+                # reasoning_content when content is null. Check both.
+                content=$(echo "$response" | jq -r '.choices[0].message.content // .choices[0].message.reasoning_content // "(no content)"' 2>/dev/null | tr '\n' ' ' | head -c 80)
+                pass "${dgd_name}: chat completion OK — ${content}"
             else
                 fail "${dgd_name}: chat completion failed"
                 if [ -n "$response" ]; then

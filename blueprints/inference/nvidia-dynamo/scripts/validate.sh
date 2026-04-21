@@ -16,7 +16,7 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 NAMESPACE="${NAMESPACE:-dynamo-system}"
 OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-dynamo-system}"
-PVC_NAME="${PVC_NAME:-dynamo-pvc}"
+PVC_NAME="${PVC_NAME:-dynamo-model-cache}"
 HF_SECRET_NAME="${HF_SECRET_NAME:-hf-token-secret}"
 
 PASS=0
@@ -73,9 +73,17 @@ check_pass "Kubernetes cluster reachable"
 # ---------------------------------------------------------------------------
 section "Custom Resource Definitions"
 
+# Required CRDs for Dynamo v1.0.1 (from platform chart)
 REQUIRED_CRDS=(
     "dynamographdeployments.nvidia.com"
-    "dynamoservicedeployments.nvidia.com"
+    "dynamocomponentdeployments.nvidia.com"
+    "dynamomodels.nvidia.com"
+)
+
+# Optional CRDs — present when DGDR profiling or autoscaling used
+OPTIONAL_CRDS=(
+    "dynamographdeploymentrequests.nvidia.com"
+    "dynamographdeploymentscalingadapters.nvidia.com"
 )
 
 for crd in "${REQUIRED_CRDS[@]}"; do
@@ -83,6 +91,14 @@ for crd in "${REQUIRED_CRDS[@]}"; do
         check_pass "CRD exists: ${crd}"
     else
         check_fail "CRD missing: ${crd}"
+    fi
+done
+
+for crd in "${OPTIONAL_CRDS[@]}"; do
+    if kubectl get crd "$crd" >/dev/null 2>&1; then
+        check_pass "Optional CRD exists: ${crd}"
+    else
+        check_warn "Optional CRD missing: ${crd}"
     fi
 done
 
@@ -174,14 +190,31 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# LeaderWorkerSet CRD
+# LeaderWorkerSet CRD (optional — only required for multinode deployments)
 # ---------------------------------------------------------------------------
-section "LeaderWorkerSet"
+section "LeaderWorkerSet (optional)"
 
 if kubectl get crd leaderworkersets.leaderworkerset.x-k8s.io >/dev/null 2>&1; then
-    check_pass "LeaderWorkerSet CRD installed"
+    check_pass "LeaderWorkerSet CRD installed (multinode deployments supported)"
 else
-    check_fail "LeaderWorkerSet CRD missing (required for multi-worker deployments)"
+    check_warn "LeaderWorkerSet CRD not installed — single-node DGDs only. Enable via 'enable_leader_worker_set = true' in blueprint.tfvars for multinode."
+fi
+
+# ---------------------------------------------------------------------------
+# Grove + KAI (optional — adopted schedulers)
+# ---------------------------------------------------------------------------
+section "Schedulers (optional)"
+
+if kubectl get crd podcliquesets.grove.io >/dev/null 2>&1; then
+    check_pass "Grove scheduler CRDs installed"
+else
+    check_warn "Grove CRDs not installed — enable via dynamo_grove_adopt/install in blueprint.tfvars"
+fi
+
+if kubectl get crd queues.scheduling.run.ai >/dev/null 2>&1; then
+    check_pass "KAI scheduler CRDs installed"
+else
+    check_warn "KAI CRDs not installed — enable via dynamo_kai_adopt/install in blueprint.tfvars"
 fi
 
 # ---------------------------------------------------------------------------
