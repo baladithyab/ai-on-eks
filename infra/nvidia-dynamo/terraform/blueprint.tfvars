@@ -51,7 +51,7 @@ dynamo_platform_version = "1.0.1"
 dynamo_grove_adopt       = true
 dynamo_kai_adopt         = true
 grove_standalone_version = "v0.1.0-alpha.7"
-kai_standalone_version   = "v0.13.0"
+kai_standalone_version   = "v0.13.4"
 
 # --- Discovery & External Services ---
 # dynamo_discovery_backend       = "kubernetes"  # "kubernetes" (default) or "etcd"

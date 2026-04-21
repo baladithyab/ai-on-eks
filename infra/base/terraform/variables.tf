@@ -679,7 +679,7 @@ variable "grove_standalone_version" {
 variable "kai_standalone_version" {
   description = "KAI Scheduler Helm chart version for standalone deployment"
   type        = string
-  default     = "v0.13.0"
+  default     = "v0.13.4"
 }
 
 # --- Observability ---
