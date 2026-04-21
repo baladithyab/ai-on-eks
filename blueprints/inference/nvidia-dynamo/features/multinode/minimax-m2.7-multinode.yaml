@@ -1,0 +1,118 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# MiniMax-M2.7 — Multi-Node Tensor Parallelism via Grove
+#
+# Multinode variant of models/minimax-m2.7.yaml. Splits the 230B / 10B-active
+# MoE model across 2 nodes with TP=4 total (2 GPUs per node).
+#
+# How multinode works here:
+#   - `multinode.nodeCount: 2` tells the Dynamo operator this service must be
+#     gang-scheduled across 2 pods, one per node.
+#   - The operator generates a Grove PodCliqueScalingGroup behind the scenes
+#     with -ldr + -wkr PodCliques. No Grove/KAI reference is needed in this
+#     manifest — the operator auto-detects Grove+KAI and wires them.
+#   - `resources.limits.gpu: "2"` is the per-pod allocation. Total GPUs =
+#     nodeCount × per-pod gpu = 2 × 2 = 4.
+#   - `--tensor-parallel-size 4` matches the total GPU count.
+#
+# Hardware:
+#   g7e.12xlarge (2× RTX PRO 96GB per node) × 2 nodes = 4 GPUs / ~384GB VRAM
+#   FP8 weights ≈ 230GB; comfortable headroom for activations + KV cache.
+#
+# Prerequisites:
+#   - Karpenter NodePool: g7e-nvidia (accepts 12xlarge, 24xlarge, 48xlarge)
+#   - PVC: dynamo-model-cache (prefetch the model first with:
+#          ./scripts/prefetch-model.sh MiniMaxAI/MiniMax-M2.7)
+#   - Secret: hf-token-secret
+#   - Grove + KAI Scheduler installed (default in our infra via adopt mode)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  # Short name required: multinode validates the combined length of
+  # DGD name + service name + '-ldr'/'-wkr' suffix to be ≤ 45 chars.
+  name: minimax-m2-7-mn
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    VllmWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      replicas: 1
+      # Split the worker across 2 nodes. Grove + KAI gang-schedule the
+      # leader/worker pods together; the operator injects schedulerName.
+      multinode:
+        nodeCount: 2
+      resources:
+        requests:
+          cpu: "16"
+          memory: "100Gi"
+          gpu: "2"
+        limits:
+          cpu: "16"
+          memory: "100Gi"
+          gpu: "2"
+      sharedMemory:
+        size: 32Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: g7e-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model MiniMaxAI/MiniMax-M2.7 \
+                --tensor-parallel-size 4 \
+                --max-model-len 32768 \
+                --gpu-memory-utilization 0.90 \
+                --trust-remote-code \
+                --dyn-tool-call-parser minimax_m2 \
+                --dyn-reasoning-parser minimax_append_think \
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

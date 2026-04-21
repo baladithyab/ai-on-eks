@@ -15,6 +15,7 @@ feature is self-contained and demonstrates a specific Dynamo capability.
 | **[dgdr-trtllm.yaml](dgdr-trtllm.yaml)** | DynamoGraphDeploymentRequest (TRT-LLM) | Auto-profiling + config |
 | **[model-management/](model-management/)** | DynamoModel CRDs + LoRA | Model lifecycle |
 | **[multimodal/](multimodal/)** | LLaVA, Qwen-VL | Image/video understanding |
+| **[multinode/](multinode/)** | MiniMax-M2.7 across 2 nodes via Grove | Cross-node tensor parallelism |
 | **[observability/](observability/)** | OTEL tracing, audit logs | Tracing and metrics |
 
 ## Quick Start
