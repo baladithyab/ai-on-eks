@@ -38,22 +38,6 @@ spec:
           value: /models
       componentType: frontend
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       resources:
         requests:
           cpu: "2"
@@ -85,20 +69,6 @@ spec:
       componentType: worker
       subComponentType: decode
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 5
-        timeoutSeconds: 30
-        failureThreshold: 1
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 10
-        timeoutSeconds: 30
-        failureThreshold: 60
       resources:
         requests:
           cpu: "4"
@@ -112,12 +82,6 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 10
-            failureThreshold: 60
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           command:
             - /bin/sh
@@ -129,7 +93,6 @@ spec:
               --tensor-parallel-size 1
               --enforce-eager
               --max-model-len 4096
-              2>&1 | tee /tmp/vllm-decode.log
         tolerations:
           - key: "nvidia.com/gpu"
             operator: "Exists"
@@ -150,20 +113,6 @@ spec:
       componentType: worker
       subComponentType: prefill
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 5
-        timeoutSeconds: 30
-        failureThreshold: 1
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 10
-        timeoutSeconds: 30
-        failureThreshold: 60
       resources:
         requests:
           cpu: "4"
@@ -177,12 +126,6 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g6e-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 10
-            failureThreshold: 60
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           command:
             - /bin/sh
@@ -196,7 +139,6 @@ spec:
               --tensor-parallel-size 1
               --enforce-eager
               --max-model-len 8192
-              2>&1 | tee /tmp/vllm-prefill.log
         tolerations:
           - key: "nvidia.com/gpu"
             operator: "Exists"

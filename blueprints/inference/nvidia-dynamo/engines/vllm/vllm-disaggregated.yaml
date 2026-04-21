@@ -24,22 +24,6 @@ spec:
           value: /models
       componentType: frontend
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       resources:
         requests:
           cpu: "2"
@@ -71,20 +55,6 @@ spec:
       componentType: worker
       subComponentType: decode
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 5
-        timeoutSeconds: 30
-        failureThreshold: 1
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 10
-        timeoutSeconds: 30
-        failureThreshold: 60
       resources:
         requests:
           cpu: "8"
@@ -98,19 +68,13 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 10
-            failureThreshold: 60
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.vllm --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --tensor-parallel-size 2 2>&1 | tee /tmp/vllm-decode.log
+            - python3 -m dynamo.vllm --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --tensor-parallel-size 2
     VllmPrefillWorker:
       envFromSecret: hf-token-secret
       volumeMounts:
@@ -126,20 +90,6 @@ spec:
       componentType: worker
       subComponentType: prefill
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 5
-        timeoutSeconds: 30
-        failureThreshold: 1
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 10
-        timeoutSeconds: 30
-        failureThreshold: 60
       resources:
         requests:
           cpu: "8"
@@ -153,16 +103,10 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 10
-            failureThreshold: 60
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           workingDir: /workspace/components/backends/vllm
           command:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.vllm --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --disaggregation-mode prefill --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' --tensor-parallel-size 2 2>&1 | tee /tmp/vllm-prefill.log
+            - python3 -m dynamo.vllm --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --disaggregation-mode prefill --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' --tensor-parallel-size 2

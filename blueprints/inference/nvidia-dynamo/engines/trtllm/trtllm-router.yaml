@@ -68,22 +68,6 @@ spec:
       componentType: frontend
       replicas: 1
       # Production-grade health checks with appropriate timeouts
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       # Resource specifications ensure Karpenter provisions appropriate nodes
       resources:
         requests:
@@ -123,20 +107,6 @@ spec:
           value: /models
       componentType: worker
       replicas: 2 # Multiple workers for load balancing and cache distribution
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 5
-        timeoutSeconds: 30
-        failureThreshold: 1
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 10
-        timeoutSeconds: 30
-        failureThreshold: 60
       resources:
         requests:
           cpu: "8"
@@ -161,13 +131,6 @@ spec:
             configMap:
               name: trtllm-router-config
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 120
           image: nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:1.0.1
           workingDir: /workspace/components/backends/trtllm
           # Mount ConfigMap to engine_configs directory
@@ -186,4 +149,4 @@ spec:
                 --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
                 --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
                 --extra-engine-args engine_configs/agg.yaml \
-                --publish-events-and-metrics 2>&1 | tee /tmp/trtllm-worker.log
+                --publish-events-and-metrics

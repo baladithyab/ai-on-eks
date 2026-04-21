@@ -159,13 +159,6 @@ spec:
           workingDir: /workspace/examples/multimodal
           securityContext:
             privileged: true
-          startupProbe:
-            httpGet:
-              path: /live
-              port: 9090
-            periodSeconds: 10
-            timeoutSeconds: 30
-            failureThreshold: 120
           command:
             - /bin/sh
             - -c

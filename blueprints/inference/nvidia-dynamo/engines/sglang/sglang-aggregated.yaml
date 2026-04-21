@@ -22,24 +22,6 @@ spec:
         value: /models
       - name: HF_HUB_CACHE
         value: /models
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        exec:
-          command:
-          - /bin/sh
-          - -c
-          - exit 0
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       componentType: frontend
       replicas: 1
       resources:
@@ -66,25 +48,6 @@ spec:
         value: /models
       - name: HF_HUB_CACHE
         value: /models
-      livenessProbe:
-        exec:
-          command:
-          - /bin/sh
-          - -c
-          - exit 0
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        exec:
-          command:
-          - /bin/sh
-          - -c
-          - exit 0
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       componentType: worker
       replicas: 1
       resources:

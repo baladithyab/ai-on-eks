@@ -26,22 +26,6 @@ spec:
       volumeMounts:
       - name: dynamo-model-cache
         mountPoint: /models
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       envs:
       - name: DYN_ROUTER_MODE
         value: kv
@@ -76,20 +60,6 @@ spec:
         value: /models
       - name: HF_HUB_CACHE
         value: /models
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 5
-        timeoutSeconds: 30
-        failureThreshold: 3
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 10
-        timeoutSeconds: 30
-        failureThreshold: 60
       componentType: worker
       replicas: 2
       resources:
@@ -105,18 +75,12 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 10
-            failureThreshold: 60
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           command:
           - /bin/sh
           - -c
           args:
-          - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B --disaggregation-mode prefill --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' 2>&1 | tee /tmp/prefill.log
+          - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B --disaggregation-mode prefill --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
     DecodeWorker:
       envFromSecret: hf-token-secret
       volumeMounts:
@@ -127,20 +91,6 @@ spec:
         value: /models
       - name: HF_HUB_CACHE
         value: /models
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 5
-        timeoutSeconds: 30
-        failureThreshold: 3
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 10
-        timeoutSeconds: 30
-        failureThreshold: 60
       componentType: worker
       replicas: 2
       resources:
@@ -156,15 +106,9 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 10
-            failureThreshold: 60
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           command:
           - /bin/sh
           - -c
           args:
-          - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B 2>&1 | tee /tmp/decode.log
+          - python3 -m dynamo.vllm --model Qwen/Qwen3-0.6B

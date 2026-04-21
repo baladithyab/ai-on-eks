@@ -31,24 +31,6 @@ spec:
           value: /models
       componentType: frontend
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        exec:
-          command:
-            - /bin/sh
-            - -c
-            - "exit 0"
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       resources:
         requests:
           cpu: "2"
@@ -77,20 +59,6 @@ spec:
           value: /models
       componentType: worker
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 5
-        timeoutSeconds: 30
-        failureThreshold: 1
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 10
-        timeoutSeconds: 30
-        failureThreshold: 60
       resources:
         requests:
           cpu: "16"
@@ -106,12 +74,6 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g7e-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 60
-            failureThreshold: 300
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           command:
             - /bin/sh
@@ -124,4 +86,3 @@ spec:
                 --max-model-len 8192 \
                 --gpu-memory-utilization 0.90 \
                 --enforce-eager \
-                2>&1 | tee /tmp/vllm.log

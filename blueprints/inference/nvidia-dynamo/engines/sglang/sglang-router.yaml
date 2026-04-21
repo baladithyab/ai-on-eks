@@ -26,22 +26,6 @@ spec:
           value: /models
       componentType: frontend
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       resources:
         requests:
           cpu: "2"
@@ -75,20 +59,6 @@ spec:
           value: /models
       componentType: worker
       replicas: 2
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 5
-        timeoutSeconds: 30
-        failureThreshold: 1
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 10
-        timeoutSeconds: 30
-        failureThreshold: 60
       resources:
         requests:
           cpu: "6"
@@ -102,12 +72,6 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: g5-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 10
-            failureThreshold: 60
           image: nvcr.io/nvidia/ai-dynamo/sglang-runtime:1.0.1
           workingDir: /workspace/components/backends/sglang
           command:
@@ -121,4 +85,4 @@ spec:
                 --page-size 16 \
                 --tp 1 \
                 --trust-remote-code \
-                --skip-tokenizer-init 2>&1 | tee /tmp/sglang-worker.log
+                --skip-tokenizer-init

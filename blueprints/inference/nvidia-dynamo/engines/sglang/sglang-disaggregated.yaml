@@ -29,24 +29,6 @@ spec:
           value: /models
       componentType: frontend
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        exec:
-          command:
-            - /bin/sh
-            - -c
-            - exit 0
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       resources:
         requests:
           cpu: "2"
@@ -76,25 +58,6 @@ spec:
       componentType: worker
       subComponentType: decode
       replicas: 1
-      livenessProbe:
-        exec:
-          command:
-            - /bin/sh
-            - -c
-            - exit 0
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        exec:
-          command:
-            - /bin/sh
-            - -c
-            - exit 0
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       resources:
         requests:
           cpu: "8"
@@ -115,8 +78,6 @@ spec:
             - -c
           args:
             - |
-              export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:$LD_LIBRARY_PATH
-              export PATH=$PATH:/usr/local/nvidia/bin:/usr/local/nvidia/lib64
               exec python3 -m dynamo.sglang \
                 --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
                 --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
@@ -143,25 +104,6 @@ spec:
       componentType: worker
       subComponentType: prefill
       replicas: 1
-      livenessProbe:
-        exec:
-          command:
-            - /bin/sh
-            - -c
-            - exit 0
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        exec:
-          command:
-            - /bin/sh
-            - -c
-            - exit 0
-        initialDelaySeconds: 60
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
       resources:
         requests:
           cpu: "8"
@@ -182,8 +124,6 @@ spec:
             - -c
           args:
             - |
-              export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:$LD_LIBRARY_PATH
-              export PATH=$PATH:/usr/local/nvidia/bin:/usr/local/nvidia/lib64
               exec python3 -m dynamo.sglang \
                 --model-path deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
                 --served-model-name deepseek-ai/DeepSeek-R1-Distill-Llama-8B \

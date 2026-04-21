@@ -60,22 +60,6 @@ spec:
           value: /models
       componentType: frontend
       replicas: 1
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 120
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 10
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 120
-        periodSeconds: 60
-        timeoutSeconds: 30
-        failureThreshold: 20
       resources:
         requests:
           cpu: "4"
@@ -107,20 +91,6 @@ spec:
       replicas: 1
       sharedMemory:
         size: 64Gi
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 30
-        timeoutSeconds: 30
-        failureThreshold: 5
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 30
-        timeoutSeconds: 30
-        failureThreshold: 120
       resources:
         requests:
           cpu: "96"
@@ -136,12 +106,6 @@ spec:
           #   p5en-nvidia (H200), p6-b200-nvidia (B200), p6-b300-nvidia (B300)
           karpenter.sh/nodepool: p5en-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 30
-            failureThreshold: 180
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           env:
             - name: VLLM_ATTENTION_BACKEND
@@ -195,20 +159,6 @@ spec:
       replicas: 1
       sharedMemory:
         size: 64Gi
-      livenessProbe:
-        httpGet:
-          path: /live
-          port: 9090
-        periodSeconds: 30
-        timeoutSeconds: 30
-        failureThreshold: 5
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: 9090
-        periodSeconds: 30
-        timeoutSeconds: 30
-        failureThreshold: 120
       resources:
         requests:
           cpu: "96"
@@ -224,12 +174,6 @@ spec:
           #   p5en-nvidia (H200), p6-b200-nvidia (B200), p6-b300-nvidia (B300)
           karpenter.sh/nodepool: p5en-nvidia
         mainContainer:
-          startupProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            periodSeconds: 30
-            failureThreshold: 180
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           env:
             - name: VLLM_ATTENTION_BACKEND
