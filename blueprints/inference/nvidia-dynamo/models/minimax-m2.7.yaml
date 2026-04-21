@@ -144,7 +144,7 @@ spec:
                 --gpu-memory-utilization 0.90 \
                 --trust-remote-code \
                 --dyn-tool-call-parser minimax_m2 \
-                --dyn-reasoning-parser minimax_m2 \
+                --dyn-reasoning-parser minimax_append_think \
                 2>&1 | tee /tmp/vllm.log
         tolerations:
           - key: "nvidia.com/gpu"
