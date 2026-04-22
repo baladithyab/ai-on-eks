@@ -47,7 +47,7 @@
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: ds-v32-disagg-efa
+  name: ds-v32-efa
   namespace: dynamo-system
 spec:
   pvcs:
@@ -103,23 +103,28 @@ spec:
       componentType: worker
       subComponentType: prefill
       replicas: 1
-      # Single-node TP=8 for prefill — fits in one p5e.48xlarge.
+      # Multi-node TP=16 for prefill — 2× p5.48xlarge gang-scheduled by Grove.
+      # 342GB FP8 weights ÷ 16 GPUs = ~21 GB/GPU, fits 80 GB H100 with headroom.
+      multinode:
+        nodeCount: 2
       resources:
         requests:
           cpu: "96"
           memory: "800Gi"
           gpu: "8"
-          vpc.amazonaws.com/efa: "32"
+          custom:
+            vpc.amazonaws.com/efa: "32"
         limits:
           cpu: "96"
           memory: "800Gi"
           gpu: "8"
-          vpc.amazonaws.com/efa: "32"
+          custom:
+            vpc.amazonaws.com/efa: "32"
       sharedMemory:
         size: 128Gi
       extraPodSpec:
         nodeSelector:
-          karpenter.sh/nodepool: p5e-nvidia
+          karpenter.sh/nodepool: p5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1-efa-amd64
           command:
@@ -129,12 +134,13 @@ spec:
             - |
               python3 -m dynamo.vllm \
                 --model deepseek-ai/DeepSeek-V3.2-Exp \
-                --tensor-parallel-size 8 \
+                --tensor-parallel-size 16 \
                 --enable-expert-parallel \
                 --kv-cache-dtype fp8 \
                 --max-model-len 8192 \
                 --trust-remote-code \
-                --gpu-memory-utilization 0.90 \
+                --gpu-memory-utilization 0.82 \
+                --max-num-seqs 128 \
                 --disaggregation-mode prefill \
                 --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
         tolerations:
@@ -163,7 +169,7 @@ spec:
       componentType: worker
       subComponentType: decode
       replicas: 1
-      # Multi-node TP=16 for decode — 2× p5e.48xlarge gang-scheduled by Grove.
+      # Multi-node TP=16 for decode — 2× p5.48xlarge gang-scheduled by Grove.
       multinode:
         nodeCount: 2
       resources:
@@ -171,17 +177,19 @@ spec:
           cpu: "96"
           memory: "800Gi"
           gpu: "8"
-          vpc.amazonaws.com/efa: "32"
+          custom:
+            vpc.amazonaws.com/efa: "32"
         limits:
           cpu: "96"
           memory: "800Gi"
           gpu: "8"
-          vpc.amazonaws.com/efa: "32"
+          custom:
+            vpc.amazonaws.com/efa: "32"
       sharedMemory:
         size: 128Gi
       extraPodSpec:
         nodeSelector:
-          karpenter.sh/nodepool: p5e-nvidia
+          karpenter.sh/nodepool: p5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1-efa-amd64
           command:
@@ -196,7 +204,8 @@ spec:
                 --kv-cache-dtype fp8 \
                 --max-model-len 8192 \
                 --trust-remote-code \
-                --gpu-memory-utilization 0.90 \
+                --gpu-memory-utilization 0.82 \
+                --max-num-seqs 128 \
                 --disaggregation-mode decode \
                 --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
         tolerations:

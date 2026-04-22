@@ -22,18 +22,21 @@
 #
 # Layout:
 #   Frontend:        1× dynamo-frontend pod (CPU only)
-#   PrefillWorker:   1× p5e.48xlarge (8× H200 141 GB), TP=8, single-node
-#   DecodeWorker:    2× p5e.48xlarge (8× H200 141 GB each), TP=16, MULTINODE
-#   Total: 3 p5e.48xlarge = 24 H200s, 3384 GB VRAM
+#   PrefillWorker:   2× p5.48xlarge (8× H100 80 GB each), TP=16, MULTINODE
+#   DecodeWorker:    2× p5.48xlarge (8× H100 80 GB each), TP=16, MULTINODE
+#   Total: 4 p5.48xlarge = 32 H100s, 2560 GB VRAM
 #
-# Why keep p5e hardware even without EFA:
-#   Running this on p5e (H200) keeps the hardware invariant with the EFA
-#   variant — benchmark deltas are attributable entirely to EFA (image,
-#   device, env vars). If budget is a concern, swap to p5-nvidia (H100)
-#   but note the weights-per-node math changes (H100 is 80 GB vs 141 GB).
+# Why TP=16 (multinode) for both roles:
+#   DeepSeek V3.2-Exp in block-FP8 is 342 GB. With TP=8 on a single
+#   p5.48xlarge (8× H100 80 GB = 640 GB), per-GPU weight footprint is
+#   ~43 GB, but activations + cache_transceiver buffers push past the
+#   80 GB H100 budget during model load. TP=16 across 2 nodes drops
+#   per-GPU weight to ~21 GB, leaving 50+ GB for everything else.
+#   On p5e/p5en (H200 141 GB) TP=8 single-node would fit; adjust
+#   accordingly if you have H200 capacity.
 #
 # Prerequisites:
-#   - Karpenter NodePool: p5e-nvidia (H200)
+#   - Karpenter NodePool: p5-nvidia (H100 + EFA)
 #   - PVC: dynamo-model-cache (MUST prefetch first:
 #          ./scripts/prefetch-model.sh deepseek-ai/DeepSeek-V3.2-Exp)
 #   - Secret: hf-token-secret
@@ -90,7 +93,10 @@ spec:
       componentType: worker
       subComponentType: prefill
       replicas: 1
-      # Single-node TP=8 for prefill — fits in one p5e.48xlarge.
+      # Multi-node TP=16 for prefill — 2× p5.48xlarge gang-scheduled by Grove.
+      # 342GB FP8 weights ÷ 16 GPUs = ~21 GB/GPU, fits 80 GB H100 with headroom.
+      multinode:
+        nodeCount: 2
       resources:
         requests:
           cpu: "96"
@@ -104,7 +110,7 @@ spec:
         size: 128Gi
       extraPodSpec:
         nodeSelector:
-          karpenter.sh/nodepool: p5e-nvidia
+          karpenter.sh/nodepool: p5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           command:
@@ -114,12 +120,13 @@ spec:
             - |
               python3 -m dynamo.vllm \
                 --model deepseek-ai/DeepSeek-V3.2-Exp \
-                --tensor-parallel-size 8 \
+                --tensor-parallel-size 16 \
                 --enable-expert-parallel \
                 --kv-cache-dtype fp8 \
                 --max-model-len 8192 \
                 --trust-remote-code \
-                --gpu-memory-utilization 0.90 \
+                --gpu-memory-utilization 0.82 \
+                --max-num-seqs 128 \
                 --disaggregation-mode prefill \
                 --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
         tolerations:
@@ -140,7 +147,7 @@ spec:
       componentType: worker
       subComponentType: decode
       replicas: 1
-      # Multi-node TP=16 for decode — 2× p5e.48xlarge gang-scheduled by Grove.
+      # Multi-node TP=16 for decode — 2× p5.48xlarge gang-scheduled by Grove.
       multinode:
         nodeCount: 2
       resources:
@@ -156,7 +163,7 @@ spec:
         size: 128Gi
       extraPodSpec:
         nodeSelector:
-          karpenter.sh/nodepool: p5e-nvidia
+          karpenter.sh/nodepool: p5-nvidia
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
           command:
@@ -171,7 +178,8 @@ spec:
                 --kv-cache-dtype fp8 \
                 --max-model-len 8192 \
                 --trust-remote-code \
-                --gpu-memory-utilization 0.90 \
+                --gpu-memory-utilization 0.82 \
+                --max-num-seqs 128 \
                 --disaggregation-mode decode \
                 --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
         tolerations:
