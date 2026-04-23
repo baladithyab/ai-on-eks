@@ -67,6 +67,16 @@ spec:
           value: "^lo,docker,veth"
         - name: NCCL_PROTO
           value: simple
+        # UCX_TLS=^mm excludes shared-memory transport to avoid broadcast
+        # deadlock. Live-tested: UCX on the -efa-amd64 image does NOT support
+        # EFA (rdmacm fails with "Input/output error" at init — this image
+        # builds UCX without libfabric, so NIXL's UCX-based KV transfer
+        # silently falls back to UCX-over-TCP. Setting UCX_TLS=rc,cuda,self
+        # to force RDMA fails with "Destination is unreachable" because no
+        # cross-node UCX transport is available. ^mm is the working default.
+        # NCCL separately uses EFA via aws-ofi-nccl + libfabric — that path
+        # is healthy but irrelevant for single-node TP=8 (NCCL all-reduce
+        # stays on NVLink).
         - name: UCX_TLS
           value: "^mm"
       componentType: worker
@@ -120,8 +130,8 @@ spec:
                 --tensor-parallel-size 8 \
                 --enable-expert-parallel \
                 --max-model-len 8192 \
-                --gpu-memory-utilization 0.90 \
-                --max-num-seqs 256 \
+                --gpu-memory-utilization 0.85 \
+                --max-num-seqs 128 \
                 --trust-remote-code \
                 --disaggregation-mode prefill \
                 --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
@@ -148,6 +158,7 @@ spec:
           value: "^lo,docker,veth"
         - name: NCCL_PROTO
           value: simple
+        # See PrefillWorker UCX_TLS note above.
         - name: UCX_TLS
           value: "^mm"
       componentType: worker
@@ -196,8 +207,8 @@ spec:
                 --tensor-parallel-size 8 \
                 --enable-expert-parallel \
                 --max-model-len 8192 \
-                --gpu-memory-utilization 0.90 \
-                --max-num-seqs 256 \
+                --gpu-memory-utilization 0.85 \
+                --max-num-seqs 128 \
                 --trust-remote-code \
                 --disaggregation-mode decode \
                 --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'

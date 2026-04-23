@@ -111,54 +111,107 @@ Single-request warm throughput at TP=8 per worker on 2× p5.48xlarge
 | Model | Arch | Warm tok/s (TCP) | Warm tok/s (EFA) | Notes |
 |-------|------|-----------------:|-----------------:|-------|
 | Llama 3.3-70B-Instruct | Dense 70B | 97 | not tested | Half the GPU burn of MoE models |
-| Llama 4 Maverick 17B-128E FP8 | MoE 402B / 17B active | 78 | 78 | TCP ≈ EFA for short prompts |
-| Qwen3-235B-A22B-Instruct FP8 | MoE 235B / 22B active | 98 | 1.2–10 (anomalous) | Works over TCP; EFA degrades 10-100×, unexplained |
+| Llama 4 Maverick 17B-128E FP8 | MoE 402B / 17B active | 78 | 78 | TCP ≈ EFA |
+| Qwen3-235B-A22B-Instruct FP8 | MoE 235B / 22B active | 98 | 97 | TCP ≈ EFA (after memory tuning, see below) |
 
-### Why EFA ≈ TCP at this hardware tier
+### Why EFA ≈ TCP at this hardware tier (and why the -efa image doesn't actually use EFA for NIXL)
 
 All three deployments use **single-node TP=8 per worker**: tensor-parallel
 all-reduce stays within one node over NVLink (900 GB/s). The only cross-
-node traffic is the prefill → decode KV cache handoff, which for 22–200
-token prompts is <1 MB per request — far below the point where EFA RDMA
-beats VPC TCP. EFA's benefit shows up at multi-node TP (cross-node NCCL
-all-reduce every token) or very long contexts (multi-GB KV transfers).
-For the single-node TP=8 disagg pattern demonstrated here, TCP is fine
-and EFA can even regress (see Qwen anomaly).
+node traffic is the prefill → decode KV cache handoff, which for short
+prompts is <1 MB per request — far below the point where any high-speed
+interconnect matters.
+
+But there's a more fundamental reason TCP ≈ EFA here: **on the
+`vllm-runtime:1.0.1-efa-amd64` image, UCX (which NIXL uses for KV
+transfers) cannot actually use EFA.** Live-tested with verbose UCX
+logging:
+
+```
+UCX DIAG failed to open CM on component rdmacm: Input/output error
+```
+
+The image's UCX is built without libfabric support, so UCX can't open
+the EFA rdma-cm path. UCX silently falls back to its built-in TCP
+transport — which is what runs today. Setting `UCX_TLS=rc,cuda,self`
+to force true RDMA-only fails with `UCX ERROR: no active messages
+transport` and `Destination is unreachable` — confirming UCX has no
+EFA-capable transport on this image.
+
+NCCL is separately healthy: `aws-ofi-nccl 1.17.2 ... Selected provider
+is efa, fabric is efa-direct (found 32 nics)`. NCCL does use EFA. But
+single-node TP=8 never triggers cross-node NCCL, so EFA's NCCL support
+doesn't help disagg here. It would help multi-node TP (which is blocked
+by the separate MLA bug for the models of interest).
+
+**Practical implication**: if all your disagg workloads are
+single-node-TP, use the plain `vllm-runtime:1.0.1` TCP blueprints.
+The `-efa-amd64` variants are useful only when you go multi-node TP,
+and only if/when UCX-EFA support lands upstream.
+
+### EFA image memory-tuning gotcha (Qwen3-235B)
+
+The `-efa-amd64` image baseline VRAM usage is a few hundred MB higher
+than the plain image (libfabric + aws-ofi-nccl buffers). The same
+`--gpu-memory-utilization 0.90 --max-num-seqs 256` that works on the
+TCP image OOMs on EFA — symptom is **not an outright crash** but a
+flood of `CUDA warning: out of memory (function destroyEvent)` during
+request processing, which slows inference 30–100× without killing
+the engine (requests complete but at 1–10 tok/s instead of 97).
+
+Live-tested fix: set `--gpu-memory-utilization 0.85` and
+`--max-num-seqs 128` on EFA blueprints. Zero CUDA OOM warnings,
+throughput matches TCP. Both Qwen and Maverick EFA blueprints here
+use these values.
+
+Transition table (Qwen3-235B EFA, same hardware):
+
+| Config | Warm tok/s | CUDA OOM warnings | KV xfer MB/s |
+|--------|-----------:|------------------:|-------------:|
+| 0.90 / 256 (TCP-image settings) | 1–10 | hundreds/sec | 2.4 |
+| 0.85 / 128 (fixed) | 97 | 0 | 81 |
 
 ### EFA same-AZ requirement
 
-EFA RDMA is **intra-AZ only**. If Karpenter places prefill and decode
-pods in different Availability Zones (us-west-2a vs 2b etc.), the NIXL
-handshake fails with `nixl_cu12._bindings.nixlBackendError:
-NIXL_ERR_BACKEND` at `add_remote_agent` and decode crashes on the first
-request. All EFA blueprints in this directory include a `podAffinity`
-stanza requiring prefill and decode to schedule in the same
+EFA RDMA is **intra-AZ only** (even though NIXL can't use it, NCCL can,
+and the discovery/handshake paths still assume same-AZ topology). If
+Karpenter places prefill and decode pods in different Availability
+Zones, the NIXL handshake fails with
+`nixl_cu12._bindings.nixlBackendError: NIXL_ERR_BACKEND` at
+`add_remote_agent` and decode crashes on the first request. All EFA
+blueprints in this directory include a `podAffinity` stanza requiring
+prefill and decode to schedule in the same
 `topology.kubernetes.io/zone`. Without it, multi-AZ placement is
 non-deterministic and you will sometimes get broken deployments. The
-TCP variants don't need this constraint — VPC TCP works cross-AZ fine
-(just with slightly higher latency).
+TCP variants don't need this constraint.
 
 ## Troubleshooting
 
 Common issues when deploying disaggregated features:
 
-1. **NIXL transfer errors / slow disaggregation**: the base `:1.0.1` runtime
-   images lack libfabric, so NIXL falls back to TCP over UCX. Use the
-   `:1.0.1-efa-amd64` image variants on EFA-capable nodepools (`p5-nvidia`,
-   `p5e-nvidia`, `p5en-nvidia`) for full fabric bandwidth.
+1. **NIXL transfer errors / slow disaggregation**: on Dynamo v1.0.1, the
+   `:1.0.1-efa-amd64` image's UCX is built without libfabric so NIXL
+   **always falls back to TCP-over-UCX** regardless of EFA availability
+   (see above). For single-node TP=8 disagg, prefer the plain `:1.0.1`
+   TCP blueprints — same throughput, simpler config.
 2. **`nixlBackendError: NIXL_ERR_BACKEND` on first request (EFA)**: prefill
-   and decode landed in different AZs. EFA is intra-AZ only. The EFA
-   blueprints in this directory already include same-AZ `podAffinity`;
-   if you're writing a new one, copy that stanza.
-3. **MLA-family decode crash on first request**: known v1.0.1 bug in
+   and decode landed in different AZs. EFA discovery/handshake is intra-AZ
+   only. The EFA blueprints in this directory already include same-AZ
+   `podAffinity`; if you're writing a new one, copy that stanza.
+3. **EFA variant runs 10–100× slower than TCP variant**: GPU memory
+   pressure from `-efa-amd64`'s extra libfabric buffers. The
+   `CUDA warning: out of memory (function destroyEvent)` log line flood
+   is the signature. Lower `--gpu-memory-utilization` to 0.85 and
+   `--max-num-seqs` to 128 to restore TCP-equivalent speed.
+4. **MLA-family decode crash on first request**: known v1.0.1 bug in
    `NixlConnector`'s `use_mla: True` code path. Affects DeepSeek V2/V3/V3.2/
    R1/R1-0528. See [multinode/README.md](multinode/README.md) for the full
    control matrix. Workaround: use non-MLA models (Llama 3.3/4, Qwen3 MoE).
-4. **KV-aware routing not working**: verify the frontend has `DYN_ROUTER_MODE=kv`
+5. **KV-aware routing not working**: verify the frontend has `DYN_ROUTER_MODE=kv`
    and workers publish KV events on ZMQ port 20080.
-5. **Workers not discovering each other**: check NATS connectivity and that
+6. **Workers not discovering each other**: check NATS connectivity and that
    the Dynamo operator pod is `Ready` in `dynamo-system`.
-6. **Throughput below expectations**: monitor GPU utilization via DCGM
+7. **Throughput below expectations**: monitor GPU utilization via DCGM
    exporter + Grafana; imbalanced prefill-to-decode ratio is a common cause.
 
 ## Related
