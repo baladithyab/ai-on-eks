@@ -10,21 +10,47 @@ KAI Scheduler, with or without EFA RDMA for the cross-node transport.
 | [minimax-m2.7-multinode.yaml](minimax-m2.7-multinode.yaml) | MiniMax-M2.7 (230B / 10B active MoE) | Aggregated, TP=4 | 2× g7e.12xlarge | VPC TCP (~25 Gbps) |
 | [deepseek-v3.2-multinode-disagg.yaml](deepseek-v3.2-multinode-disagg.yaml) | DeepSeek V3.2-Exp (671B MoE, MLA+DSA) | **Disaggregated**, prefill TP=16 + decode TP=16 | 4× p5.48xlarge (H100) | VPC TCP (~25 Gbps) |
 | [deepseek-v3.2-multinode-disagg-efa.yaml](deepseek-v3.2-multinode-disagg-efa.yaml) | DeepSeek V3.2-Exp (671B MoE, MLA+DSA) | **Disaggregated**, prefill TP=16 + decode TP=16 | 4× p5.48xlarge (H100 + EFA) | **EFA RDMA (3.2 Tbps/node)** |
+| [deepseek-r1-multinode-disagg.yaml](deepseek-r1-multinode-disagg.yaml) | DeepSeek R1-0528 (671B MoE, MLA) | **Disaggregated**, prefill TP=16 + decode TP=16 | 4× p5.48xlarge (H100) | VPC TCP (~25 Gbps) |
 
-> ⚠️ **Known issue (Dynamo v1.0.1 + DeepSeek V3.2-Exp):** both DeepSeek V3.2
-> disagg blueprints load and reach `Ready` on all 5 pods, but the decode
-> engine crashes during the first request's NIXL KV-cache transfer.
-> Identical failure on both TCP and EFA transports — the issue is not the
-> transport. Crash trace:
-> `EngineCore encountered a fatal error ... RuntimeError: Worker failed`
-> at `kv_cache_usage=1.4e-4` (blocks just allocated, no forward step yet).
-> The underlying worker-process stack trace is lost to `multiproc_executor`
-> before stdout flushes. Suspected incompatibility between DeepSeek V3.2's
-> `fp8_ds_mla` kv-cache format (sparse-MLA) and the v1.0.1 `NixlConnector`.
-> A simpler model (e.g. Llama-3.3-70B or Qwen3 MoE) is a useful control to
-> confirm Dynamo + NIXL disagg works end-to-end on this cluster before
-> debugging this specific model path. See the commit history for
-> `fix(dynamo): DeepSeek V3.2 multinode` for the full live-test data.
+> ⚠️ **Known issue (Dynamo v1.0.1 + MLA disaggregation, NOT model-specific):**
+> every DeepSeek disagg blueprint in this directory loads and reaches
+> `Ready` on all 5 pods, but the decode engine crashes during the first
+> request's NIXL KV-cache transfer, with `latency_ms=300-3300` before
+> the frontend 500s. Pattern:
+>
+>     Stream disconnected... recreating stream...
+>     Cannot recreate stream: Migration limit exhausted
+>     Backend error: 500 "Stream ended before generation completed"
+>
+> The decode-side vLLM EngineCore dies; the Python runtime respawns a
+> fresh engine within ~1 min (no pod restart visible, since only the
+> subprocess dies — kubelet doesn't see it). Worker-subprocess stack
+> trace is lost to `multiproc_executor` before stdout flushes.
+>
+> **This is NOT V3.2- or DSA-specific.** Tested on a live cluster:
+> - V3.2-Exp with `--kv-cache-dtype fp8` (→ `fp8_ds_mla` + sparse) → fails
+> - V3.2-Exp with `--kv-cache-dtype auto` (→ bf16, sparse) → fails
+> - V3.2-Exp over TCP → fails
+> - V3.2-Exp over EFA → fails
+> - **R1-0528** (dense MLA, standard fp8) over TCP → **also fails**
+>
+> Prefill always processes the prompt successfully (logs show
+> `prompt throughput: ~1.7 tok/s`). Failure is unambiguously in the
+> decode-side NIXL KV-cache receive path for MLA models.
+>
+> Suspected root cause: the `NixlConnector` KV-buffer layout registration
+> for MLA's latent-vector format is broken in v1.0.1 at scale, or
+> specific to disaggregated-mode sends with `use_mla: True` (confirmed
+> in the logs: `Registering KV_Caches. use_mla: True, kv_buffer_device:
+> cuda, use_host_buffer: False`). Non-MLA disagg (Llama, Qwen dense)
+> is a useful control to confirm the bug is MLA-gated.
+>
+> Upstream tracking: file a bug at `ai-dynamo/dynamo` referencing the
+> v1.0.1 release, attach prefill logs showing prompt throughput +
+> decode discovery instance-removal events. See the commit history for
+> `fix(dynamo): DeepSeek V3.2 multinode` and
+> `feat(dynamo): add R1 multinode disagg control blueprint` for the
+> full live-test data.
 
 ## Which one to use
 

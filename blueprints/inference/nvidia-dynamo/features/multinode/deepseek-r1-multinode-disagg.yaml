@@ -1,0 +1,190 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# DeepSeek R1 (0528) — Multi-Node + Disaggregated (TCP)
+#
+# Designed as a CONTROL for the V3.2-Exp pair. R1 uses the same 671B MoE
+# architecture and MLA attention as V3.2, but WITHOUT DeepSeek Sparse
+# Attention (DSA). That makes this blueprint useful for isolating whether
+# the v1.0.1 NixlConnector's first-request crash we observed on V3.2 is:
+#   (a) specific to V3.2's fp8_ds_mla + FLASHMLA_SPARSE path, or
+#   (b) a broader MLA + NIXL disagg bug that affects R1 as well.
+#
+# See the multinode README "Known issue" section for the crash details.
+#
+# DeepSeek R1-0528 architecture:
+#   - 671B total parameters, ~37B active (MoE)
+#   - Standard MLA (Multi-head Latent Attention) — dense, not sparse
+#   - Standard fp8 kv-cache dtype (NOT fp8_ds_mla)
+#   - FLASHINFER_MLA attention backend (NOT FLASHMLA_SPARSE)
+#   - Block-FP8 weights (~671 GB on disk, 163 safetensor shards)
+#   - Requires Hopper (H100/H200) or Blackwell (B200/B300)
+#
+# Layout (identical to the V3.2 TCP pair for apples-to-apples):
+#   Frontend:        1× dynamo-frontend pod (CPU only)
+#   PrefillWorker:   2× p5.48xlarge (8× H100 80 GB each), TP=16, MULTINODE
+#   DecodeWorker:    2× p5.48xlarge (8× H100 80 GB each), TP=16, MULTINODE
+#   Total: 4 p5.48xlarge = 32 H100s, 2560 GB VRAM
+#
+# Why TP=16 multinode on H100:
+#   671 GB FP8 weights ÷ 8 GPUs (single p5.48xlarge) = 84 GB/GPU > 80 GB.
+#   Single-node TP=8 OOMs on load. TP=16 across 2 nodes drops per-GPU
+#   weight to ~42 GB, leaving ~38 GB for activations + KV cache.
+#   On H200 (141 GB) TP=8 single-node fits; see models/deepseek-r1-671b.yaml
+#   for that layout.
+#
+# Prerequisites:
+#   - Karpenter NodePool: p5-nvidia (H100)
+#   - PVC: dynamo-model-cache (MUST prefetch first:
+#          ./scripts/prefetch-model.sh deepseek-ai/DeepSeek-R1-0528)
+#   - Secret: hf-token-secret
+#   - Grove + KAI Scheduler installed (default in our infra via adopt mode)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: ds-r1-disagg
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    PrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      # Multi-node TP=16 for prefill — 2× p5.48xlarge gang-scheduled by Grove.
+      # 671GB FP8 weights ÷ 16 GPUs = ~42 GB/GPU, fits 80 GB H100 with headroom.
+      multinode:
+        nodeCount: 2
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model deepseek-ai/DeepSeek-R1-0528 \
+                --tensor-parallel-size 16 \
+                --enable-expert-parallel \
+                --quantization fp8 \
+                --kv-cache-dtype fp8 \
+                --max-model-len 8192 \
+                --trust-remote-code \
+                --gpu-memory-utilization 0.82 \
+                --max-num-seqs 128 \
+                --dyn-reasoning-parser deepseek_r1 \
+                --disaggregation-mode prefill \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    DecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      # Multi-node TP=16 for decode — 2× p5.48xlarge gang-scheduled by Grove.
+      multinode:
+        nodeCount: 2
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model deepseek-ai/DeepSeek-R1-0528 \
+                --tensor-parallel-size 16 \
+                --enable-expert-parallel \
+                --quantization fp8 \
+                --kv-cache-dtype fp8 \
+                --max-model-len 8192 \
+                --trust-remote-code \
+                --gpu-memory-utilization 0.82 \
+                --max-num-seqs 128 \
+                --dyn-reasoning-parser deepseek_r1 \
+                --disaggregation-mode decode \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
