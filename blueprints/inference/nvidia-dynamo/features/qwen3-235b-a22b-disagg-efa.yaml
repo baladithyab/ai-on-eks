@@ -1,33 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Llama 4 Maverick 17B-128E-Instruct-FP8 — Single-Node Disaggregated (EFA)
+# Qwen3-235B-A22B-Instruct-2507-FP8 — Single-Node Disaggregated (EFA)
 #
-# EFA sibling of llama-4-maverick-disagg.yaml. Identical in every way
+# EFA sibling of qwen3-235b-a22b-disagg.yaml. Identical in every way
 # except:
-#   - image tag: vllm-runtime:1.0.1-efa-amd64 (includes libfabric +
-#     aws-ofi-nccl + EFA-aware UCX)
+#   - image tag: vllm-runtime:1.0.1-efa-amd64
 #   - vpc.amazonaws.com/efa: "32" under resources.{requests,limits}.custom
-#   - FI_PROVIDER=efa + FI_EFA_USE_DEVICE_RDMA=1 + NCCL tuning
+#   - FI_PROVIDER=efa + NCCL tuning env vars
 #
-# Apples-to-apples benchmark target for TCP vs EFA:
-#   NCCL all-reduce (cross-rank, within-node and cross-node) rides EFA
-#   instead of VPC TCP. NIXL KV cache transfer (prefill → decode) also
-#   rides EFA. Expected delta: 5-15x latency improvement on KV transfer
-#   for medium-to-long prompts; ~2x throughput improvement under high
-#   concurrency due to avoiding TCP congestion on the VPC interface.
-#
-# See llama-4-maverick-disagg.yaml for full architecture notes.
-#
-# Prerequisites (additional):
-#   - aws-efa-k8s-device-plugin installed (default in blueprint.tfvars)
-#   - Karpenter NodePool provisions p5.48xlarge with 32 EFA interfaces
-#     (default for p5-nvidia nodepool)
+# See qwen3-235b-a22b-disagg.yaml for full architecture notes.
 
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: llama4-mav-efa
+  name: qwen3-235b-efa
   namespace: dynamo-system
 spec:
   pvcs:
@@ -104,14 +91,11 @@ spec:
         nodeSelector:
           karpenter.sh/nodepool: p5-nvidia
         # REQUIRED for EFA: co-locate prefill and decode workers in the same
-        # Availability Zone. EFA RDMA is intra-AZ only; cross-AZ placement
-        # causes NIXL handshake failures (nixl_cu12._bindings.nixlBackendError:
-        # NIXL_ERR_BACKEND at add_remote_agent). Live-observed when Karpenter
-        # provisioned p5.48xlarge spot across 2a/2b during a sibling Qwen EFA
-        # deployment — the DGD that happened to land single-AZ worked, the
-        # cross-AZ one did not. Without this affinity, EFA deploys are
-        # non-deterministic; with it, KAI gang-scheduling + podAffinity
-        # guarantee correctness.
+        # Availability Zone. EFA RDMA is intra-AZ ONLY — cross-AZ placement
+        # causes NIXL handshake failures (nixlBackendError: NIXL_ERR_BACKEND
+        # at add_remote_agent). Live-tested: without this constraint, Karpenter
+        # will freely place p5.48xlarge spot across AZs based on capacity,
+        # which breaks disagg.
         affinity:
           podAffinity:
             requiredDuringSchedulingIgnoredDuringExecution:
@@ -119,7 +103,7 @@ spec:
                   matchExpressions:
                     - key: nvidia.com/dynamo-graph-deployment-name
                       operator: In
-                      values: ["llama4-mav-efa"]
+                      values: ["qwen3-235b-efa"]
                     - key: nvidia.com/dynamo-component-type
                       operator: In
                       values: ["worker"]
@@ -132,12 +116,12 @@ spec:
           args:
             - |
               python3 -m dynamo.vllm \
-                --model meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 \
+                --model Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
                 --tensor-parallel-size 8 \
                 --enable-expert-parallel \
                 --max-model-len 8192 \
-                --gpu-memory-utilization 0.85 \
-                --max-num-seqs 128 \
+                --gpu-memory-utilization 0.90 \
+                --max-num-seqs 256 \
                 --trust-remote-code \
                 --disaggregation-mode prefill \
                 --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
@@ -195,7 +179,7 @@ spec:
                   matchExpressions:
                     - key: nvidia.com/dynamo-graph-deployment-name
                       operator: In
-                      values: ["llama4-mav-efa"]
+                      values: ["qwen3-235b-efa"]
                     - key: nvidia.com/dynamo-component-type
                       operator: In
                       values: ["worker"]
@@ -208,12 +192,12 @@ spec:
           args:
             - |
               python3 -m dynamo.vllm \
-                --model meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 \
+                --model Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
                 --tensor-parallel-size 8 \
                 --enable-expert-parallel \
                 --max-model-len 8192 \
-                --gpu-memory-utilization 0.85 \
-                --max-num-seqs 128 \
+                --gpu-memory-utilization 0.90 \
+                --max-num-seqs 256 \
                 --trust-remote-code \
                 --disaggregation-mode decode \
                 --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'

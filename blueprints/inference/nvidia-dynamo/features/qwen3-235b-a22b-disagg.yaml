@@ -1,0 +1,176 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Qwen3-235B-A22B-Instruct-2507-FP8 — Single-Node Disaggregated (TCP)
+#
+# Alibaba's production MoE model at the ~20B-active tier. Serves as a
+# third non-MLA data point alongside Llama 3.3-70B (dense, 70B) and
+# Llama 4 Maverick (MoE, 402B/17B active) in the v1.0.1 disagg
+# validation matrix.
+#
+# Qwen3-235B-A22B architecture:
+#   - 235B total, 22B active (MoE, 128 experts per layer, top-8 routing)
+#   - Grouped-query attention (64 Q heads, 4 KV heads) — NOT MLA
+#   - 262K native context (we cap at 8192 for benchmark sanity)
+#   - Qwen team's official FP8 checkpoint (~120 GB on disk)
+#   - Instruct-tuned; "2507" is the July-2025 refresh
+#   - Apache 2.0 license — no HF gating, drop-in deploy
+#
+# Layout:
+#   Frontend:       1× dynamo-frontend pod (CPU only)
+#   PrefillWorker:  1× p5.48xlarge (8× H100 80 GB), TP=8, single-node
+#   DecodeWorker:   1× p5.48xlarge (8× H100 80 GB), TP=8, single-node
+#   Total: 2 p5.48xlarge = 16 H100s
+#
+# Why TP=8 single-node:
+#   235B FP8 ÷ 8 GPUs = ~15 GB/GPU for weights. Much lighter than
+#   Maverick's 50 GB/GPU, so gpu-memory-utilization 0.90 with
+#   max-num-seqs 256 is safe — more KV cache budget for higher
+#   concurrency throughput than Maverick at the same hardware tier.
+#
+# Prerequisites:
+#   - Karpenter NodePool: p5-nvidia (H100)
+#   - PVC: dynamo-model-cache (MUST prefetch first:
+#          ./scripts/prefetch-model.sh Qwen/Qwen3-235B-A22B-Instruct-2507-FP8)
+#   - Secret: hf-token-secret (HF token helpful for rate limits but
+#             model is public — no license acceptance required)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: qwen3-235b-disagg
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    PrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
+                --tensor-parallel-size 8 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.90 \
+                --max-num-seqs 256 \
+                --trust-remote-code \
+                --disaggregation-mode prefill \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    DecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
+                --tensor-parallel-size 8 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.90 \
+                --max-num-seqs 256 \
+                --trust-remote-code \
+                --disaggregation-mode decode \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
