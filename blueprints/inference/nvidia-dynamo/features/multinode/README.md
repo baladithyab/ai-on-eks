@@ -12,8 +12,8 @@ KAI Scheduler, with or without EFA RDMA for the cross-node transport.
 | [deepseek-v3.2-multinode-disagg-efa.yaml](deepseek-v3.2-multinode-disagg-efa.yaml) | DeepSeek V3.2-Exp (671B MoE, MLA+DSA) | **Disaggregated**, prefill TP=16 + decode TP=16 | 4× p5.48xlarge (H100 + EFA) | **EFA RDMA (3.2 Tbps/node)** |
 | [deepseek-r1-multinode-disagg.yaml](deepseek-r1-multinode-disagg.yaml) | DeepSeek R1-0528 (671B MoE, MLA) | **Disaggregated**, prefill TP=16 + decode TP=16 | 4× p5.48xlarge (H100) | VPC TCP (~25 Gbps) |
 
-> ⚠️ **Known issue (Dynamo v1.0.1 + MLA disaggregation, NOT model-specific):**
-> every DeepSeek disagg blueprint in this directory loads and reaches
+> ⚠️ **Known issue (Dynamo v1.0.1 + MLA disaggregation):**
+> Every MLA-family disagg blueprint in this directory loads and reaches
 > `Ready` on all 5 pods, but the decode engine crashes during the first
 > request's NIXL KV-cache transfer, with `latency_ms=300-3300` before
 > the frontend 500s. Pattern:
@@ -27,30 +27,44 @@ KAI Scheduler, with or without EFA RDMA for the cross-node transport.
 > subprocess dies — kubelet doesn't see it). Worker-subprocess stack
 > trace is lost to `multiproc_executor` before stdout flushes.
 >
-> **This is NOT V3.2- or DSA-specific.** Tested on a live cluster:
-> - V3.2-Exp with `--kv-cache-dtype fp8` (→ `fp8_ds_mla` + sparse) → fails
-> - V3.2-Exp with `--kv-cache-dtype auto` (→ bf16, sparse) → fails
-> - V3.2-Exp over TCP → fails
-> - V3.2-Exp over EFA → fails
-> - **R1-0528** (dense MLA, standard fp8) over TCP → **also fails**
+> ### Control matrix (all live-tested on dynamo-on-eks cluster)
+>
+> | # | Model | Attention | kv-cache | Transport | UCX_TLS | Result |
+> |---|-------|-----------|----------|-----------|---------|--------|
+> | 1 | V3.2-Exp | MLA + DSA | `fp8_ds_mla` | TCP | unset | ✗ |
+> | 2 | V3.2-Exp | MLA + DSA | `fp8_ds_mla` | EFA | unset | ✗ |
+> | 3 | V3.2-Exp | MLA + DSA | `auto` (bf16) | TCP | unset | ✗ |
+> | 4 | R1-0528 | MLA (dense) | `fp8` | TCP | unset | ✗ |
+> | 5 | R1-Distill-Llama-8B | **Llama (dense)** | `auto` | single-node | `^mm` | **✓** |
+> | 6 | R1-0528 | MLA (dense) | `fp8` | TCP | `^mm` | ✗ |
+>
+> Rules out as root causes: V3.2-specific features (DSA, `fp8_ds_mla`),
+> transport (TCP vs EFA), kv-cache dtype, UCX `mm` shared-memory transport.
+>
+> The only surviving variable: **`use_mla: True`** in the decode-side
+> `NixlConnector` KV-buffer registration (confirmed in failing runs'
+> logs: `Registering KV_Caches. use_mla: True, kv_buffer_device: cuda,
+> use_host_buffer: False`). The working non-MLA run logged
+> `use_mla: False` at the same code path.
 >
 > Prefill always processes the prompt successfully (logs show
 > `prompt throughput: ~1.7 tok/s`). Failure is unambiguously in the
-> decode-side NIXL KV-cache receive path for MLA models.
+> decode-side NIXL KV-cache receive path when MLA is enabled.
 >
-> Suspected root cause: the `NixlConnector` KV-buffer layout registration
-> for MLA's latent-vector format is broken in v1.0.1 at scale, or
-> specific to disaggregated-mode sends with `use_mla: True` (confirmed
-> in the logs: `Registering KV_Caches. use_mla: True, kv_buffer_device:
-> cuda, use_host_buffer: False`). Non-MLA disagg (Llama, Qwen dense)
-> is a useful control to confirm the bug is MLA-gated.
->
-> Upstream tracking: file a bug at `ai-dynamo/dynamo` referencing the
-> v1.0.1 release, attach prefill logs showing prompt throughput +
-> decode discovery instance-removal events. See the commit history for
-> `fix(dynamo): DeepSeek V3.2 multinode` and
-> `feat(dynamo): add R1 multinode disagg control blueprint` for the
+> **Upstream tracking**: file a bug at `ai-dynamo/dynamo` against v1.0.1.
+> Attach: (a) any MLA decode log showing the `Registering KV_Caches.
+> use_mla: True` line preceding the backend 500, (b) the control matrix
+> above, (c) the prefill-success-but-decode-silent-crash timing. See
+> the commit history for `feat(dynamo): add R1 multinode disagg control
+> blueprint + conclusive diagnosis` and
+> `fix(dynamo): add UCX_TLS=^mm + disprove as MLA-disagg fix` for the
 > full live-test data.
+>
+> **Non-MLA disagg is fully supported** — see
+> [`../../engines/vllm/vllm-disaggregated.yaml`](../../engines/vllm/vllm-disaggregated.yaml)
+> (R1-Distill-Llama-8B, 2× g5) for a working template. Use any
+> Llama/Qwen/Mistral-family model as drop-in replacements for V3.2/R1
+> while the upstream MLA fix is pending.
 
 ## Which one to use
 

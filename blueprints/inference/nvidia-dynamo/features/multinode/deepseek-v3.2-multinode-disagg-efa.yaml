@@ -100,6 +100,11 @@ spec:
           value: "^lo,docker,veth"
         - name: NCCL_PROTO
           value: simple
+        # Matches upstream engines/vllm/vllm-disaggregated.yaml convention.
+        # Live-tested: UCX_TLS=^mm does NOT fix the v1.0.1 MLA-disagg decode
+        # crash (see README), but included for UCX transport hygiene.
+        - name: UCX_TLS
+          value: "^mm"
       componentType: worker
       subComponentType: prefill
       replicas: 1
@@ -166,6 +171,9 @@ spec:
           value: "^lo,docker,veth"
         - name: NCCL_PROTO
           value: simple
+        # See PrefillWorker UCX_TLS note above.
+        - name: UCX_TLS
+          value: "^mm"
       componentType: worker
       subComponentType: decode
       replicas: 1

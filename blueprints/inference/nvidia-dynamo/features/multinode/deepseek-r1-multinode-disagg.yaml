@@ -88,6 +88,13 @@ spec:
           value: /models
         - name: HF_HUB_CACHE
           value: /models
+        # Exclude shared-memory transport. Set by upstream's canonical
+        # engines/vllm/vllm-disaggregated.yaml; good hygiene for UCX
+        # stability. Live-tested: does NOT fix the v1.0.1 MLA-disagg
+        # decode crash (see README known-issue section), but does not
+        # hurt and matches upstream convention.
+        - name: UCX_TLS
+          value: "^mm"
       componentType: worker
       subComponentType: prefill
       replicas: 1
@@ -144,6 +151,9 @@ spec:
           value: /models
         - name: HF_HUB_CACHE
           value: /models
+        # See PrefillWorker UCX_TLS note above.
+        - name: UCX_TLS
+          value: "^mm"
       componentType: worker
       subComponentType: decode
       replicas: 1
