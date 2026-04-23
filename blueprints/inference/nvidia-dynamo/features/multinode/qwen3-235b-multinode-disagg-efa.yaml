@@ -1,0 +1,240 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Qwen3-235B-A22B-Instruct-2507-FP8 — Multi-Node + Disaggregated (EFA)
+#
+# EFA sibling of qwen3-235b-multinode-disagg.yaml. This is the FIRST
+# disagg config where EFA actually matters — at TP=16 across 2 nodes,
+# every token's attention + MoE all-reduce rides cross-node NCCL. EFA
+# (100 Gbps via aws-ofi-nccl + libfabric) vs VPC TCP (~25 Gbps) delivers
+# a measurable latency win on this path.
+#
+# NOTE: NIXL KV transfers (prefill → decode) still go over UCX-over-TCP
+# because UCX on the -efa-amd64 image can't open rdmacm (see
+# ../README.md for the full UCX-no-EFA finding). Only the intra-role
+# NCCL all-reduce (both in prefill and in decode) benefits from EFA.
+# That is the dominant cross-node traffic at TP=16, so the benefit is
+# real.
+#
+# Layout:
+#   Frontend:        1× dynamo-frontend pod (CPU only)
+#   PrefillWorker:   2× p5.48xlarge (8× H100 80 GB each) + EFA, TP=16
+#   DecodeWorker:    2× p5.48xlarge (8× H100 80 GB each) + EFA, TP=16
+#   Total: 4 p5.48xlarge = 32 H100s + 128 EFA NICs
+#
+# Memory tuning (vs TCP variant):
+#   -efa-amd64 image has higher baseline VRAM from libfabric +
+#   aws-ofi-nccl + EFA driver buffers (~400 MB/GPU). The same tight
+#   0.90/256 that works on TCP OOMs here with a flood of
+#   'CUDA warning: out of memory (function destroyEvent)' — cut to
+#   0.85/128 for headroom. Matches single-node EFA blueprint
+#   convention.
+#
+# Prerequisites:
+#   - Karpenter NodePool: p5-nvidia
+#   - aws-efa-k8s-device-plugin (default in blueprint.tfvars)
+#   - PVC: dynamo-model-cache (prefetch first)
+#   - Secret: hf-token-secret
+#   - Grove + KAI Scheduler
+#   - 4× p5.48xlarge spot capacity (2+ in at least one AZ per role)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: qwen3-235b-mn-efa
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    PrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: NCCL_SOCKET_IFNAME
+          value: "^lo,docker,veth"
+        - name: NCCL_PROTO
+          value: simple
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      multinode:
+        nodeCount: 2
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "32"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "32"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        # Per-role same-AZ affinity — REQUIRED for EFA, which is intra-AZ
+        # only. The 2 prefill pods must be in one AZ so their cross-node
+        # NCCL all-reduce can take the EFA SRD path. Prefill pair and
+        # decode pair may be in different AZs (NIXL KV transfer uses TCP
+        # and works cross-AZ). Scoping affinity per-role (via
+        # nvidia.com/dynamo-component label) relaxes the capacity
+        # requirement from "4 p5s in one AZ" to "2 p5s in each of two
+        # AZs" — much more achievable on spot.
+        affinity:
+          podAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: nvidia.com/dynamo-graph-deployment-name
+                      operator: In
+                      values: ["qwen3-235b-mn-efa"]
+                    - key: nvidia.com/dynamo-component
+                      operator: In
+                      values: ["PrefillWorker"]
+                topologyKey: topology.kubernetes.io/zone
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1-efa-amd64
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
+                --tensor-parallel-size 16 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.85 \
+                --max-num-seqs 128 \
+                --trust-remote-code \
+                --disaggregation-mode prefill \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    DecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: NCCL_SOCKET_IFNAME
+          value: "^lo,docker,veth"
+        - name: NCCL_PROTO
+          value: simple
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      multinode:
+        nodeCount: 2
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "32"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "32"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        # Per-role same-AZ affinity — see PrefillWorker note above.
+        affinity:
+          podAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: nvidia.com/dynamo-graph-deployment-name
+                      operator: In
+                      values: ["qwen3-235b-mn-efa"]
+                    - key: nvidia.com/dynamo-component
+                      operator: In
+                      values: ["DecodeWorker"]
+                topologyKey: topology.kubernetes.io/zone
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1-efa-amd64
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
+                --tensor-parallel-size 16 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.85 \
+                --max-num-seqs 128 \
+                --trust-remote-code \
+                --disaggregation-mode decode \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

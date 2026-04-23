@@ -1,0 +1,222 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Qwen3-235B-A22B-Instruct-2507-FP8 — Multi-Node + Disaggregated (TCP)
+#
+# TCP baseline for the EFA comparison at multi-node scale. This is the
+# FIRST multinode disagg config in this repo where cross-node network
+# traffic actually drives inference latency — single-node TP=8 disagg
+# keeps all NCCL on NVLink, so EFA vs TCP didn't matter. At TP=16 across
+# 2 nodes, every token triggers cross-node NCCL all-reduce + expert-
+# parallel all-to-all, and the interconnect finally shows up in the
+# numbers.
+#
+# Layout:
+#   Frontend:        1× dynamo-frontend pod (CPU only)
+#   PrefillWorker:   2× p5.48xlarge (8× H100 80 GB each), TP=16, MULTINODE
+#   DecodeWorker:    2× p5.48xlarge (8× H100 80 GB each), TP=16, MULTINODE
+#   Total: 4 p5.48xlarge = 32 H100s, 2560 GB VRAM
+#
+# Why TP=16 multinode on Qwen:
+#   235 GB FP8 ÷ 16 GPUs = ~15 GB/GPU for weights (vs ~30 GB at TP=8).
+#   Plenty of headroom for KV cache at max-num-seqs 256 and max-model-len
+#   8192 — the whole point of going multinode when a smaller layout fits
+#   is to stress-test the cross-node interconnect. Use the single-node
+#   variant (../qwen3-235b-a22b-disagg.yaml) for production if one node
+#   is enough; use this for benchmarking or if you need larger batches /
+#   longer contexts.
+#
+# GQA considerations at TP=16:
+#   Qwen3-235B has 64 Q heads and 4 KV heads (GQA ratio 16). At TP=16:
+#   - 4 Q heads per rank (64/16)
+#   - 0.25 KV heads per rank — vLLM replicates KV heads to match TP size
+#     (each rank gets 1 full KV head worth of cache, duplicated 4x across
+#     the 4 ranks that would share one real KV head). This 4x KV cache
+#     inflation is accounted for — plenty of VRAM headroom remains.
+#
+# Prerequisites:
+#   - Karpenter NodePool: p5-nvidia (H100)
+#   - PVC: dynamo-model-cache (MUST prefetch first:
+#          ./scripts/prefetch-model.sh Qwen/Qwen3-235B-A22B-Instruct-2507-FP8)
+#   - Secret: hf-token-secret
+#   - Grove + KAI Scheduler (default in blueprint.tfvars)
+#   - 4× p5.48xlarge spot capacity (2+ in at least one AZ per role)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: qwen3-235b-mn
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    PrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      # Multi-node TP=16 for prefill — 2× p5.48xlarge gang-scheduled by Grove.
+      multinode:
+        nodeCount: 2
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        # Per-role same-AZ affinity: the 2 prefill pods must colocate in one
+        # AZ so their cross-node NCCL all-reduce can take the shortest path
+        # through the VPC (TCP variant) or eventually EFA (EFA variant). The
+        # prefill pair can be in a different AZ from the decode pair —
+        # prefill↔decode traffic is NIXL KV cache, which rides UCX-over-TCP
+        # and works cross-AZ. Scoping affinity per-role relaxes the capacity
+        # requirement from "4 p5s in one AZ" to "2 p5s in each of two AZs",
+        # which is much more achievable on spot.
+        affinity:
+          podAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: nvidia.com/dynamo-graph-deployment-name
+                      operator: In
+                      values: ["qwen3-235b-mn"]
+                    - key: nvidia.com/dynamo-component
+                      operator: In
+                      values: ["PrefillWorker"]
+                topologyKey: topology.kubernetes.io/zone
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
+                --tensor-parallel-size 16 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.90 \
+                --max-num-seqs 256 \
+                --trust-remote-code \
+                --disaggregation-mode prefill \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    DecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      # Multi-node TP=16 for decode — 2× p5.48xlarge gang-scheduled by Grove.
+      multinode:
+        nodeCount: 2
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        # Per-role same-AZ affinity — see PrefillWorker note above.
+        affinity:
+          podAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: nvidia.com/dynamo-graph-deployment-name
+                      operator: In
+                      values: ["qwen3-235b-mn"]
+                    - key: nvidia.com/dynamo-component
+                      operator: In
+                      values: ["DecodeWorker"]
+                topologyKey: topology.kubernetes.io/zone
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
+                --tensor-parallel-size 16 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.90 \
+                --max-num-seqs 256 \
+                --trust-remote-code \
+                --disaggregation-mode decode \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
