@@ -1,0 +1,184 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Llama 4 Maverick 17B-128E-Instruct-FP8 — Single-Node Disaggregated (TCP)
+#
+# Production-scale non-MLA disagg. This is the benchmark target originally
+# intended for the DeepSeek V3.2 pair — Maverick hits the same class of
+# model (~400B MoE / ~17B active) without tripping the v1.0.1 NIXL+MLA
+# bug that blocks V3.2/R1 (see multinode/README.md).
+#
+# Llama 4 Maverick architecture:
+#   - 402B total parameters, 17B active (MoE, 128 experts)
+#   - Grouped-query attention, standard multi-head — NOT MLA
+#   - Native multimodal (text + image); we use text-only here
+#   - 10M-token context capable (we cap at 8192 for benchmark sanity)
+#   - Meta's official FP8 checkpoint (~400 GB on disk)
+#
+# Layout:
+#   Frontend:       1× dynamo-frontend pod (CPU only)
+#   PrefillWorker:  1× p5.48xlarge (8× H100 80 GB), TP=8, single-node
+#   DecodeWorker:   1× p5.48xlarge (8× H100 80 GB), TP=8, single-node
+#   Total: 2 p5.48xlarge = 16 H100s = 1280 GB VRAM
+#
+# Why TP=8 single-node:
+#   402B FP8 ÷ 8 GPUs = ~50 GB/GPU for weights. With --gpu-memory-utilization
+#   0.85 that leaves ~18 GB/GPU for activations, KV cache, expert-parallel
+#   buffers, and MoE routing tables. Tight but fits — the FP8 checkpoint
+#   was designed for exactly this topology. Going TP=16 multinode would
+#   drop per-GPU weight to 25 GB but adds cross-node NCCL and Grove gang
+#   scheduling overhead; stick with single-node unless you hit OOM.
+#
+# Why --enable-expert-parallel:
+#   Maverick is MoE with 128 experts per layer. Without expert-parallel,
+#   every rank holds all 128 experts → OOM. With EP, experts are sharded
+#   across TP ranks, 16 experts per GPU.
+#
+# Prerequisites:
+#   - Karpenter NodePool: p5-nvidia (H100)
+#   - PVC: dynamo-model-cache (MUST prefetch first:
+#          ./scripts/prefetch-model.sh meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8)
+#   - Secret: hf-token-secret (MUST have accepted Meta's Llama 4 license
+#             on the HF account that minted the token — gated model)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: llama4-mav-disagg
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    PrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        # Exclude shared-memory transport (upstream canonical-template hygiene).
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 \
+                --tensor-parallel-size 8 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.85 \
+                --max-num-seqs 128 \
+                --trust-remote-code \
+                --disaggregation-mode prefill \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    DecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        # See PrefillWorker UCX_TLS note above.
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 \
+                --tensor-parallel-size 8 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.85 \
+                --max-num-seqs 128 \
+                --trust-remote-code \
+                --disaggregation-mode decode \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

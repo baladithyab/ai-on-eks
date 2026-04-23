@@ -1,0 +1,181 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Llama 3.3-70B-Instruct — Single-Node Disaggregated (TCP)
+#
+# Non-MLA production-scale disagg. Serves two purposes:
+#   1. Bridge between the 8B smoke test (too small to be meaningful) and
+#      Llama 4 Maverick (400B, slow to iterate on). Validates that
+#      Dynamo v1.0.1 disagg + NIXL scales cleanly past toy sizes at a
+#      point where we can still turn a deployment around in ~30 min.
+#   2. Workaround for the DeepSeek V3.2/R1 MLA disagg bug (see
+#      multinode/README.md). Dense Llama attention, no `use_mla: True`
+#      in NixlConnector's KV-buffer registration — sidesteps the bug
+#      that blocks the MLA-family deployments on v1.0.1.
+#
+# Llama 3.3-70B architecture:
+#   - 70B parameters, dense (NOT MoE)
+#   - Grouped-query attention (8 KV heads, 64 Q heads, GQA factor 8)
+#   - Standard multi-head attention — NOT MLA — no DSA
+#   - 128K context capable (we cap at 8192 here)
+#   - BF16 weights (~140 GB on disk, 262 GB with tokenizer/configs)
+#
+# Layout:
+#   Frontend:       1× dynamo-frontend pod (CPU only)
+#   PrefillWorker:  1× p5.48xlarge (8× H100 80 GB), TP=8, single-node
+#   DecodeWorker:   1× p5.48xlarge (8× H100 80 GB), TP=8, single-node
+#   Total: 2 p5.48xlarge = 16 H100s
+#
+# Why TP=8 single-node (no multinode):
+#   70B BF16 ÷ 8 GPUs = 17.5 GB/GPU for weights. With --gpu-memory-utilization
+#   0.90 that leaves ~54 GB/GPU for KV cache + activations — plenty at
+#   max-num-seqs 256, max-model-len 8192. Half the hardware cost of the
+#   multinode V3.2 blueprints (2 p5s vs 4), twice as fast to iterate.
+#
+# Prerequisites:
+#   - Karpenter NodePool: p5-nvidia (H100)
+#   - PVC: dynamo-model-cache (prefetched; already cached if the model
+#          was ever loaded before — 262 GB)
+#   - Secret: hf-token-secret (MUST have accepted meta-llama license
+#             on the HF account that minted the token)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: llama33-70b-disagg
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    PrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        # Exclude shared-memory transport — upstream canonical-template hygiene
+        # for UCX stability in NIXL disagg. See multinode/README.md for the
+        # full rationale (live-tested; helps UCX but does NOT by itself fix
+        # the separate MLA-disagg bug, not relevant to this non-MLA model).
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model meta-llama/Llama-3.3-70B-Instruct \
+                --tensor-parallel-size 8 \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.90 \
+                --max-num-seqs 256 \
+                --disaggregation-mode prefill \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    DecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        # See PrefillWorker UCX_TLS note above.
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model meta-llama/Llama-3.3-70B-Instruct \
+                --tensor-parallel-size 8 \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.90 \
+                --max-num-seqs 256 \
+                --disaggregation-mode decode \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"

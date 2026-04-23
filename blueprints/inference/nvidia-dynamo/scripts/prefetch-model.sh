@@ -118,7 +118,11 @@ spec:
               find /models -name '*.lock' -delete 2>/dev/null || true
               echo ""
               echo "Downloading \${MODEL_ID} to /models"
-              echo "  HF_TOKEN:  \${HF_TOKEN:+SET}\${HF_TOKEN:-NOT SET (anonymous, slower)}"
+              if [ -n "\${HF_TOKEN:-}" ]; then
+                echo "  HF_TOKEN:  SET"
+              else
+                echo "  HF_TOKEN:  NOT SET (anonymous, slower)"
+              fi
               echo ""
               python3 <<'PYEOF'
               import os, sys, time

@@ -1,0 +1,189 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Llama 4 Maverick 17B-128E-Instruct-FP8 — Single-Node Disaggregated (EFA)
+#
+# EFA sibling of llama-4-maverick-disagg.yaml. Identical in every way
+# except:
+#   - image tag: vllm-runtime:1.0.1-efa-amd64 (includes libfabric +
+#     aws-ofi-nccl + EFA-aware UCX)
+#   - vpc.amazonaws.com/efa: "32" under resources.{requests,limits}.custom
+#   - FI_PROVIDER=efa + FI_EFA_USE_DEVICE_RDMA=1 + NCCL tuning
+#
+# Apples-to-apples benchmark target for TCP vs EFA:
+#   NCCL all-reduce (cross-rank, within-node and cross-node) rides EFA
+#   instead of VPC TCP. NIXL KV cache transfer (prefill → decode) also
+#   rides EFA. Expected delta: 5-15x latency improvement on KV transfer
+#   for medium-to-long prompts; ~2x throughput improvement under high
+#   concurrency due to avoiding TCP congestion on the VPC interface.
+#
+# See llama-4-maverick-disagg.yaml for full architecture notes.
+#
+# Prerequisites (additional):
+#   - aws-efa-k8s-device-plugin installed (default in blueprint.tfvars)
+#   - Karpenter NodePool provisions p5.48xlarge with 32 EFA interfaces
+#     (default for p5-nvidia nodepool)
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: llama4-mav-efa
+  namespace: dynamo-system
+spec:
+  pvcs:
+    - name: dynamo-model-cache
+      create: false
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+      componentType: frontend
+      replicas: 1
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - "python3 -m dynamo.frontend --http-port 8000"
+
+    PrefillWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: NCCL_SOCKET_IFNAME
+          value: "^lo,docker,veth"
+        - name: NCCL_PROTO
+          value: simple
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "32"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "32"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1-efa-amd64
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 \
+                --tensor-parallel-size 8 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.85 \
+                --max-num-seqs 128 \
+                --trust-remote-code \
+                --disaggregation-mode prefill \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+    DecodeWorker:
+      envFromSecret: hf-token-secret
+      volumeMounts:
+        - name: dynamo-model-cache
+          mountPoint: /models
+      envs:
+        - name: HF_HOME
+          value: /models
+        - name: HF_HUB_CACHE
+          value: /models
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: NCCL_SOCKET_IFNAME
+          value: "^lo,docker,veth"
+        - name: NCCL_PROTO
+          value: simple
+        - name: UCX_TLS
+          value: "^mm"
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      resources:
+        requests:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "32"
+        limits:
+          cpu: "96"
+          memory: "800Gi"
+          gpu: "8"
+          custom:
+            vpc.amazonaws.com/efa: "32"
+      sharedMemory:
+        size: 128Gi
+      extraPodSpec:
+        nodeSelector:
+          karpenter.sh/nodepool: p5-nvidia
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.1-efa-amd64
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.vllm \
+                --model meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 \
+                --tensor-parallel-size 8 \
+                --enable-expert-parallel \
+                --max-model-len 8192 \
+                --gpu-memory-utilization 0.85 \
+                --max-num-seqs 128 \
+                --trust-remote-code \
+                --disaggregation-mode decode \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
